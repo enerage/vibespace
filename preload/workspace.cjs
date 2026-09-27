@@ -1,5 +1,5 @@
 'use strict';
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 contextBridge.exposeInMainWorld('vs', {
   kind: 'workspace',
@@ -12,6 +12,8 @@ contextBridge.exposeInMainWorld('vs', {
   gitStatus: (repoPath) => ipcRenderer.invoke('git:status', repoPath),
   fsRead: (file) => ipcRenderer.invoke('fs:read', file),
   fsWrite: (file, content) => ipcRenderer.invoke('fs:write', file, content),
+  fsCopyInto: (opts) => ipcRenderer.invoke('fs:copyInto', opts),
+  dropPath: (file) => { try { return webUtils.getPathForFile(file); } catch { return null; } },
   reveal: (file) => ipcRenderer.invoke('fs:reveal', file),
 
   ptyCreate: (opts) => ipcRenderer.invoke('pty:create', opts),

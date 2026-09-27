@@ -2,6 +2,16 @@
 
 Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 
+## [0.5.5] — 2026-09-27 (afternoon, part 2)
+
+### Added
+- **Drag & drop into the tree**: drop files from Explorer onto any folder row
+  (green highlight) or the tree background (repo root) — files are COPIED in,
+  never overwriting (`name (2).ext` collision rename). The live tree watcher
+  picks them up immediately.
+- **Drop an image on the workspace logo** (top-left) to set it as the workspace
+  logo — same flow as the 🏷 button / clicking the logo.
+
 ## [0.5.4] — 2026-09-27 (afternoon)
 
 ### Added

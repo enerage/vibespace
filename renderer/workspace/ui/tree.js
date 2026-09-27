@@ -1,4 +1,4 @@
-import { $, el } from './common.js';
+import { $, el, toast } from './common.js';
 
 let rootPath = '';
 let onOpenFile = () => {};
@@ -23,6 +23,32 @@ export function init(root, onOpen, savedExpanded) {
   // live refresh: agents and external tools write files constantly
   vs.onTreeChanged(() => queueRebuild());
   window.addEventListener('focus', () => queueRebuild()); // catches watcher gaps
+
+  // drag-and-drop: files dropped on the tree background land in the repo root
+  const pane = $('#tree-pane');
+  pane.addEventListener('dragover', (ev) => {
+    if (!ev.dataTransfer.types.includes('Files')) return;
+    ev.preventDefault();
+    ev.dataTransfer.dropEffect = 'copy';
+  });
+  pane.addEventListener('drop', (ev) => {
+    ev.preventDefault();
+    dropFiles(ev, rootPath);
+  });
+}
+
+async function dropFiles(ev, destDir) {
+  const files = [...ev.dataTransfer.files];
+  if (!files.length) return;
+  const paths = files.map(f => vs.dropPath(f)).filter(Boolean);
+  if (!paths.length) return;
+  const r = await vs.fsCopyInto({ sources: paths, destDir }).catch(err => ({ error: String(err) }));
+  if (r && r.copied && r.copied.length) {
+    toast(`Copied ${r.copied.length} file${r.copied.length > 1 ? 's' : ''} — ${r.copied.join(', ')}`, 'ok');
+    // the tree watcher picks the new files up on its own
+  } else {
+    toast('Nothing was copied', 'err');
+  }
 }
 
 // Rebuild everything from current disk state, keeping expanded folders, the
@@ -93,6 +119,7 @@ function applyGitClasses() {
 async function addDirNode(container, dirPath, name, expandedHere) {
   const row = el('div', 'tree-row');
   row.dataset.rel = relOf(dirPath);
+  row.dataset.dir = '1';
   row.innerHTML = `<span class="caret">${expandedHere ? '▾' : '▸'}</span>📁 <span class="tree-name">${escape(name)}</span>`;
   const children = el('div', 'tree-children');
   if (!expandedHere) children.classList.add('hidden');
@@ -134,6 +161,21 @@ async function addDirNode(container, dirPath, name, expandedHere) {
     if (hidden) expanded.delete(dirPath);
     else expanded.add(dirPath);
   };
+
+  // drag-and-drop target: copy dropped files into THIS folder
+  row.addEventListener('dragover', (ev) => {
+    if (!ev.dataTransfer.types.includes('Files')) return;
+    ev.preventDefault();
+    ev.dataTransfer.dropEffect = 'copy';
+    row.classList.add('droptarget');
+  });
+  row.addEventListener('dragleave', () => row.classList.remove('droptarget'));
+  row.addEventListener('drop', (ev) => {
+    ev.preventDefault();
+    ev.stopPropagation(); // folder wins over the pane-background root drop
+    row.classList.remove('droptarget');
+    dropFiles(ev, dirPath);
+  });
 
   if (expandedHere) await loadOnce();
 }

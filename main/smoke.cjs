@@ -231,6 +231,21 @@ async function runSmoke() {
     void ignoredFired;
   }
 
+  // 15. drag-drop copy (collision-safe)
+  {
+    const srcDir = path.join(U.dataRoot(), 'copyin-smoke');
+    fs.mkdirSync(srcDir, { recursive: true });
+    const src = path.join(srcDir, 'logo.png');
+    fs.writeFileSync(src, 'pngdata');
+    const dest = path.join(srcDir, 'dest');
+    fs.mkdirSync(dest, { recursive: true });
+    fs.writeFileSync(path.join(dest, 'logo.png'), 'existing');
+    const n1 = U.copyIn(src, dest);
+    const n2 = U.copyIn(src, dest);
+    check('copyIn collision-safe rename', n1 === 'logo (2).png' && n2 === 'logo (3).png' && fs.readFileSync(path.join(dest, 'logo.png'), 'utf8') === 'existing', `${n1}, ${n2}`);
+    try { fs.rmSync(srcDir, { recursive: true, force: true }); } catch {}
+  }
+
   // 8. pty echo (powershell)
   const echo = await ptyEchoTest();
   check('pty spawn + echo (powershell)', echo.ok, echo.detail);

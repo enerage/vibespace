@@ -88,7 +88,20 @@ function isIgnoredPath(rel) {
   return IGNORED_SUFFIXES.some(s => last.endsWith(s));
 }
 
+// Copy a file into destDir without ever overwriting: "name (2).ext", "(3)"…
+// Returns the final file name. Used by the tree's drag-and-drop.
+function copyIn(source, destDir) {
+  const base = path.basename(source);
+  const ext = path.extname(base);
+  const stem = base.slice(0, base.length - ext.length);
+  let target = path.join(destDir, base);
+  for (let i = 2; fs.existsSync(target); i++) target = path.join(destDir, `${stem} (${i})${ext}`);
+  fs.copyFileSync(source, target);
+  return path.basename(target);
+}
+
 module.exports = {
+  copyIn,
   ROOT,
   BIN_ROOT,
   dataRoot,

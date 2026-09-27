@@ -86,6 +86,7 @@ body { margin: 0; background: var(--bg); color: var(--text); font: 13.5px/1.45 "
   cursor: pointer; white-space: nowrap; font-size: 12.8px;
 }
 .tree-row:hover { background: #1c2129; }
+.tree-row.droptarget { background: rgba(63, 185, 80, 0.18); outline: 1px solid var(--ok); }
 .tree-row.active { background: rgba(110, 156, 255, 0.16); color: #b9cfff; }
 .tree-row .caret { width: 10px; color: var(--dim); font-size: 9px; text-align: center; flex: none; }
 .tree-children { margin-left: 14px; border-left: 1px solid #21262d; }

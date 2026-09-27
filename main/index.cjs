@@ -573,6 +573,17 @@ function initIpc() {
     fs.writeFileSync(file, content, 'utf8');
     return true;
   });
+  // drag-and-drop into the tree: copy files into a folder, never overwriting
+  ipcMain.handle('fs:copyInto', (e, { sources, destDir }) => {
+    if (!Array.isArray(sources) || !destDir || !fs.existsSync(destDir)) return { copied: [], error: 'bad args' };
+    const copied = [];
+    for (const s of sources) {
+      try {
+        if (typeof s === 'string' && fs.existsSync(s) && fs.statSync(s).isFile()) copied.push(U.copyIn(s, destDir));
+      } catch {}
+    }
+    return { copied };
+  });
   ipcMain.handle('fs:reveal', (e, file) => { shell.showItemInFolder(file); return true; });
 
   // Ctrl+P file finder: recursive walk honoring the same ignore rules as the tree.

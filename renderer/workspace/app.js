@@ -62,6 +62,24 @@ function wireLayoutToggle() {
   logoImg.title = 'Change this workspace’s logo';
   logoImg.onclick = changeLogo;
 
+  // drop an image ON the logo to set it (drag a png from the desktop → logo)
+  logoImg.addEventListener('dragover', (e) => {
+    if (!e.dataTransfer.types.includes('Files')) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    logoImg.style.outline = '2px solid var(--accent)';
+  });
+  logoImg.addEventListener('dragleave', () => { logoImg.style.outline = ''; });
+  logoImg.addEventListener('drop', async (e) => {
+    e.preventDefault();
+    logoImg.style.outline = '';
+    const f = e.dataTransfer.files[0];
+    if (!f) return;
+    const p = vs.dropPath(f);
+    if (!p) return;
+    try { await vs.updateLogo(wsId, p); } catch (err) { toast('Logo update failed: ' + (err.message || err), 'err'); }
+  });
+
   // ↻ restart onto new VibeSpace code: the button only exists after main detects a
   // source-tree change; restarting relaunches this window and all conversations
   // auto-resume (busy agents get interrupted — the confirm says so)
