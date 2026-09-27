@@ -14,6 +14,7 @@ const sessions = require('./sessions.cjs');
 const status = require('./status.cjs');
 const gitstatus = require('./gitstatus.cjs');
 const srcstate = require('./srcstate.cjs');
+const treewatch = require('./treewatch.cjs');
 const updater = require('./updater.cjs');
 
 // ---------- CLI args ----------
@@ -322,6 +323,7 @@ function createWorkspaceWindow(ws, { shot = false } = {}) {
   win.loadURL(`app://local/workspace/index.html?id=${encodeURIComponent(ws.id)}${shot ? '&shot=1' : ''}`);
   sessions.start(ws.id, ws.repoPath);
   status.start(ws.id, path.join(U.dataRoot(), 'instances', ws.id, 'status'));
+  treewatch.start(ws.id, ws.repoPath); // live file-tree refresh (agents write files)
   baselineClaudeFor(ws.id); // update-button baseline: the version these agents run
 
   // focusing the window answers the attention signal — clear the taskbar badge
@@ -339,6 +341,7 @@ function createWorkspaceWindow(ws, { shot = false } = {}) {
     winInfo.delete(win.id);
     sessions.stop(ws.id);
     status.stop(ws.id);
+    treewatch.stop(ws.id);
     claudeBaselines.delete(ws.id);
     if (!workspaceWindowsFor(ws.id).length) {
       persistState(ws.id);
@@ -538,15 +541,13 @@ function initIpc() {
   });
 
   // fs
-  const IGNORED = new Set(['node_modules', '.git', 'dist', 'build', 'out', 'coverage', '__pycache__', '.next', '.venv', 'venv', 'target', '.cache', '.turbo', '.parcel-cache', '.idea', '*.egg-info', 'playwright-report', 'test-results', '.nx', '.angular', '.sst', '.expo', '.output']);
-  const IGNORED_SUFFIX = ['.tsbuildinfo', '.eslintcache', '.stackdump'];
   ipcMain.handle('git:status', (e, repoPath) => (repoPath ? gitstatus.status(repoPath) : null));
   ipcMain.handle('fs:list', (e, dir) => {
     if (!fs.existsSync(dir)) return { entries: [] };
     const out = [];
     for (const name of fs.readdirSync(dir)) {
-      if (IGNORED.has(name)) continue;
-      if (IGNORED_SUFFIX.some(s => name.endsWith(s))) continue;
+      if (U.IGNORED_NAMES.has(name)) continue;
+      if (U.IGNORED_SUFFIXES.some(s => name.endsWith(s))) continue;
       const full = path.join(dir, name);
       let isDir = false;
       try { isDir = fs.statSync(full).isDirectory(); } catch { continue; }
@@ -581,8 +582,8 @@ function initIpc() {
     let names;
     try { names = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
     for (const d of names) {
-      if (IGNORED.has(d.name)) continue;
-      if (IGNORED_SUFFIX.some(s => d.name.endsWith(s))) continue;
+      if (U.IGNORED_NAMES.has(d.name)) continue;
+      if (U.IGNORED_SUFFIXES.some(s => d.name.endsWith(s))) continue;
       if (d.isDirectory()) walkFiles(path.join(dir, d.name), out, depth + 1);
       else if (d.isFile()) out.push(path.join(dir, d.name));
     }
@@ -666,6 +667,11 @@ function initIpc() {
       if (!win.isDestroyed()) win.webContents.send('term:status', termId, st);
     }
     notifyAttention(wsId, termId, st);
+  });
+  treewatch.onData((wsId) => {
+    for (const win of workspaceWindowsFor(wsId)) {
+      if (!win.isDestroyed()) win.webContents.send('tree:changed');
+    }
   });
 }
 

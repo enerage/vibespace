@@ -212,6 +212,25 @@ async function runSmoke() {
     try { fs.rmSync(path.join(U.dataRoot(), 'fp-test'), { recursive: true, force: true }); } catch {}
   }
 
+  // 14. tree watcher (live file-tree refresh) + ignore-path filter
+  {
+    const tw = require('./treewatch.cjs');
+    const dir = path.join(U.dataRoot(), 'treewatch-smoke', 'src');
+    fs.mkdirSync(dir, { recursive: true });
+    let fired = 0;
+    let ignoredFired = false;
+    tw.onData((wsId) => { if (wsId === 'tw-ws') fired++; if (wsId === 'tw-bad') ignoredFired = true; });
+    tw.start('tw-ws', path.join(U.dataRoot(), 'treewatch-smoke'));
+    fs.writeFileSync(path.join(dir, 'new-file.ts'), 'x');
+    const deadline = Date.now() + 4000;
+    while (!fired && Date.now() < deadline) await new Promise(r => setTimeout(r, 150));
+    check('tree watcher fires on new file', fired > 0, `fired=${fired}`);
+    check('ignore-path filter', U.isIgnoredPath('src/node_modules/pkg/x.js') === true && U.isIgnoredPath('a/b.tsbuildinfo') === true && U.isIgnoredPath('src/new-file.ts') === false, '');
+    tw.stop('tw-ws');
+    try { fs.rmSync(path.join(U.dataRoot(), 'treewatch-smoke'), { recursive: true, force: true }); } catch {}
+    void ignoredFired;
+  }
+
   // 8. pty echo (powershell)
   const echo = await ptyEchoTest();
   check('pty spawn + echo (powershell)', echo.ok, echo.detail);

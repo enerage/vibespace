@@ -76,10 +76,25 @@ function readJson(file, fallback = null) {
   }
 }
 
+// Shared ignore rules for the file tree, the Ctrl+P index, and the tree watcher.
+const IGNORED_NAMES = new Set(['node_modules', '.git', 'dist', 'build', 'out', 'coverage', '__pycache__', '.next', '.venv', 'venv', 'target', '.cache', '.turbo', '.parcel-cache', '.idea', '*.egg-info', 'playwright-report', 'test-results', '.nx', '.angular', '.sst', '.expo', '.output']);
+const IGNORED_SUFFIXES = ['.tsbuildinfo', '.eslintcache', '.stackdump'];
+
+// 'src/node_modules/x' or 'foo.tsbuildinfo' -> ignored (slash-separated, relative)
+function isIgnoredPath(rel) {
+  const segs = rel.split('/');
+  if (segs.some(s => IGNORED_NAMES.has(s))) return true;
+  const last = segs[segs.length - 1];
+  return IGNORED_SUFFIXES.some(s => last.endsWith(s));
+}
+
 module.exports = {
   ROOT,
   BIN_ROOT,
   dataRoot,
+  IGNORED_NAMES,
+  IGNORED_SUFFIXES,
+  isIgnoredPath,
   ensureDir,
   mungeClaudeDir,
   claudeProjectsDir,

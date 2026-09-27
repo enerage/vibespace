@@ -39,6 +39,7 @@ contextBridge.exposeInMainWorld('vs', {
   onSessionFound: (cb) => ipcRenderer.on('session:found', (e, termId, sessionId) => cb(termId, sessionId)),
   onTermStatus: (cb) => ipcRenderer.on('term:status', (e, termId, st) => cb(termId, st)),
   onTermFocus: (cb) => ipcRenderer.on('term:focus', (e, termId) => cb(termId)),
+  onTreeChanged: (cb) => ipcRenderer.on('tree:changed', () => cb()),
   onUpdaterStage: (cb) => ipcRenderer.on('updater:stage', (e, stage) => cb(stage)),
   onUpdaterLine: (cb) => ipcRenderer.on('updater:line', (e, line) => cb(line)),
   onUpdaterDone: (cb) => ipcRenderer.on('updater:done', (e, info) => cb(info)),

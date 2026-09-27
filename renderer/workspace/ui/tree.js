@@ -5,6 +5,8 @@ let onOpenFile = () => {};
 let gitFiles = null; // Map: repo-relative path (forward slashes) -> M|A|U|D
 let gitDirs = new Map(); // derived: dir path -> strongest status found under it
 const expanded = new Set(); // absolute dir paths currently expanded (persisted)
+let activeRel = null; // repo-relative path of the selected file (survives rebuilds)
+let rebuildQueued = false;
 
 const GIT_RANK = { U: 1, A: 2, D: 2, M: 3 };
 
@@ -14,13 +16,39 @@ export function init(root, onOpen, savedExpanded) {
   expanded.clear();
   // first run (no saved list): root expanded; later runs: exactly what was open
   for (const p of (Array.isArray(savedExpanded) ? savedExpanded : [root])) expanded.add(p);
-  $('#tree').innerHTML = '';
-  const host = el('div');
-  $('#tree').appendChild(host);
-  addDirNode(host, root, root.split(/[\\/]/).pop() || root, expanded.has(root));
+  buildDom();
   refreshGit();
   // keep colors honest while the window is in use; git itself is cached main-side
   setInterval(() => { if (document.hasFocus()) refreshGit(); }, 30000);
+  // live refresh: agents and external tools write files constantly
+  vs.onTreeChanged(() => queueRebuild());
+  window.addEventListener('focus', () => queueRebuild()); // catches watcher gaps
+}
+
+// Rebuild everything from current disk state, keeping expanded folders, the
+// active file, and the scroll position. Debounced: watchers fire in bursts.
+function queueRebuild() {
+  if (rebuildQueued) return;
+  rebuildQueued = true;
+  setTimeout(() => {
+    rebuildQueued = false;
+    const pane = $('#tree-pane');
+    const scroll = pane ? pane.scrollTop : 0;
+    buildDom();
+    if (pane) pane.scrollTop = scroll;
+    refreshGit();
+  }, 150);
+}
+
+function buildDom() {
+  $('#tree').innerHTML = '';
+  const host = el('div');
+  $('#tree').appendChild(host);
+  addDirNode(host, rootPath, rootPath.split(/[\\/]/).pop() || rootPath, expanded.has(rootPath));
+  if (activeRel) {
+    const row = document.querySelector(`#tree .tree-row[data-rel="${CSS.escape(activeRel)}"]`);
+    if (row) row.classList.add('active');
+  }
 }
 
 export function expandedPaths() { return [...expanded]; }
@@ -113,6 +141,7 @@ async function addDirNode(container, dirPath, name, expandedHere) {
 function markActive(row) {
   for (const r of document.querySelectorAll('.tree-row.active')) r.classList.remove('active');
   row.classList.add('active');
+  activeRel = row.dataset.rel || null;
 }
 
 function icon(name) {

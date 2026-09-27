@@ -2,6 +2,16 @@
 
 Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 
+## [0.5.4] — 2026-09-27 (afternoon)
+
+### Added
+- **Live file tree**: a recursive repo watcher (main/treewatch.cjs, ignores
+  node_modules et al., 700 ms debounce) pushes `tree:changed` → the tree rebuilds
+  from disk, preserving expanded folders, the selected file, and scroll position.
+  The window also rebuilds on focus. Files created by agents or external tools now
+  appear immediately. Ignore rules unified in util (`IGNORED_NAMES/SUFFIXES`,
+  `isIgnoredPath`) and shared by tree, Ctrl+P index, and watcher. Smoke: 22.
+
 ## [0.5.3] — 2026-09-27 (midday)
 
 ### Added
@@ -12,6 +22,10 @@ Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 - Terminal restore keeps saved termIds (stable pty/session ids across restarts).
 
 ### Fixed
+- **Agent tab rename was a lottery while agents ran**: the tab bar redrew on every
+  status change / session capture, destroying the rename input mid-typing. The bar
+  now skips redraws while a rename is live; tabs rename on **right-click** as well
+  as double-click (tooltip says so).
 - **"Electron" name/icon hijacking a workspace's taskbar identity**: pinning a
   *running* window in dev mode makes Windows drop a junk `Electron.lnk` (bare
   electron.exe target, no icon) into the Start Menu root, which shadows the
