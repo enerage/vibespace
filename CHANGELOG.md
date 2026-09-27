@@ -12,6 +12,14 @@ Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 - **Drop an image on the workspace logo** (top-left) to set it as the workspace
   logo — same flow as the 🏷 button / clicking the logo.
 
+### Fixed
+- **Tab rename fought you for focus**: clicks inside the rename input bubbled
+  to the tab's click handler → `activateTab` → `term.focus()`, ripping focus
+  to the claude terminal mid-typing; and committing never rebuilt the bar
+  (the mid-rename redraw guard saw the still-mounted input), leaving a stuck,
+  un-focusable input as the tab face. The input now stops mouse-event
+  propagation and removes itself before the rebuild.
+
 ## [0.5.4] — 2026-09-27 (afternoon)
 
 ### Added

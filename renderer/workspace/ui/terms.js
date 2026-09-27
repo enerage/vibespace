@@ -453,14 +453,22 @@ function renderTabBar() {
 }
 
 function startRename(tabEl, labelEl, tab) {
+  if (tabEl.querySelector('.rename')) return; // already renaming this tab
   const input = el('input', 'rename');
   input.value = tab.name;
+  // clicks inside the input must not bubble to the tab's onclick/oncontextmenu —
+  // that runs activateTab → term.focus() and rips focus out mid-rename (double-
+  // rename would also re-target a detached label)
+  for (const evn of ['mousedown', 'click', 'contextmenu']) {
+    input.addEventListener(evn, (e) => e.stopPropagation());
+  }
   labelEl.replaceWith(input);
   input.focus();
   input.select();
   const commit = () => {
     const v = input.value.trim();
     if (v) tab.name = v;
+    input.remove(); // redraws are skipped while .rename is live — clear it BEFORE rebuilding
     renderTabBar();
     persist();
   };
