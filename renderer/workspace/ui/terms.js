@@ -416,6 +416,9 @@ function removeTab(termId, kill = true) {
 }
 
 function renderTabBar() {
+  // mid-rename: rebuilding the bar would destroy the input (status changes and
+  // session captures redraw constantly while agents run) — skip until committed
+  if ($('#tabs .rename')) return;
   const bar = $('#tabs');
   bar.innerHTML = '';
   for (const tab of tabs.values()) {
@@ -427,12 +430,13 @@ function renderTabBar() {
       : st === 'done' ? 'agent finished its turn'
       : (tab.sessionId ? `session ${tab.sessionId.slice(0, 8)}…` : 'no claude session yet');
     const label = el('span', 'label', tab.name);
-    label.title = tab.sessionId ? `${tab.name} — ${tab.sessionId}` : tab.name;
+    label.title = (tab.sessionId ? `${tab.name} — ${tab.sessionId}` : tab.name) + '  (double-click or right-click to rename)';
     const close = el('span', 'close', '✕');
     close.title = 'close terminal';
 
     t.append(status, label, close);
     t.onclick = () => activateTab(tab.id);
+    t.oncontextmenu = (ev) => { ev.preventDefault(); startRename(t, label, tab); };
     close.onclick = (ev) => {
       ev.stopPropagation();
       const hasAgent = tab.sessionId || !tab.dead;
