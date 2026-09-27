@@ -12,6 +12,15 @@ Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 - **Drop an image on the workspace logo** (top-left) to set it as the workspace
   logo — same flow as the 🏷 button / clicking the logo.
 
+### Changed
+- **Red light no longer cries wolf**: the idle "waiting for your input" nudge
+  (fires ~60 s after an agent finishes) used to flip finished tabs from green
+  to red, making both colors mean the same thing. The Notification hook now
+  reads the notification JSON on stdin and drops the idle nudge — **red =
+  agent demands input** (permission, question, choice), **green = task
+  completed** (stays green while idle), orange = working. Applies to
+  terminals launched after the update; running agents pick it up on restart.
+
 ### Fixed
 - **Tab rename fought you for focus**: clicks inside the rename input bubbled
   to the tab's click handler → `activateTab` → `term.focus()`, ripping focus

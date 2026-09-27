@@ -128,7 +128,16 @@ function ensureHookSettings(wsId) {
     hooks: {
       UserPromptSubmit: [hook('working')],
       PreToolUse: [hook('working')],
-      Notification: [hook('waiting')],
+      // red ("waiting") only when claude actually demands input — permission,
+      // question, choice. The idle "waiting for your input" nudge arrives on
+      // stdin as JSON; grep drops it so finished agents stay green (done).
+      // Anything unparseable/empty fails toward the old always-red behavior.
+      Notification: [{
+        hooks: [{
+          type: 'command',
+          command: `grep -qi 'waiting for your input' || echo waiting >> "$VIBESPACE_TERM_STATUS"`,
+        }],
+      }],
       Stop: [hook('done')],
     },
   };

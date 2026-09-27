@@ -426,8 +426,8 @@ function renderTabBar() {
     const st = tab.status || '';
     const status = el('span', 'status' + (tab.sessionId ? ' on' : '') + (st ? ' ' + st : ''));
     status.title = st === 'working' ? 'agent is working'
-      : st === 'waiting' ? 'agent needs your input'
-      : st === 'done' ? 'agent finished its turn'
+      : st === 'waiting' ? 'agent is asking for you — permission or question'
+      : st === 'done' ? 'task completed — agent is idle'
       : (tab.sessionId ? `session ${tab.sessionId.slice(0, 8)}…` : 'no claude session yet');
     const label = el('span', 'label', tab.name);
     label.title = (tab.sessionId ? `${tab.name} — ${tab.sessionId}` : tab.name) + '  (double-click or right-click to rename)';
