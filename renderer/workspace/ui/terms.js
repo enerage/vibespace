@@ -151,9 +151,10 @@ export function init(opts) {
         // saved session file is gone — open claude's interactive picker instead of
         // typing a resume id that would silently error out
         deadSessions.push(t.name);
-        createTab({ name: t.name, cwd: t.cwd || repoPath, pickSession: true });
+        createTab({ termId: t.termId || null, name: t.name, cwd: t.cwd || repoPath, pickSession: true });
       } else {
         createTab({
+          termId: t.termId || null, // keep stable ids across restarts (sessions pin by termId)
           name: t.name,
           cwd: t.cwd || repoPath,
           claude: opts.autoResume && isClaude && !t.claudeSessionId,
@@ -169,15 +170,18 @@ export function init(opts) {
         createTab({ termId: p.termId, name: 'recovered', cwd: p.cwd || repoPath, attachBuffer: p.buffer, savedIsClaude: true, savedSessionId: null });
       }
     }
-    if (attached) toast(`Re-attached ${attached} live terminal${attached > 1 ? 's' : ''} — agents never stopped`, 'ok');
-    else if (saved.length && opts.autoResume) toast(`Restored ${saved.length} agent terminal${saved.length > 1 ? 's' : ''} — conversations resumed`, 'ok');
-    else if (saved.length) toast(`Restored ${saved.length} terminals (auto-resume off)`, '');
+    if (!opts.quiet) {
+      if (attached) toast(`Re-attached ${attached} live terminal${attached > 1 ? 's' : ''} — agents never stopped`, 'ok');
+      else if (saved.length && opts.autoResume) toast(`Restored ${saved.length} agent terminal${saved.length > 1 ? 's' : ''} — conversations resumed`, 'ok');
+      else if (saved.length) toast(`Restored ${saved.length} terminals (auto-resume off)`, '');
+    }
   }).catch(() => {
     // pty:list failed — fall back to the classic spawn/resume path
     if (saved.length === 0) { createTab({ name: 'agent-1', cwd: repoPath, claude: true }); return; }
     for (const t of saved) {
       const isClaude = t.isClaude === undefined ? true : Boolean(t.isClaude);
       createTab({
+        termId: t.termId || null,
         name: t.name,
         cwd: t.cwd || repoPath,
         claude: opts.autoResume && isClaude && !t.claudeSessionId,

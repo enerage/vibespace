@@ -8,17 +8,10 @@ taskbar icon, its own pin, its own logo), and inside that window you run, watch,
 and supervise any number of Claude Code agents. Close the window, reopen it next
 week: every conversation comes back exactly where it left off.
 
-```
-┌────────────────────────────────────────────────────────────┐
-│ [logo] MyRepo    ↻ Restart VibeSpace   🏷 Logo…  ⇄ Layout  │
-├──────────┬─────────────────────────────────────────────────┤
-│ file tree│  Monaco preview / edit                           │
-│ (git-    ├─────────────────────────────────────────────────┤
-│  colored)│  ● agent-1  ● agent-2  ● agent-3   + Claude      │
-│          │  $ claude                                        │
-│          │  > refactoring the auth module…                  │
-└──────────┴─────────────────────────────────────────────────┘
-```
+![VibeSpace workspace](assets/screenshot.png)
+
+*Three agents on one repo: amber = working, green = finished, red pulse = waiting
+for your answer. Left: git-colored file tree. Top: Monaco preview.*
 
 ## Why
 
@@ -89,6 +82,13 @@ npm start         # launcher; or: npm run dev (adds opt-in hot reload)
 ```powershell
 npm run smoke    # 20 self-tests — run after touching main-process code
 npm run dist     # NSIS installer (electron-builder)
+```
+
+Regenerate the README screenshot (staged demo repo → captured window):
+
+```powershell
+electron . --open-repo=<demo-repo>          # once, to create the workspace
+electron . --workspace=<its-id> --screenshot=assets/screenshot.png
 ```
 
 Read `CLAUDE.md` first — it encodes the decisions learned the hard way.

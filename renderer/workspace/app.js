@@ -182,13 +182,16 @@ async function main() {
   tree.init(ws.repoPath, (path, name) => viewer.open(path, name), state.expandedFolders);
   finder.init(ws.repoPath, (path, name) => viewer.open(path, name));
 
+  const shot = new URLSearchParams(location.search).get('shot');
   terms.init({
     wsId,
     repoPath: ws.repoPath,
     savedTerminals: state.terminals,
     autoResume: $('#auto-resume').checked,
     persist,
+    quiet: Boolean(shot),
   });
+  if (shot) viewer.open(ws.repoPath + '\\README.md', 'README.md'); // docs mode: show code in the preview
 
   wireSplitters();
 

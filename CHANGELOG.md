@@ -4,6 +4,13 @@ Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 
 ## [0.5.3] — 2026-09-27 (midday)
 
+### Added
+- **`--screenshot=<path>` docs mode**: opens a workspace, stages demo terminal
+  content + status lights, captures the window to PNG, exits. Produced
+  assets/screenshot.png for the README. (capturePage needs a VISIBLE painted
+  window — hidden windows fail with UnknownVizError; the mode shows the window.)
+- Terminal restore keeps saved termIds (stable pty/session ids across restarts).
+
 ### Fixed
 - **"Electron" name/icon hijacking a workspace's taskbar identity**: pinning a
   *running* window in dev mode makes Windows drop a junk `Electron.lnk` (bare

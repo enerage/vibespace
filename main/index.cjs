@@ -23,6 +23,7 @@ function parseArgv() {
   let smoke = false;
   let openRepoPath = null;
   let watch = false;
+  let screenshotPath = null;
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--workspace' && argv[i + 1]) { workspaceId = argv[i + 1]; i++; }
     else if (argv[i].startsWith('--workspace=')) { workspaceId = argv[i].slice('--workspace='.length); }
@@ -30,10 +31,11 @@ function parseArgv() {
     else if (argv[i] === '--open-repo' && argv[i + 1]) { openRepoPath = argv[i + 1]; i++; }
     else if (argv[i].startsWith('--open-repo=')) { openRepoPath = argv[i].slice('--open-repo='.length); }
     else if (argv[i] === '--watch') { watch = true; }
+    else if (argv[i].startsWith('--screenshot=')) { screenshotPath = argv[i].slice('--screenshot='.length); }
   }
-  return { workspaceId, smoke, openRepoPath, watch };
+  return { workspaceId, smoke, openRepoPath, watch, screenshotPath };
 }
-const { workspaceId, smoke, openRepoPath, watch } = parseArgv();
+const { workspaceId, smoke, openRepoPath, watch, screenshotPath } = parseArgv();
 if (watch) process.env.VIBESPACE_WATCH = '1'; // opt-in dev hot reload (children inherit)
 
 if (smoke) {
@@ -288,7 +290,7 @@ function createLauncherWindow() {
   return win;
 }
 
-function createWorkspaceWindow(ws) {
+function createWorkspaceWindow(ws, { shot = false } = {}) {
   const win = new BrowserWindow({
     width: 1480,
     height: 940,
@@ -317,7 +319,7 @@ function createWorkspaceWindow(ws) {
     logger.error(`did-fail-load ${url} → ${code} ${desc}`);
   });
 
-  win.loadURL(`app://local/workspace/index.html?id=${encodeURIComponent(ws.id)}`);
+  win.loadURL(`app://local/workspace/index.html?id=${encodeURIComponent(ws.id)}${shot ? '&shot=1' : ''}`);
   sessions.start(ws.id, ws.repoPath);
   status.start(ws.id, path.join(U.dataRoot(), 'instances', ws.id, 'status'));
   baselineClaudeFor(ws.id); // update-button baseline: the version these agents run
@@ -735,6 +737,66 @@ app.whenReady().then(async () => {
     if (!ws) {
       dialog.showErrorBox('VibeSpace', `Workspace "${workspaceId}" not found. Open the launcher to create it.`);
       app.exit(1);
+      return;
+    }
+    if (screenshotPath) {
+      // Docs mode: seed a demo state, stage terminal content + status lights,
+      // capture the window to PNG, exit. Used for README/screenshots:
+      //   electron . --workspace=<id> --screenshot=out.png
+      try {
+        U.ensureDir(path.dirname(stateFile(ws.id)));
+        U.writeJsonAtomic(stateFile(ws.id), {
+          terminals: [
+            { termId: 'demo1', name: 'agent-1', cwd: ws.repoPath, isClaude: true, claudeSessionId: null },
+            { termId: 'demo2', name: 'agent-2', cwd: ws.repoPath, isClaude: true, claudeSessionId: null },
+            { termId: 'demo3', name: 'agent-3', cwd: ws.repoPath, isClaude: true, claudeSessionId: null },
+          ],
+          autoResume: false,
+          termPosition: 'right',
+          treeWidth: 240,
+        });
+      } catch {}
+      const shotWin = createWorkspaceWindow(ws, { shot: true });
+      const statusDir = path.join(U.dataRoot(), 'instances', ws.id, 'status');
+      const setStatus = (termId, st) => { try { fs.appendFileSync(path.join(statusDir, `${termId}.status`), st + '\n'); } catch {} };
+      setTimeout(() => {
+        ptyhost.write('demo1', 'git log --oneline --no-decorate -6\r');
+        ptyhost.write('demo2', 'git status -s\r');
+        ptyhost.write('demo3', 'powershell -NoProfile -ExecutionPolicy Bypass -File .\\demo-claude.ps1\r');
+      }, 3500);
+      setTimeout(() => {
+        setStatus('demo1', 'working'); // amber pulse
+        setStatus('demo2', 'done');    // green
+        setStatus('demo3', 'waiting'); // red pulse — the money shot
+      }, 6500);
+      setTimeout(async () => {
+        try {
+          // capturePage needs a painted, visible window (UnknownVizError otherwise)
+          if (!shotWin.isDestroyed()) {
+            shotWin.show();
+            shotWin.focus();
+          }
+          let png = null;
+          for (let i = 0; i < 4 && !png; i++) {
+            await new Promise(r => setTimeout(r, i ? 600 : 0));
+            try {
+              const img = await shotWin.webContents.capturePage();
+              const buf = img.toPNG();
+              if (buf.length > 1000) png = buf;
+            } catch {}
+          }
+          if (png) {
+            fs.writeFileSync(screenshotPath, png);
+            console.log('SCREENSHOT_SAVED: ' + screenshotPath);
+          } else {
+            console.error('SCREENSHOT_FAILED: capturePage never produced pixels');
+          }
+        } catch (e) {
+          console.error('SCREENSHOT_FAILED: ' + e.message);
+        }
+        app.exit(0);
+        setTimeout(() => process.exit(0), 400).unref?.();
+      }, 10000);
       return;
     }
     createWorkspaceWindow(ws);
