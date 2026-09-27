@@ -3,6 +3,11 @@
 Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 
 ## [0.5.5] — 2026-09-27 (afternoon, part 2)
+- **Drag to reorder tabs**: grab a tab and drop it anywhere in the bar — order
+  persists in the workspace state. Follows the splitter drag rules (window
+  capture listeners, no `setPointerCapture`); a 4 px threshold keeps clicks
+  and the double-click rename from ever starting a drag.
+
 
 ### Added
 - **Drag & drop into the tree**: drop files from Explorer onto any folder row

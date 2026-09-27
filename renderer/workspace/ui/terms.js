@@ -423,6 +423,7 @@ function renderTabBar() {
   bar.innerHTML = '';
   for (const tab of tabs.values()) {
     const t = el('div', 'tab' + (tab.id === activeId ? ' active' : '') + (tab.dead ? ' dead' : '') + (tab.unread ? ' unread' : ''));
+    t.dataset.termId = tab.id; // drag-to-reorder reads the order back from the bar
     const st = tab.status || '';
     const status = el('span', 'status' + (tab.sessionId ? ' on' : '') + (st ? ' ' + st : ''));
     status.title = st === 'working' ? 'agent is working'
@@ -450,6 +451,55 @@ function renderTabBar() {
 
     bar.appendChild(t);
   }
+}
+
+    wireTabDrag(bar, t);
+// ---- drag to reorder tabs ----------------------------------------------------
+// Follows the splitter drag rules: window-level capture listeners for the drag,
+// absolute clientX, NO setPointerCapture (breaks under remote-control software).
+// A 4 px threshold keeps plain clicks and the dblclick rename from ever
+// triggering a drag. DOM order is committed into the tabs Map (insertion order
+// = display order = persisted snapshot order) on release.
+function wireTabDrag(bar, t) {
+  t.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    if (e.target.closest('.close') || e.target.closest('.rename')) return;
+    const startX = e.clientX;
+    let dragging = false;
+    const move = (ev) => {
+      if (!dragging) {
+        if (Math.abs(ev.clientX - startX) < 4) return;
+        dragging = true;
+        t.classList.add('dragging');
+        document.body.classList.add('dragging'); // user-select: none while dragging
+      }
+      // drop before the first tab whose midpoint the pointer passed
+      for (const sib of bar.children) {
+        if (sib === t) continue;
+        const r = sib.getBoundingClientRect();
+        if (ev.clientX < r.left + r.width / 2) { bar.insertBefore(t, sib); return; }
+      }
+      bar.appendChild(t); // pointer is right of everything
+    };
+    const up = () => {
+      window.removeEventListener('pointermove', move, true);
+      window.removeEventListener('pointerup', up, true);
+      if (!dragging) return;
+      t.classList.remove('dragging');
+      document.body.classList.remove('dragging');
+      const next = new Map();
+      for (const el of bar.children) {
+        const rec = tabs.get(el.dataset.termId);
+        if (rec) next.set(el.dataset.termId, rec);
+      }
+      if (next.size !== tabs.size) return; // stale bar — next redraw fixes order
+      tabs.clear();
+      for (const [id, rec] of next) tabs.set(id, rec);
+      persist();
+    };
+    window.addEventListener('pointermove', move, true);
+    window.addEventListener('pointerup', up, true);
+  });
 }
 
 function startRename(tabEl, labelEl, tab) {

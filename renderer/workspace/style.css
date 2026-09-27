@@ -144,6 +144,7 @@ body { margin: 0; background: var(--bg); color: var(--text); font: 13.5px/1.45 "
 }
 .tab.active { border-color: var(--accent); background: #20293a; }
 .tab.dead { opacity: 0.45; }
+.tab.dragging { opacity: 0.6; border-style: dashed; cursor: grabbing; }
 .tab .status { width: 7px; height: 7px; border-radius: 50%; background: #3d444d; flex: none; }
 .tab .status.on { background: var(--ok); box-shadow: 0 0 6px rgba(63,185,80,0.7); }
 /* agent status lights (fed by injected claude hooks) */
