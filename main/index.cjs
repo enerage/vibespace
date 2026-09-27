@@ -669,6 +669,7 @@ function initIpc() {
     notifyAttention(wsId, termId, st);
   });
   treewatch.onData((wsId) => {
+    logger.info(`tree changed: ws=${wsId}`);
     for (const win of workspaceWindowsFor(wsId)) {
       if (!win.isDestroyed()) win.webContents.send('tree:changed');
     }
