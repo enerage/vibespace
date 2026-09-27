@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src app: 'unsafe-inline'; img-src app: data: file:; script-src app: 'unsafe-eval';" />
+  <title>VibeSpace</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <img class="brand-logo" src="app://local/assets/app.ico" alt="" onerror="this.style.display='none'" />
+      <div>
+        <h1>VibeSpace</h1>
+        <p class="sub">One taskbar app per repo — preview files, drive Claude Code agents.</p>
+      </div>
+    </div>
+    <div class="top-right">
+      <span id="claude-version" class="chip" title="Claude Code version"></span>
+      <button id="btn-explorer" class="btn" title="Add or remove 'Open with VibeSpace' in the folder right-click menu">🧩 Right-click menu</button>
+      <button id="btn-logs" class="btn" title="Open the VibeSpace logs folder">🐞 Logs</button>
+      <button id="btn-new" class="btn primary">+ New workspace</button>
+    </div>
+  </header>
+
+  <main>
+    <section id="form-panel" class="panel hidden">
+      <h2>New workspace</h2>
+      <div class="form-grid">
+        <label>Name
+          <input id="f-name" type="text" placeholder="My Project" />
+        </label>
+        <label>Repository folder
+          <div class="row">
+            <input id="f-path" type="text" placeholder="D:\Repositories\MyProject" />
+            <button id="f-browse-path" class="btn">Browse…</button>
+          </div>
+        </label>
+        <label>Logo (png / ico / svg — optional, becomes the taskbar icon)
+          <div class="row">
+            <input id="f-logo" type="text" placeholder="pick an image…" readonly />
+            <button id="f-browse-logo" class="btn">Browse…</button>
+          </div>
+        </label>
+        <img id="f-logo-preview" class="logo-preview hidden" alt="logo preview" />
+      </div>
+      <div class="form-actions">
+        <button id="f-cancel" class="btn">Cancel</button>
+        <button id="f-create" class="btn primary">Create</button>
+      </div>
+    </section>
+
+    <div id="grid" class="grid"></div>
+    <div id="empty" class="empty hidden">
+      <p>No workspaces yet.</p>
+      <p class="dim">Create one, pin it to the taskbar with your project's logo, and every launch opens that repo with its agent terminals restored.</p>
+    </div>
+  </main>
+
+  <div id="toasts"></div>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

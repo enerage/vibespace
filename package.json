@@ -1,0 +1,59 @@
+{
+  "name": "vibespace",
+  "productName": "VibeSpace",
+  "version": "0.5.3",
+  "description": "Lightweight per-repo workspace app: file tree + preview + named Claude Code agent terminals, one taskbar app per repo",
+  "main": "main/index.cjs",
+  "author": "Valentin",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --watch",
+    "launcher": "electron .",
+    "workspace": "electron . --workspace=",
+    "smoke": "electron . --smoke",
+    "rebuild": "electron-rebuild -f -w node-pty",
+    "dist": "electron-builder --win nsis",
+    "dist:dir": "electron-builder --win --dir"
+  },
+  "build": {
+    "appId": "app.vibespace",
+    "productName": "VibeSpace",
+    "npmRebuild": false,
+    "files": [
+      "main/**/*",
+      "preload/**/*",
+      "renderer/**/*",
+      "assets/**/*",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "**/node-pty/**",
+      "**/sharp/**",
+      "**/@img/**"
+    ],
+    "win": {
+      "target": ["nsis"],
+      "icon": "assets/app.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": false,
+      "shortcutName": "VibeSpace Launcher"
+    }
+  },
+  "dependencies": {
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/addon-search": "^0.16.0",
+    "@xterm/xterm": "^6.0.0",
+    "monaco-editor": "^0.57.0",
+    "node-pty": "^1.1.0",
+    "sharp": "^0.35.4"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^4.2.0",
+    "electron": "^44.4.5",
+    "electron-builder": "^26.15.3"
+  }
+}

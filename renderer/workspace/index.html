@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src app: 'unsafe-inline'; script-src app: blob: 'unsafe-eval'; worker-src blob:; img-src app: data: file:; style-src app: 'unsafe-inline'; font-src app: data:;" />
+  <title>Workspace</title>
+  <link rel="stylesheet" href="app://local/vendor/@xterm/xterm/css/xterm.css" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="app">
+    <header id="topbar">
+      <img id="ws-logo" alt="" />
+      <div class="ws-meta">
+        <div id="ws-name">…</div>
+        <div id="ws-path"></div>
+      </div>
+      <div class="spacer"></div>
+      <label class="toggle" title="When this window opens, relaunch each agent with its saved conversation (claude --resume)">
+        <input type="checkbox" id="auto-resume" checked />
+        <span>auto-resume agents on open</span>
+      </label>
+      <button id="btn-app-restart" class="btn small hidden" title="VibeSpace code changed — restart to pick it up (every agent conversation resumes)">↻ Restart VibeSpace</button>
+      <button id="btn-logo" class="btn small ghost" title="Change this workspace's logo — window icon updates live; re-pin the taskbar shortcut to refresh it">🏷 Logo…</button>
+      <button id="btn-layout" class="btn small ghost" title="Terminals are at the bottom — click to move them to the right side">⇄ Layout</button>
+      <button id="btn-update" class="btn primary" title="Run claude update once, then relaunch every agent on the new version, resuming each conversation">
+        ⟳ Update &amp; Restart All
+      </button>
+      <button id="btn-logs" class="btn small ghost" title="Open logs folder — Ctrl+Shift+D copies a full diagnostics report to the clipboard">🐞 Logs</button>
+    </header>
+
+    <div id="body">
+      <aside id="tree-pane">
+        <div id="tree"></div>
+      </aside>
+      <div id="split-v" title="drag to resize"></div>
+
+      <section id="content">
+        <div id="viewer">
+          <div id="viewer-head">
+            <span id="viewer-name">pick a file to preview</span>
+            <span id="viewer-path"></span>
+            <div class="spacer"></div>
+            <div id="viewer-actions">
+              <button id="btn-edit" class="btn small">Edit</button>
+              <button id="btn-save" class="btn small" disabled>Save</button>
+              <button id="btn-reveal" class="btn small ghost" title="Reveal in Explorer">⌕</button>
+            </div>
+          </div>
+          <div id="monaco-host"></div>
+          <div id="viewer-placeholder">
+            <p>Select a file from the tree to preview it.</p>
+            <p class="dim">Editing is off by default — hit <b>Edit</b> for a quick fix, <b>Ctrl+S</b> saves.</p>
+          </div>
+        </div>
+
+        <div id="split-h" title="drag to resize"></div>
+
+        <div id="terms-pane">
+          <div id="term-find" class="hidden">
+            <input id="term-find-input" type="text" placeholder="Find in terminal — Enter next · Shift+Enter previous · Esc close" spellcheck="false" />
+            <button id="term-find-prev" class="btn small ghost" title="Previous match (Shift+Enter)">↑</button>
+            <button id="term-find-next" class="btn small ghost" title="Next match (Enter)">↓</button>
+            <button id="term-find-close" class="btn small ghost" title="Close (Esc)">✕</button>
+          </div>
+          <div id="tabbar">
+            <div id="tabs"></div>
+            <div class="tabbar-actions">
+              <button id="btn-new-claude" class="btn small primary" title="New terminal running a fresh claude session">+ Claude</button>
+              <button id="btn-new-term" class="btn small" title="New plain PowerShell terminal">+ Terminal</button>
+            </div>
+          </div>
+          <div id="term-hosts"></div>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <div id="update-modal" class="hidden">
+    <div class="box">
+      <h3 id="update-title">Updating Claude Code…</h3>
+      <pre id="update-log"></pre>
+      <div id="update-status"></div>
+    </div>
+  </div>
+
+  <div id="finder" class="hidden">
+    <div class="finder-box">
+      <input id="finder-input" type="text" placeholder="Jump to file…  (fuzzy; Enter opens, Esc closes)" spellcheck="false" />
+      <div id="finder-list"></div>
+    </div>
+  </div>
+
+  <div id="toasts"></div>
+
+  <script src="app://local/vendor/@xterm/xterm/lib/xterm.js"></script>
+  <script src="app://local/vendor/@xterm/addon-fit/lib/addon-fit.js"></script>
+  <script src="app://local/vendor/@xterm/addon-search/lib/addon-search.js"></script>
+  <script src="app://local/vendor/monaco-editor/min/vs/loader.js"></script>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
