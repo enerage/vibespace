@@ -89,6 +89,13 @@ async function buildIcoFromImage(srcPath, outIco) {
 }
 
 async function buildDefaultIco(outIco) {
+  // the shipped app logo is the default workspace icon; the generated mark is
+  // only a fallback for source checkouts that somehow lack assets/app.ico
+  const appIco = path.join(__dirname, '..', 'assets', 'app.ico');
+  if (fs.existsSync(appIco)) {
+    fs.copyFileSync(appIco, outIco);
+    return outIco;
+  }
   const png = await sharp(Buffer.from(DEFAULT_SVG)).resize(256, 256).png().toBuffer();
   return buildIcoFromImageViaBuffer(png, outIco);
 }

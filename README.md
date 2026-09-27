@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/logo-256.png" width="140" alt="VibeSpace logo"></p>
+
 # VibeSpace
 
 **One taskbar app per repository. File tree, code preview, and named Claude Code
