@@ -4,7 +4,11 @@ const path = require('node:path');
 const fs = require('node:fs');
 const { spawn } = require('node:child_process');
 
+// FIRST: rebuild PATH from the registry (machine + user). Windows spawned from
+// stripped environments (agent shells) otherwise break node/python/git for every
+// terminal AND every process we spawn (git status, claude --version, builds).
 const U = require('./util.cjs');
+process.env.PATH = U.rebuildPath();
 const logger = require('./logger.cjs');
 const workspaces = require('./workspaces.cjs');
 const shortcuts = require('./shortcuts.cjs');

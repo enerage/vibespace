@@ -39,6 +39,20 @@ Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
   fsops round-trip incl. a real Recycle-Bin move, and a temp-git-repo diff
   fixture.
 
+## [0.6.1] — 2026-09-28
+
+### Fixed — the stripped/mangled PATH class of bugs, for real
+- **PATH is rebuilt from the registry (machine + user) at app boot.** Windows
+  launched through agent-spawned chains inherit a broken PATH — stripped (only 2
+  entries) or mangled (backslashes eaten: "C:Windows") — which broke `node`,
+  `python`, `git` by name in every terminal AND every process VibeSpace spawns.
+  `util.rebuildPath()` unions the authoritative registry PATH with whatever was
+  inherited, expands %vars%, dedupes, and drops entries that don't exist on disk
+  (mangled and %unset% leftovers die there). Applied to the process env at the
+  very top of index.cjs, so ptys, git status, claude --version, builds —
+  everything downstream — gets the full PATH. Existing windows need one restart
+  (agents auto-resume) to heal; this replaces the 0.3.2 System32-only band-aid.
+
 ## [0.6.0] — 2026-09-28
 
 ### Added — "update all docs" system

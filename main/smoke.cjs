@@ -354,6 +354,14 @@ async function runSmoke() {
     try { fs.rmSync(path.dirname(bc._cmdFile()), { recursive: true, force: true }); } catch {}
   }
 
+  // 17. PATH rebuild from registry (the stripped/mangled-PATH class of bugs)
+  {
+    const rebuilt = U.rebuildPath('C:\\Windows;C:\\Windows;junk;C:Windows');
+    const parts = rebuilt.split(';');
+    const dupes = parts.length !== new Set(parts.map(p => p.toLowerCase())).size;
+    check('PATH rebuild: registry entries + dedupe', rebuilt.toLowerCase().includes('windows\\system32') && !dupes && !parts.includes('junk'), `${parts.length} entries`);
+  }
+
   // 8. pty echo (powershell)
   const echo = await ptyEchoTest();
   check('pty spawn + echo (powershell)', echo.ok, echo.detail);

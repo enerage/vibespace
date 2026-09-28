@@ -2,6 +2,7 @@
 const os = require('node:os');
 const path = require('node:path');
 const fs = require('node:fs');
+const { execSync } = require('node:child_process');
 
 const ROOT = path.resolve(__dirname, '..');
 
@@ -110,7 +111,49 @@ function jailed(repoRoot, p) {
   return r.toLowerCase().startsWith(root.toLowerCase() + path.sep) ? r : null;
 }
 
+// Windows keeps the REAL PATH in two registry values (machine + user). Processes
+// spawned from stripped environments (agent shells etc.) inherit a gutted PATH —
+// rebuilding it from the registry gives every pty and every spawned child the
+// full user+machine PATH regardless of how the window was launched.
+function readRegistryPath(key) {
+  try {
+    const out = execSync(`reg query "${key}" /v PATH`, { encoding: 'utf8', windowsHide: true, timeout: 4000 });
+    const m = out.match(/^\s*PATH\s+REG_(?:EXPAND_)?SZ\s+(.+)$/mi);
+    return m ? m[1].trim() : '';
+  } catch {
+    return '';
+  }
+}
+
+function expandEnvVars(s) {
+  return String(s).replace(/%([^%]+)%/g, (whole, name) => process.env[name] || whole);
+}
+
+function rebuildPath(inherited = process.env.PATH || '') {
+  const machine = expandEnvVars(readRegistryPath('HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment'));
+  const user = expandEnvVars(readRegistryPath('HKCU\\Environment'));
+  const parts = [];
+  const seen = new Set();
+  for (const p of `${machine};${user};${inherited}`.split(';')) {
+    const t = p.trim();
+    const key = t.toLowerCase().replace(/\\+$/, '');
+    if (!t || seen.has(key)) continue;
+    // drop entries that don't exist — mangled ones ("C:Windows", backslashes eaten
+    // by an agent-spawned chain) and leftovers from unset %vars% die here
+    try {
+      const st = fs.statSync(t);
+      if (!st.isDirectory()) continue;
+    } catch {
+      continue;
+    }
+    seen.add(key);
+    parts.push(t);
+  }
+  return parts.join(';');
+}
+
 module.exports = {
+  rebuildPath,
   copyIn,
   ROOT,
   BIN_ROOT,
