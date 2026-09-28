@@ -383,6 +383,28 @@ async function runSmoke() {
     check('picker resume ignores fresh sessions', none === null, `got=${none && none.id}`);
   }
 
+  // 19. junk "Electron.lnk" cleanup (pinned-before-shortcut taskbar bug)
+  {
+    const { shell } = require('electron');
+    const shortcutsMod = require('./shortcuts.cjs');
+    const realAppData = process.env.APPDATA;
+    const fakeAppData = path.join(U.dataRoot(), 'fake-appdata');
+    const progs = path.join(fakeAppData, 'Microsoft', 'Windows', 'Start Menu', 'Programs');
+    fs.mkdirSync(progs, { recursive: true });
+    process.env.APPDATA = fakeAppData;
+    try {
+      shell.writeShortcutLink(path.join(progs, 'Electron.lnk'), { target: process.execPath });           // junk: our exe, no args
+      shell.writeShortcutLink(path.join(progs, 'Electron (2).lnk'), { target: process.execPath, args: '--workspace=x' }); // has args: keep
+      shell.writeShortcutLink(path.join(progs, 'Other.lnk'), { target: process.execPath });              // not Electron*: keep
+      const removed = shortcutsMod.removeJunkElectronLinks(process.execPath);
+      const kept = fs.readdirSync(progs).sort().join(',');
+      check('junk Electron.lnk cleanup (only bare strays)', removed.join(',') === 'Electron.lnk' && kept === 'Electron (2).lnk,Other.lnk', `removed=${removed} kept=${kept}`);
+    } finally {
+      process.env.APPDATA = realAppData;
+      try { fs.rmSync(fakeAppData, { recursive: true, force: true }); } catch {}
+    }
+  }
+
   // 8. pty echo (powershell)
   const echo = await ptyEchoTest();
   check('pty spawn + echo (powershell)', echo.ok, echo.detail);

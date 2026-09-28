@@ -307,6 +307,48 @@ function createLauncherWindow() {
   return win;
 }
 
+// Pinning a RUNNING window whose AppID has no matching Start Menu shortcut makes
+// Windows invent a junk "Electron.lnk" (bare electron.exe, no args, no icon) —
+// the pin then shows the Electron logo and relaunches nothing useful. Three layers:
+//  1. setAppDetails: the window itself carries its name, icon and relaunch command,
+//     so pinning it directly produces a correct pin.
+//  2. ensure the workspace's Start Menu shortcut exists (AppID -> name + icon).
+//  3. delete junk Electron.lnk strays pointing at our exe with no arguments.
+function workspaceLaunchSpec(ws) {
+  const isDev = !app.isPackaged;
+  return {
+    targetPath: process.execPath,
+    targetArgs: isDev ? `"${U.ROOT}" --workspace=${ws.id}` : `--workspace=${ws.id}`,
+    workingDir: isDev ? U.ROOT : path.dirname(process.execPath),
+  };
+}
+
+function claimTaskbarIdentity(win, ws) {
+  const spec = workspaceLaunchSpec(ws);
+  try {
+    win.setAppDetails({
+      appId: shortcuts.aumidFor(ws.id),
+      appIconPath: ws.iconPath,
+      appIconIndex: 0,
+      relaunchCommand: `"${spec.targetPath}" ${spec.targetArgs}`,
+      relaunchDisplayName: ws.name,
+    });
+  } catch (e) {
+    logger.warn('setAppDetails failed: ' + e.message);
+  }
+  if (smoke || screenshotPath) return; // docs/test runs never touch the Start Menu
+  setTimeout(async () => {
+    try {
+      const created = await shortcuts.ensureStartMenu({ workspace: ws, ...spec });
+      if (created) logger.info(`start-menu shortcut created for ${ws.name} (taskbar identity)`);
+      const removed = shortcuts.removeJunkElectronLinks(process.execPath);
+      if (removed.length) logger.info(`removed junk Electron shortcuts: ${removed.join(', ')}`);
+    } catch (e) {
+      logger.warn('taskbar identity upkeep failed: ' + e.message);
+    }
+  }, 1500);
+}
+
 function createWorkspaceWindow(ws, { shot = false } = {}) {
   const win = new BrowserWindow({
     width: 1480,
@@ -323,6 +365,7 @@ function createWorkspaceWindow(ws, { shot = false } = {}) {
   winInfo.set(win.id, { wsId: ws.id });
   logger.info(`workspace window opened: ${ws.name} (${ws.id}) repo=${ws.repoPath}`);
   probeSrc(); // baseline = the code this window is actually running (dev only)
+  claimTaskbarIdentity(win, ws);
 
   // renderer console warnings/errors go to the log too
   win.webContents.on('console-message', (e) => {

@@ -69,6 +69,19 @@ Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 - Symptom it fixes: agent terminals with a 5-entry PATH (`C:WindowsSystem32…`),
   node/npm/pnpm/python/git not found by name. Needs one VibeSpace restart.
 
+## [0.6.4] — 2026-09-28
+
+### Fixed — pinned workspaces showing the Electron logo (root cause)
+- Pinning a **running** workspace window whose AppID had no Start Menu shortcut
+  (anyone who never used the launcher's Pin button) made Windows invent a junk
+  `Electron.lnk` — the pin showed the Electron logo and relaunched nothing. Found
+  4 of 7 workspaces in this state (FlexIQ, FlexFunnels, Recruitica, JustLinked).
+- Every workspace window now **claims its taskbar identity** at open:
+  `setAppDetails` (AppID, icon, relaunch command, display name — pinning the
+  running window now yields a correct pin), **auto-creates its Start Menu
+  shortcut** if missing, and **deletes junk `Electron*.lnk` strays** that target
+  our exe with no arguments (never other apps' shortcuts). Smoke: 48.
+
 ## [0.6.3] — 2026-09-28
 
 ### Added — the knowledge system is a standing rule, not a button

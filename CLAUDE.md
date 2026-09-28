@@ -40,7 +40,11 @@ Knowledge is tracked **as we go**, never batched for later:
   `userData` dir AND `app.setAppUserModelId('vibespace.workspace.<id>')` *before* app
   ready; shortcuts carry the same AUMID (`assets/ps/set-shortcut.ps1` writes it through
   the shell property store — `Get-StartApps` verifies). Change the scheme and every
-  existing pin breaks.
+  existing pin breaks. **Pinning a running window whose AppID has no Start Menu
+  .lnk makes Windows create a junk `Electron.lnk`** (Electron logo, no args) —
+  that's why every window calls `claimTaskbarIdentity` (setAppDetails + ensure
+  shortcut + purge junk). `Get-StartApps` showing a workspace named "Electron"
+  = this bug.
 - GPU acceleration is deliberately off (`app.disableHardwareAcceleration()`) — windows
   went blank over remote-display software. Renderers self-heal via
   `render-process-gone` → reload WITHOUT killing ptys — the renderer re-attaches.

@@ -110,4 +110,41 @@ async function refreshIcons({ workspace, targetPath, targetArgs, workingDir }) {
   return true;
 }
 
-module.exports = { create, createLauncherShortcut, removeShortcuts, refreshIcons, aumidFor };
+function startMenuLinkPath(workspace) {
+  return path.join(process.env.APPDATA || '', 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'VibeSpace', `${sanitizeFileName(workspace.name)}.lnk`);
+}
+
+// Every open workspace guarantees its Start Menu shortcut exists: that .lnk is how
+// Windows maps the window's AppID to a display name + icon. Without it, pinning
+// the running window yields a junk "Electron" pin. Returns true if it created one.
+async function ensureStartMenu({ workspace, targetPath, targetArgs, workingDir }) {
+  if (fs.existsSync(startMenuLinkPath(workspace))) return false;
+  const r = await create({ workspace, targetPath, targetArgs, workingDir, startMenu: true, desktop: false });
+  return Boolean(r && r.ok);
+}
+
+// Junk left by Windows when a running window was pinned before its shortcut
+// existed: "<Start Menu>\Programs\Electron*.lnk" targeting OUR exe with no
+// arguments. Only those exact strays are deleted — never other apps' shortcuts.
+function removeJunkElectronLinks(exePath) {
+  const dir = path.join(process.env.APPDATA || '', 'Microsoft', 'Windows', 'Start Menu', 'Programs');
+  const removed = [];
+  let names = [];
+  try { names = fs.readdirSync(dir); } catch { return removed; }
+  for (const name of names) {
+    if (!/^Electron.*\.lnk$/i.test(name)) continue;
+    const full = path.join(dir, name);
+    try {
+      const { shell } = require('electron');
+      const info = shell.readShortcutLink(full);
+      const sameExe = info.target && path.resolve(info.target).toLowerCase() === path.resolve(exePath).toLowerCase();
+      if (sameExe && !String(info.args || '').trim()) {
+        fs.unlinkSync(full);
+        removed.push(name);
+      }
+    } catch {}
+  }
+  return removed;
+}
+
+module.exports = { create, createLauncherShortcut, removeShortcuts, refreshIcons, ensureStartMenu, removeJunkElectronLinks, startMenuLinkPath, aumidFor };
