@@ -55,6 +55,17 @@ Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 - Symptom it fixes: agent terminals with a 5-entry PATH (`C:WindowsSystem32…`),
   node/npm/pnpm/python/git not found by name. Needs one VibeSpace restart.
 
+## [0.6.2] — 2026-09-28
+
+### Added — resume an existing conversation on purpose
+- **Right-click `+ Claude` → "resume conversation…"**: the new tab opens claude's
+  interactive `--resume` picker instead of a blank session.
+- **Picked conversations get pinned**: the tracker now recognizes picker-launched
+  tabs and pins the OLD session file that comes alive (appends after launch on a
+  file born before it) — so restarts resume the conversation you actually chose,
+  never a stray blank one. Excludes files owned by other tabs; most-recent-write
+  wins. In-tab `/resume` (typed mid-session) is still untracked — see TODO.
+
 ## [0.6.1] — 2026-09-28
 
 ### Fixed — the stripped/mangled PATH class of bugs, for real

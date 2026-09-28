@@ -368,6 +368,21 @@ async function runSmoke() {
     check('PATH rebuild works from a mangled PATH', fromMangled.toLowerCase().includes('windows\\system32') && fromMangled.split(';').length > 3 && !fromMangled.split(';').includes('C:Windows'), `${fromMangled.split(';').length} entries`);
   }
 
+  // 18. picker resume pinning (right-click + Claude → claude --resume)
+  {
+    const now = Date.now();
+    const files = [
+      { id: 'fresh', born: now - 1000, mtime: now - 500 },              // born after launch — not it
+      { id: 'old-idle', born: now - 900000, mtime: now - 800000 },      // old but never touched — not it
+      { id: 'old-picked', born: now - 900000, mtime: now - 1000 },      // old, appends since launch — IT
+      { id: 'taken', born: now - 900000, mtime: now - 10 },             // newer appends but owned by another tab
+    ];
+    const picked = sessions._pickResumed(files, now - 60000, new Set(['taken']));
+    check('picker resume picks the revived old conversation', picked && picked.id === 'old-picked', `picked=${picked && picked.id}`);
+    const none = sessions._pickResumed([{ id: 'x', born: now - 5000, mtime: now - 4000 }], now - 60000, new Set());
+    check('picker resume ignores fresh sessions', none === null, `got=${none && none.id}`);
+  }
+
   // 8. pty echo (powershell)
   const echo = await ptyEchoTest();
   check('pty spawn + echo (powershell)', echo.ok, echo.detail);

@@ -38,9 +38,11 @@ itself while an agent runs in the same window.
 - [ ] Full-text grep panel (S/M).
 
 ## Session tracking robustness
-- [ ] Detect `/resume` switches inside a running tab (known limitation: tab keeps its
-      original session id). Options: parse OSC title, watch newest jsonl mtime per tab,
-      or ask the user to start a fresh `+ Claude` tab.
+- [x] Resume-an-existing-conversation flow (0.6.2): right-click `+ Claude` opens
+      claude's picker; the picked old conversation is auto-pinned by mtime revival.
+- [ ] Detect `/resume` typed mid-session inside a running tab (tab keeps its original
+      session id). The picker path is covered; the in-typed command is not.
+      Options: parse OSC title, or reuse the revival heuristic on all claude tabs.
 - [ ] Disambiguate two claude launches within ~2 s of each other (window heuristic
       currently loses the earlier tab).
 - [ ] Track claude started *manually* inside a plain `+ Terminal` tab.

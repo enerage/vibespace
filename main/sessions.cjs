@@ -45,12 +45,25 @@ function stop(wsId) {
   active.delete(wsId);
 }
 
-function trackClaudeStart(wsId, termId) {
+function trackClaudeStart(wsId, termId, { picker = false } = {}) {
   const state = active.get(wsId);
   if (!state) return;
   const prev = state.terms.get(termId) || {};
-  state.terms.set(termId, { startedAt: Date.now(), sessionId: prev.sessionId });
+  state.terms.set(termId, { startedAt: Date.now(), sessionId: prev.sessionId, picker });
   scheduleScan(wsId);
+}
+
+// A tab launched via `claude --resume` (the interactive picker): whichever OLD
+// session file (born well before the launch) starts receiving appends AFTER the
+// launch is the conversation the user picked. Most-recent-mtime wins; files
+// already pinned to other tabs are excluded.
+function pickResumed(files, startedAt, takenIds) {
+  const candidates = files.filter(f =>
+    f.mtime > startedAt &&            // being written since the launch
+    f.born < startedAt - 2000 &&      // genuinely old conversation, not a fresh one
+    !takenIds.has(f.id));             // not owned by another tab
+  candidates.sort((a, b) => b.mtime - a.mtime);
+  return candidates[0] || null;
 }
 
 function pinSession(wsId, termId, sessionId) {
@@ -124,9 +137,25 @@ function scan(wsId) {
   // which can be minutes after launch. So: an unresolved terminal owns the earliest
   // session file born after its claude launched and before the next terminal's
   // claude launched (the last terminal's window is unbounded).
+  // Picker-launched tabs are different: the user resumed an OLD conversation via
+  // claude's interactive picker, so we pin the old file that came alive instead.
+  const takenIds = new Set(terms.filter(t => t.sessionId).map(t => t.sessionId));
   let changed = false;
+  for (const term of terms) {
+    if (term.sessionId) continue;
+    if (term.picker) {
+      const match = pickResumed(files, term.startedAt, takenIds);
+      if (match) {
+        state.terms.set(term.termId, { startedAt: term.startedAt, sessionId: match.id, picker: true });
+        takenIds.add(match.id);
+        changed = true;
+        sessionListener(wsId, term.termId, match.id);
+      }
+      continue;
+    }
+  }
   terms.forEach((term, i) => {
-    if (term.sessionId) return; // already resolved (pinned on resume or discovered)
+    if (term.sessionId || term.picker) return; // resolved, or handled above
     const windowStart = term.startedAt - 2000;
     const windowEnd = i + 1 < terms.length ? terms[i + 1].startedAt - 2000 : Infinity;
     const candidates = files
@@ -153,4 +182,4 @@ function sessionIdsFor(wsId) {
   return out;
 }
 
-module.exports = { start, stop, trackClaudeStart, pinSession, getSession, sessionExists, sessionIdsFor, onData, _scan: scan };
+module.exports = { start, stop, trackClaudeStart, pinSession, getSession, sessionExists, sessionIdsFor, onData, _scan: scan, _pickResumed: pickResumed };

@@ -697,7 +697,7 @@ function initIpc() {
   ipcMain.on('pty:write', (e, termId, data) => ptyhost.write(termId, data));
   ipcMain.on('pty:resize', (e, termId, cols, rows) => ptyhost.resize(termId, cols, rows));
   ipcMain.on('pty:kill', (e, termId) => ptyhost.kill(termId));
-  ipcMain.on('pty:claudeStarted', (e, wsId, termId) => sessions.trackClaudeStart(wsId, termId));
+  ipcMain.on('pty:claudeStarted', (e, wsId, termId, opts) => sessions.trackClaudeStart(wsId, termId, opts || {}));
   ipcMain.on('pty:sessionPinned', (e, wsId, termId, sessionId) => sessions.pinSession(wsId, termId, sessionId));
   ipcMain.handle('sessions:check', (e, wsId, sessionId) => sessions.sessionExists(wsId, sessionId));
 

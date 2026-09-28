@@ -1,4 +1,5 @@
 import { $, el, toast } from './common.js';
+import { termTheme, onThemeChange } from './themes.js';
 
 // terminal tabs: each hosts a PowerShell pty; "claude" tabs run Claude Code and
 // get their session id tracked (main process) so they can be resumed after updates.
@@ -19,16 +20,7 @@ const TERM_OPTS = {
   fontFamily: '"Cascadia Mono", Consolas, "Courier New", monospace',
   cursorBlink: true,
   scrollback: 6000,
-  theme: {
-    background: '#0c0f14',
-    foreground: '#d7dee8',
-    cursor: '#6e9cff',
-    selectionBackground: '#31456e',
-    black: '#1a1f28', red: '#f85149', green: '#3fb950', yellow: '#d29922',
-    blue: '#58a6ff', magenta: '#bc8cff', cyan: '#39c5cf', white: '#d7dee8',
-    brightBlack: '#6b7683', brightRed: '#ff7b72', brightGreen: '#56d364', brightYellow: '#e3b341',
-    brightBlue: '#79c0ff', brightMagenta: '#d2a8ff', brightCyan: '#56d4dd', brightWhite: '#f0f6fc',
-  },
+  // theme comes from ui/themes.js per workspace (see createTab + onThemeChange)
   allowProposedApi: true,
 };
 
@@ -37,6 +29,11 @@ export function init(opts) {
   repoPath = opts.repoPath;
   persist = opts.persist || persist;
   openFile = opts.openFile || openFile;
+
+  // a theme switch repaints every live terminal in place (xterm v5 options setter)
+  onThemeChange((t) => {
+    for (const tab of tabs.values()) { try { tab.term.options.theme = t.term; } catch {} }
+  });
 
   vs.onPtyData((termId, chunk) => {
     const tab = tabs.get(termId);
@@ -92,6 +89,12 @@ export function init(opts) {
   });
 
   $('#btn-new-claude').onclick = () => createTab({ name: nextName('agent'), cwd: repoPath, claude: true });
+  // right-click + Claude: start from an EXISTING conversation — claude's own
+  // resume picker opens in the new tab and the picked session gets pinned
+  $('#btn-new-claude').oncontextmenu = (ev) => {
+    ev.preventDefault();
+    createTab({ name: nextName('agent'), cwd: repoPath, pickSession: true });
+  };
   $('#btn-new-term').onclick = () => createTab({ name: nextName('term'), cwd: repoPath });
   $('#btn-update').onclick = updateRestartAll;
 
@@ -357,7 +360,7 @@ export function createTab({ name = 'agent', cwd = repoPath, claude = false, resu
   host.style.display = 'none';
   $('#term-hosts').appendChild(host);
 
-  const term = new window.Terminal({ ...TERM_OPTS });
+  const term = new window.Terminal({ ...TERM_OPTS, theme: termTheme() });
   const fit = new window.FitAddon.FitAddon();
   term.loadAddon(fit);
   term.open(host);
@@ -409,7 +412,7 @@ export function createTab({ name = 'agent', cwd = repoPath, claude = false, resu
         ? withSettings('claude --resume') // saved id is dead — interactive picker
         : withSettings(resumeId ? `claude --resume ${resumeId}` : 'claude');
       vs.ptyWrite(id, cmd + '\r');
-      vs.claudeStarted(wsId, id);
+      vs.claudeStarted(wsId, id, pickSession ? { picker: true } : undefined);
       if (resumeId) vs.sessionPinned(wsId, id, resumeId);
     }, 900);
   }

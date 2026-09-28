@@ -5,6 +5,7 @@
   <meta http-equiv="Content-Security-Policy" content="default-src app: 'unsafe-inline'; script-src app: blob: 'unsafe-eval'; worker-src blob:; img-src app: data: file:; style-src app: 'unsafe-inline'; font-src app: data:;" />
   <title>Workspace</title>
   <link rel="stylesheet" href="app://local/vendor/@xterm/xterm/css/xterm.css" />
+  <script src="theme-boot.js"></script>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
@@ -16,17 +17,12 @@
         <div id="ws-path"></div>
       </div>
       <div class="spacer"></div>
-      <label class="toggle" title="When this window opens, relaunch each agent with its saved conversation (claude --resume)">
-        <input type="checkbox" id="auto-resume" checked />
-        <span>auto-resume agents on open</span>
-      </label>
       <button id="btn-docs-sync" class="btn small" title="Broadcast /sync-docs to every Claude agent in every open workspace — they all update their repo docs, decisions, and memory">📨 Sync Docs</button>
       <button id="btn-app-restart" class="btn small hidden" title="VibeSpace code changed — restart to pick it up (every agent conversation resumes)">↻ Restart VibeSpace</button>
-      <button id="btn-layout" class="btn small ghost" title="Terminals are at the bottom — click to move them to the right side">⇄ Layout</button>
       <button id="btn-update" class="btn primary" title="Run claude update once, then relaunch every agent on the new version, resuming each conversation">
         ⟳ Update &amp; Restart All
       </button>
-      <button id="btn-logs" class="btn small ghost" title="Open logs folder — Ctrl+Shift+D copies a full diagnostics report to the clipboard">🐞 Logs</button>
+      <button id="btn-prefs" class="btn small ghost" title="Preferences — layout, auto-resume, logs, theme">⚙</button>
     </header>
 
     <div id="body">
@@ -76,6 +72,38 @@
           <div id="term-hosts"></div>
         </div>
       </section>
+    </div>
+  </div>
+
+  <div id="prefs-modal" class="hidden">
+    <div class="box">
+      <h3>Preferences</h3>
+
+      <div class="prefs-row">
+        <div>
+          <div class="prefs-label">Auto-resume agents on open</div>
+          <div class="prefs-hint">When this window opens, relaunch each agent with its saved conversation (claude --resume)</div>
+        </div>
+        <label class="toggle"><input type="checkbox" id="auto-resume" checked /></label>
+      </div>
+      <div class="prefs-row">
+        <div>
+          <div class="prefs-label">Terminal dock</div>
+          <div class="prefs-hint">Where the terminal pane sits in this window</div>
+        </div>
+        <button id="btn-layout" class="btn small ghost">⇄ Switch bottom / right</button>
+      </div>
+      <div class="prefs-row">
+        <div>
+          <div class="prefs-label">Logs &amp; diagnostics</div>
+          <div class="prefs-hint">Ctrl+Shift+D copies a full diagnostics report to the clipboard</div>
+        </div>
+        <button id="btn-logs" class="btn small ghost">🐞 Open logs folder</button>
+      </div>
+
+      <div class="prefs-label" style="margin-top: 14px;">Theme</div>
+      <div class="prefs-hint">Per workspace — applied instantly, saved with the window</div>
+      <div id="theme-grid"></div>
     </div>
   </div>
 

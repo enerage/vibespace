@@ -4,6 +4,8 @@ import * as viewer from './ui/viewer.js';
 import * as terms from './ui/terms.js';
 import * as finder from './ui/finder.js';
 import * as diffpane from './ui/diff.js';
+import * as prefs from './ui/prefs.js';
+import { applyTheme } from './ui/themes.js';
 
 const wsId = new URLSearchParams(location.search).get('id');
 let ws = null;
@@ -15,6 +17,7 @@ function persistNow() {
   vs.saveState(wsId, {
     terminals: terms.snapshot(),
     autoResume: $('#auto-resume').checked,
+    theme: state.theme || 'vibespace',
     termPosition: state.termPosition || 'bottom',
     treeWidth: $('#tree-pane').getBoundingClientRect().width,
     expandedFolders: tree.expandedPaths(),
@@ -26,25 +29,29 @@ function persistNow() {
 const persist = debounce(persistNow, 350);
 
 // ---------- terminal dock position: bottom <-> right ----------
+function layoutTitle() {
+  return state.termPosition === 'right'
+    ? 'Terminals are on the right — click to move them to the bottom'
+    : 'Terminals are at the bottom — click to move them to the right side';
+}
 function applyTermPosition() {
   const right = state.termPosition === 'right';
   $('#body').classList.toggle('terms-right', right);
   const pane = $('#terms-pane');
   const size = right ? (state.termWidth || 560) : (state.termHeight || 380);
   pane.style.flexBasis = size + 'px';
-  $('#btn-layout').title = right
-    ? 'Terminals are on the right — click to move them to the bottom'
-    : 'Terminals are at the bottom — click to move them to the right side';
+  $('#btn-layout').title = layoutTitle();
   requestAnimationFrame(() => terms.refitActive());
 }
 
 function wireLayoutToggle() {
+  // lives inside the ⚙ Preferences modal now (same element id, same behavior)
   $('#btn-layout').onclick = () => {
     state.termPosition = state.termPosition === 'right' ? 'bottom' : 'right';
     applyTermPosition();
     persistNow();
+    $('#btn-layout').title = layoutTitle();
   };
-  $('#btn-logs').onclick = () => vs.openLogs();
 
   // swap this workspace's logo from inside the window (was launcher-only; the
   // window reloads onto the new icon — agents survive and re-attach).
@@ -191,11 +198,19 @@ async function main() {
   logo.onerror = () => { logo.style.visibility = 'hidden'; };
 
   state = (await vs.loadState(wsId)) || {};
+  // theme FIRST — before terminals/viewer exist, so xterm and Monaco are born
+  // themed (theme-boot.js already replayed the vars pre-paint)
+  applyTheme(state.theme || 'vibespace', wsId);
   if (typeof state.autoResume === 'boolean') $('#auto-resume').checked = state.autoResume;
   if (state.treeWidth) $('#tree-pane').style.width = state.treeWidth + 'px';
-  $('#auto-resume').addEventListener('change', persist);
   applyTermPosition();
   wireLayoutToggle();
+  prefs.init({
+    wsId,
+    persist,
+    layoutTitle,
+    onThemePicked: (id) => { state.theme = id; persistNow(); },
+  });
 
   viewer.init(persist);
   viewer.restore(state.viewer?.openFiles || [], state.viewer?.activePath);
