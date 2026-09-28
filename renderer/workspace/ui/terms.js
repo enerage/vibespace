@@ -260,7 +260,9 @@ function wireClipboard(term) {
     if (!ctrl) return true;
     if (key === 'c') {
       if (term.hasSelection()) { ev.preventDefault(); copySelection(term); return false; }
-      return true; // no selection: let Ctrl+C reach the shell/claude as interrupt
+      // Ctrl+Shift+C is copy-only (Windows Terminal convention) — never an interrupt
+      if (ev.shiftKey) { ev.preventDefault(); return false; }
+      return true; // plain Ctrl+C, no selection: interrupt for the shell/claude
     }
     if (key === 'v') { // Ctrl+V and Ctrl+Shift+V both paste
       ev.preventDefault();
@@ -270,15 +272,21 @@ function wireClipboard(term) {
     return true;
   });
 
-  // right-click: copy selection, or paste when nothing is selected
+  // right-click: copy selection, or paste when nothing is selected.
+  // When the program in the terminal has mouse tracking on (Claude Code does, once
+  // past its trust screen), xterm forwards the right-click to it and IT pastes from
+  // the clipboard — pasting here too doubled every right-click paste. So: leave
+  // right-click to the app when it tracks the mouse.
   term.element.addEventListener('contextmenu', (e) => {
     e.preventDefault();
     if (term.hasSelection()) {
       copySelection(term);
       term.clearSelection();
-    } else {
-      pasteInto(term);
+      return;
     }
+    const mouseMode = term.modes?.mouseTrackingMode || 'none';
+    if (mouseMode !== 'none') return; // the app handles its own right-click paste
+    pasteInto(term);
   });
 }
 

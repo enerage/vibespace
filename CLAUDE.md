@@ -35,6 +35,11 @@ Knowledge is tracked **as we go**, never batched for later:
   If you give both panes grow/shrink, the divider stops tracking the pointer 1:1.
 - **xterm refit is throttled** (`terms.js`: 120 ms during drags, once on release).
   Per-pixel `fit()` → pty resize → ConPTY reflow is a visible storm.
+- **Right-click belongs to the app when it tracks the mouse.** Claude Code turns on
+  mouse tracking after its trust screen and pastes on right-click itself; our
+  contextmenu paste must skip when `term.modes.mouseTrackingMode !== 'none'` or
+  every paste doubles. Test mouse behavior AFTER the trust prompt — before it,
+  Claude hasn't enabled tracking yet (an early probe gave a false all-clear).
 - **Per-workspace identity is load-bearing**: each workspace process sets its own
   `userData` dir AND `app.setAppUserModelId('vibespace.workspace.<id>')` *before* app
   ready; shortcuts carry the same AUMID (`assets/ps/set-shortcut.ps1` writes it through

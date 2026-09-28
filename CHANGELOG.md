@@ -69,6 +69,19 @@ Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 - Symptom it fixes: agent terminals with a 5-entry PATH (`C:WindowsSystem32…`),
   node/npm/pnpm/python/git not found by name. Needs one VibeSpace restart.
 
+## [0.6.7] — 2026-09-29
+
+### Fixed
+- **Right-click paste pasted twice in Claude tabs.** Once past its trust screen,
+  Claude Code enables full mouse tracking (`?1000/1002/1003/1006h`), so xterm
+  forwards the right-click to Claude — which pastes from the clipboard itself —
+  and our own contextmenu handler pasted again. Right-click now leaves pasting to
+  the program whenever it tracks the mouse (`term.modes.mouseTrackingMode`);
+  plain shells keep VibeSpace's paste. Reproduced and verified via CDP-driven real
+  right-clicks: Claude tab 2 → 1, PowerShell tab 1 → 1.
+- **Ctrl+Shift+C never interrupts** — it copies a selection or does nothing
+  (Windows Terminal convention); plain Ctrl+C without a selection still interrupts.
+
 ## [0.6.6] — 2026-09-28
 
 ### Removed
