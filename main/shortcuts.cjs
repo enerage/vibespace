@@ -101,13 +101,34 @@ async function refreshIcons({ workspace, targetPath, targetArgs, workingDir }) {
   const desktop = path.join(process.env.USERPROFILE || '', 'Desktop', `${name}.lnk`);
   const wantStart = fs.existsSync(startMenu);
   const wantDesktop = fs.existsSync(desktop);
-  if (!wantStart && !wantDesktop) return false;
-  await create({ workspace, targetPath, targetArgs, workingDir, startMenu: wantStart, desktop: wantDesktop });
+  if (wantStart || wantDesktop) await create({ workspace, targetPath, targetArgs, workingDir, startMenu: wantStart, desktop: wantDesktop });
+  refreshTaskbarPins(workspace);
   const ie4u = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'ie4uinit.exe');
   try {
     if (fs.existsSync(ie4u)) spawn(ie4u, ['-show'], { windowsHide: true }).unref?.();
   } catch {}
   return true;
+}
+
+// Taskbar pins are their own .lnk copies (User Pinned\TaskBar) that freeze the
+// icon at pin time — a logo swap must rewrite them too, or the pin keeps showing
+// whatever the icon was the second it was pinned. Matched by --workspace=<id>.
+function refreshTaskbarPins(workspace) {
+  const dir = path.join(process.env.APPDATA || '', 'Microsoft', 'Internet Explorer', 'Quick Launch', 'User Pinned', 'TaskBar');
+  const updated = [];
+  let names = [];
+  try { names = fs.readdirSync(dir); } catch { return updated; }
+  const { shell } = require('electron');
+  for (const name of names) {
+    if (!name.toLowerCase().endsWith('.lnk')) continue;
+    const full = path.join(dir, name);
+    try {
+      const info = shell.readShortcutLink(full);
+      if (!String(info.args || '').includes(`--workspace=${workspace.id}`)) continue;
+      if (shell.writeShortcutLink(full, 'update', { icon: workspace.iconPath, iconIndex: 0 })) updated.push(name);
+    } catch {}
+  }
+  return updated;
 }
 
 function startMenuLinkPath(workspace) {
@@ -147,4 +168,4 @@ function removeJunkElectronLinks(exePath) {
   return removed;
 }
 
-module.exports = { create, createLauncherShortcut, removeShortcuts, refreshIcons, ensureStartMenu, removeJunkElectronLinks, startMenuLinkPath, aumidFor };
+module.exports = { create, createLauncherShortcut, removeShortcuts, refreshIcons, refreshTaskbarPins, ensureStartMenu, removeJunkElectronLinks, startMenuLinkPath, aumidFor };

@@ -405,6 +405,20 @@ async function runSmoke() {
     }
   }
 
+  // 20. default workspace icon = per-name letter mark (never the app logo)
+  {
+    const icoMod = require('./ico.cjs');
+    const a = path.join(U.dataRoot(), 'mark-a.ico');
+    const b = path.join(U.dataRoot(), 'mark-b.ico');
+    await icoMod.buildDefaultIco(a, 'Recruitica');
+    await icoMod.buildDefaultIco(b, 'FlexIQ');
+    const ha = require('node:crypto').createHash('sha1').update(fs.readFileSync(a)).digest('hex');
+    const hb = require('node:crypto').createHash('sha1').update(fs.readFileSync(b)).digest('hex');
+    const appIco = path.join(U.ROOT, 'assets', 'app.ico');
+    const happ = fs.existsSync(appIco) ? require('node:crypto').createHash('sha1').update(fs.readFileSync(appIco)).digest('hex') : '';
+    check('default icons are per-workspace letter marks', ha !== hb && ha !== happ && fs.statSync(a).size > 1000, `${ha.slice(0, 8)} vs ${hb.slice(0, 8)}`);
+  }
+
   // 8. pty echo (powershell)
   const echo = await ptyEchoTest();
   check('pty spawn + echo (powershell)', echo.ok, echo.detail);

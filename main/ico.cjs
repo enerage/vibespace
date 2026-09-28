@@ -88,15 +88,28 @@ async function buildIcoFromImage(srcPath, outIco) {
   return outIco;
 }
 
-async function buildDefaultIco(outIco) {
-  // the shipped app logo is the default workspace icon; the generated mark is
-  // only a fallback for source checkouts that somehow lack assets/app.ico
-  const appIco = path.join(__dirname, '..', 'assets', 'app.ico');
-  if (fs.existsSync(appIco)) {
-    fs.copyFileSync(appIco, outIco);
-    return outIco;
-  }
-  const png = await sharp(Buffer.from(DEFAULT_SVG)).resize(256, 256).png().toBuffer();
+// Per-workspace default icon: a letter mark on a color derived from the name, so
+// every workspace is distinguishable in the taskbar from the first second (a pin
+// caches its icon at creation). Never the VibeSpace app logo — a new workspace
+// wearing the app's own logo looked like VibeSpace itself (2026-09-28).
+function letterMarkSvg(label) {
+  const name = String(label || 'W').trim() || 'W';
+  let h = 0;
+  for (const ch of name.toLowerCase()) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  const hue = h % 360;
+  const letter = name.replace(/[^A-Za-z0-9]/g, '').slice(0, 1).toUpperCase() || 'W';
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="hsl(${hue},70%,58%)"/><stop offset="1" stop-color="hsl(${(hue + 40) % 360},70%,42%)"/>
+  </linearGradient></defs>
+  <rect x="8" y="8" width="240" height="240" rx="52" fill="url(#g)"/>
+  <text x="128" y="172" font-family="Segoe UI, Arial, sans-serif" font-size="150" font-weight="700" fill="#ffffff" text-anchor="middle">${letter}</text>
+</svg>`;
+}
+
+async function buildDefaultIco(outIco, label = null) {
+  const svg = label ? letterMarkSvg(label) : DEFAULT_SVG;
+  const png = await sharp(Buffer.from(svg)).resize(256, 256).png().toBuffer();
   return buildIcoFromImageViaBuffer(png, outIco);
 }
 

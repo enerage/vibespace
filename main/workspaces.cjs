@@ -35,7 +35,7 @@ async function create({ name, repoPath, logoPath }) {
   if (logoPath && fs.existsSync(logoPath)) {
     await ico.buildIcoFromImage(logoPath, iconPath);
   } else {
-    await ico.buildDefaultIco(iconPath);
+    await ico.buildDefaultIco(iconPath, name);
   }
   const ws = {
     id,

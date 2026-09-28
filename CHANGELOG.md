@@ -69,6 +69,17 @@ Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 - Symptom it fixes: agent terminals with a 5-entry PATH (`C:WindowsSystem32…`),
   node/npm/pnpm/python/git not found by name. Needs one VibeSpace restart.
 
+## [0.6.5] — 2026-09-28
+
+### Fixed — new/re-logo'd workspaces showing the VibeSpace logo when pinned
+- **Default workspace icon is now a per-name letter mark** (colored rounded square
+  + initial) instead of the VibeSpace app logo. A brand-new workspace wearing the
+  app's own logo looked like VibeSpace itself — and a pin made in that first
+  second froze that image (reverts the 0.5.x "new workspaces default to app.ico").
+- **Logo swaps rewrite taskbar pins too** (`User Pinned\TaskBar\*.lnk` matched by
+  `--workspace=<id>`), not only Start Menu/Desktop shortcuts, and re-announce the
+  window's AppDetails. Pins cache their icon at pin time; nothing refreshed them.
+
 ## [0.6.4] — 2026-09-28
 
 ### Fixed — pinned workspaces showing the Electron logo (root cause)

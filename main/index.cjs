@@ -575,6 +575,7 @@ function initIpc() {
     for (const win of workspaceWindowsFor(id)) {
       if (!win.isDestroyed()) {
         win.setIcon(ws.iconPath);
+        claimTaskbarIdentity(win, ws); // re-announce: the shell cached the old icon at open
         // reload without killing: the renderer re-attaches to live ptys (Layer 2)
         win.reload(); // pick up the new logo in the top bar
       }
