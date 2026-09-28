@@ -44,7 +44,10 @@ Knowledge is tracked **as we go**, never batched for later:
   .lnk makes Windows create a junk `Electron.lnk`** (Electron logo, no args) —
   that's why every window calls `claimTaskbarIdentity` (setAppDetails + ensure
   shortcut + purge junk). `Get-StartApps` showing a workspace named "Electron"
-  = this bug.
+  = this bug. A pin still showing a stale icon after the .lnk + .ico are verified
+  correct = Windows icon cache: stop explorer, delete
+  `%LOCALAPPDATA%\Microsoft\Windows\Explorer\iconcache_*.db`, start explorer
+  (`ie4uinit -show` alone is not always enough — confirmed 2026-09-28).
 - GPU acceleration is deliberately off (`app.disableHardwareAcceleration()`) — windows
   went blank over remote-display software. Renderers self-heal via
   `render-process-gone` → reload WITHOUT killing ptys — the renderer re-attaches.
