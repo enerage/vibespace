@@ -69,6 +69,16 @@ Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 - Symptom it fixes: agent terminals with a 5-entry PATH (`C:WindowsSystem32…`),
   node/npm/pnpm/python/git not found by name. Needs one VibeSpace restart.
 
+## [0.6.10] — 2026-09-29
+
+### Fixed
+- **Preview header overflowed when the pane was squeezed**: at 240px its content
+  needed 458px and all four buttons (Edit/Save/⌕/Diff) were pushed out of view.
+  Now the buttons never shrink, the path gives way first, the file name ellipsizes,
+  and below 420px (container query on `#viewer`) the path hides and buttons go
+  compact. Measured via CDP at 220/240/300/420/700px: no overflow, no clipped
+  buttons.
+
 ## [0.6.9] — 2026-09-29
 
 ### Fixed — the actual cause of "node / python / MCP servers not found" in terminals

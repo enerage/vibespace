@@ -82,9 +82,21 @@ body { margin: 0; background: var(--bg); color: var(--text); font: 13.5px/1.45 "
   border-bottom: 1px solid var(--border);
   background: var(--panel);
 }
-#viewer-name { font-size: 12.5px; font-weight: 600; white-space: nowrap; }
-#viewer-path { color: var(--dim); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-#viewer-actions { display: flex; gap: 6px; }
+/* Narrow-pane behaviour: the buttons never shrink or overflow; the path gives up
+   its space first, then the file name ellipsizes. Very narrow panes (container
+   query on #viewer) drop the path and compact the buttons. */
+#viewer { container-type: inline-size; }
+#viewer-head { min-width: 0; overflow: hidden; }
+#viewer-name { flex: 0 1 auto; min-width: 0; font-size: 12.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#viewer-path { flex: 1 1 0; min-width: 0; color: var(--dim); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#viewer-head .spacer { flex: 0 0 0; }
+#viewer-actions { flex: none; display: flex; gap: 6px; }
+@container (max-width: 420px) {
+  #viewer-path { display: none; }
+  #viewer-head { gap: 6px; padding: 0 6px; }
+  #viewer-actions { gap: 4px; }
+  #viewer-actions .btn.small { padding: 4px 7px; }
+}
 #monaco-host { flex: 1; min-height: 0; }
 #viewer-placeholder {
   position: absolute; left: 0; right: 0; top: 64px; bottom: 0;
