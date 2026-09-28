@@ -16,6 +16,7 @@ function persistNow() {
   const termsRect = $('#terms-pane').getBoundingClientRect();
   vs.saveState(wsId, {
     terminals: terms.snapshot(),
+    activeTerm: terms.activeTermId(),
     autoResume: $('#auto-resume').checked,
     theme: state.theme || 'vibespace',
     termPosition: state.termPosition || 'bottom',

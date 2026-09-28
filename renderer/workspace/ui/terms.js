@@ -421,6 +421,7 @@ function activateTab(id) {
   try { tab.fit.fit(); } catch {}
   tab.term.focus();
   renderTabBar();
+  persist(); // main needs the active tab to decide whether a finish deserves a toast
 }
 
 // Ctrl+Shift+U: cycle to the next tab that needs you (waiting first, then finished)
@@ -611,6 +612,10 @@ export function snapshot() {
 
 export function isActiveKnown() {
   return activeId !== null;
+}
+
+export function activeTermId() {
+  return activeId;
 }
 
 async function updateRestartAll() {

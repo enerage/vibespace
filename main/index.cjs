@@ -185,10 +185,16 @@ function notifyAttention(wsId, termId, st) {
   if (st !== 'waiting' && st !== 'done') return;
   const wins = workspaceWindowsFor(wsId);
   if (!wins.length) return;
-  if (wins.some(w => w.isFocused())) return; // user is watching; dot + unread is enough
-  const body = st === 'waiting' ? 'needs your attention' : 'finished its turn';
+  // only skip when you're literally looking at THIS agent: focused window AND its
+  // tab active. A different tab finishing in the window you're in still toasts.
+  const activeTerm = rendererState.get(wsId)?.activeTerm;
+  if (wins.some(w => w.isFocused()) && activeTerm === termId) return;
+  const ws = workspaces.get(wsId);
+  const agent = termName(wsId, termId);
+  const title = `${(ws && ws.name) || 'VibeSpace'} · ${agent}`;
+  const body = st === 'waiting' ? `${agent} needs your input` : `${agent} finished its turn`;
   try {
-    const n = new Notification({ title: `VibeSpace — ${termName(wsId, termId)}`, body });
+    const n = new Notification({ title, body, icon: ws && ws.iconPath && fs.existsSync(ws.iconPath) ? ws.iconPath : undefined });
     n.on('click', () => {
       for (const w of workspaceWindowsFor(wsId)) {
         if (!w.isDestroyed()) { w.show(); w.focus(); w.webContents.send('term:focus', termId); }

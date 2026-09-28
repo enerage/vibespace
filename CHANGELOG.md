@@ -69,6 +69,20 @@ Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 - Symptom it fixes: agent terminals with a 5-entry PATH (`C:WindowsSystem32…`),
   node/npm/pnpm/python/git not found by name. Needs one VibeSpace restart.
 
+## [0.6.8] — 2026-09-29
+
+### Changed — attention toasts name the workspace AND the agent
+- Toast title is now **`<workspace> · <agent tab name>`** (was the literal
+  "VibeSpace — <tab>"), body "<agent> finished its turn" / "<agent> needs your
+  input", with the workspace's logo as the toast icon. Click still focuses the
+  window and the exact tab.
+- Toasts now also fire when the window is focused but you're on a *different* tab
+  (only suppressed when you're looking at that exact agent). The renderer reports
+  the active tab to main (`activeTerm` in state).
+- Note for users with a global Claude notify hook: it can skip its own toast when
+  `$env:VIBESPACE_TERM_STATUS` is set (every VibeSpace terminal has it) to avoid
+  duplicate toasts — done for Valentin's `~/.claude/notifications/notify.ps1`.
+
 ## [0.6.7] — 2026-09-29
 
 ### Fixed
