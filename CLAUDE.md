@@ -5,6 +5,21 @@ app: file tree + Monaco preview + named Claude Code agent terminals, one Windows
 identity per repository. Read this before changing things; it encodes decisions that were
 learned the hard way on build day (full history in CHANGELOG.md).
 
+## How we work (standing rules for every agent in this repo)
+
+Knowledge is tracked **as we go**, never batched for later:
+
+- Decision made → append one line to `DECISIONS.md` immediately.
+- User-visible change → `CHANGELOG.md` section before reporting the work done.
+- Hard-won lesson/gotcha → the matching bullet in this file, same day.
+- New task/idea → `TODO.md`. Done task → checked off.
+- User preference or project fact → your agent memory (with Why + How-to-apply).
+- Valentin says **"update all docs"** → run the `/sync-docs` skill (the full sweep).
+  The 📨 Sync Docs button merely broadcasts that command to every workspace —
+  optional sugar, the rule is the point.
+- A task is not done until the docs above are current. "I'll document it later"
+  is how knowledge dies.
+
 ## Ground rules
 
 - **Never reintroduce caching in the `app://` protocol** (`main/index.cjs`). It must read

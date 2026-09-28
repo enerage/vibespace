@@ -10,8 +10,10 @@ export function init(opts) {
   const modal = $('#prefs-modal');
 
   const close = () => modal.classList.add('hidden');
+  modal.tabIndex = -1; // so Esc works right after opening via the header button
   $('#btn-prefs').onclick = () => {
     modal.classList.remove('hidden');
+    modal.focus();
     markActiveTheme();
     $('#btn-layout').title = opts.layoutLabel(); // title lives on the modal's copy now
   };

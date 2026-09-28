@@ -1,4 +1,5 @@
 import { $, el, toast, debounce } from './common.js';
+import { monacoTheme, onThemeChange } from './themes.js';
 
 const VS_URL = 'app://local/vendor/monaco-editor/min/vs/';
 
@@ -38,13 +39,15 @@ export function init(cb) {
   window.require.config({ paths: { vs: VS_URL } });
   window.require(['vs/editor/editor.main'], (m) => {
     monaco = m;
+    // theme switches flip the Monaco base live (the diff editor follows via diff.js)
+    onThemeChange((t) => { try { editor?.updateOptions({ theme: t.monaco }); } catch {} });
     try {
       monaco.languages.typescript.typescriptDefaults.setDiagnosticsOptions({ noSemanticValidation: true, noSyntaxValidation: true });
       monaco.languages.typescript.javascriptDefaults.setDiagnosticsOptions({ noSemanticValidation: true, noSyntaxValidation: true });
       monaco.languages.json.jsonDefaults.setDiagnosticsOptions({ validate: false });
     } catch {}
     editor = monaco.editor.create($('#monaco-host'), {
-      theme: 'vs-dark',
+      theme: monacoTheme(),
       readOnly: true,
       minimap: { enabled: true, maxColumn: 80 },
       fontSize: 13,

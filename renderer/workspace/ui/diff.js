@@ -1,5 +1,6 @@
 import { $, el, toast } from './common.js';
 import { onMonaco, LANGS } from './viewer.js';
+import { monacoTheme, onThemeChange } from './themes.js';
 
 // Git diff review pane (the pinned "Changes" tab). Read-only side-by-side diff
 // of uncommitted work. Diff models live under git:///HEAD/<rel> and
@@ -23,6 +24,7 @@ export function init(repo, open) {
   openFile = open || (() => {});
   onMonaco((m) => {
     monacoRef = m;
+    onThemeChange((t) => { try { diffEditor?.updateOptions({ theme: t.monaco }); } catch {} });
     if (wantEditor) createEditor();
     if (files.length) { buildModels(); renderList(); applySelection(); } // refreshed before Monaco landed
   });
@@ -70,7 +72,7 @@ export async function refresh() {
 function createEditor() {
   if (diffEditor || !monacoRef) return;
   diffEditor = monacoRef.editor.createDiffEditor($('#diff-editor'), {
-    theme: 'vs-dark',
+    theme: monacoTheme(),
     readOnly: true,
     renderSideBySide: true,
     automaticLayout: true,

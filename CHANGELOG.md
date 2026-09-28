@@ -2,6 +2,20 @@
 
 Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 
+## [0.6.3] — 2026-09-28
+
+### Added
+- **⚙ Preferences modal** — the header keeps only 📨 Sync Docs, ↻/⟳ (when
+  relevant) and ⚙; terminal dock (bottom/right), auto-resume, logs folder and
+  the new theme picker moved inside. New settings = one row + one state key.
+- **20 per-workspace color themes** (15 dark + 5 light): full palette swap —
+  UI, xterm ANSI set, and the Monaco base all follow, `color-scheme` flips so
+  native scrollbars/inputs match. Applied instantly, saved in workspace state,
+  replayed pre-paint on window open (no default-theme flash). The default
+  `VibeSpace Dark` is the pre-theme palette, byte-exact. Style.css literals
+  were tokenized into theme vars; accent/ok/danger glows derive via
+  `color-mix()`.
+
 ## [0.6.0] — 2026-09-27 (evening)
 
 ### Added
