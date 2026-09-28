@@ -69,6 +69,17 @@ Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 - Symptom it fixes: agent terminals with a 5-entry PATH (`C:WindowsSystem32…`),
   node/npm/pnpm/python/git not found by name. Needs one VibeSpace restart.
 
+## [0.6.3] — 2026-09-28
+
+### Added — the knowledge system is a standing rule, not a button
+- **DECISIONS.md** — flat append-only decision log, seeded with every major
+  decision to date (hot-reload opt-in, pty attach, status hooks, PATH rebuild,
+  live tree, picker pinning, …).
+- **CLAUDE.md "How we work"** — every agent in this repo records decisions /
+  changelog entries / lessons / TODOs / memory **as they happen**; "update all
+  docs" runs `/sync-docs`; the 📨 button is optional sugar. A task isn't done
+  until the docs are current.
+
 ## [0.6.2] — 2026-09-28
 
 ### Added — resume an existing conversation on purpose
