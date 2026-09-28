@@ -1,5 +1,5 @@
 'use strict';
-const { app, BrowserWindow, ipcMain, dialog, protocol, shell, clipboard, Notification } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, protocol, shell, clipboard, Notification, screen } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
 const { spawn } = require('node:child_process');
@@ -31,6 +31,7 @@ function parseArgv() {
   let openRepoPath = null;
   let watch = false;
   let screenshotPath = null;
+  let restarted = false;
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--workspace' && argv[i + 1]) { workspaceId = argv[i + 1]; i++; }
     else if (argv[i].startsWith('--workspace=')) { workspaceId = argv[i].slice('--workspace='.length); }
@@ -39,10 +40,11 @@ function parseArgv() {
     else if (argv[i].startsWith('--open-repo=')) { openRepoPath = argv[i].slice('--open-repo='.length); }
     else if (argv[i] === '--watch') { watch = true; }
     else if (argv[i].startsWith('--screenshot=')) { screenshotPath = argv[i].slice('--screenshot='.length); }
+    else if (argv[i] === '--restarted') { restarted = true; }
   }
-  return { workspaceId, smoke, openRepoPath, watch, screenshotPath };
+  return { workspaceId, smoke, openRepoPath, watch, screenshotPath, restarted };
 }
-const { workspaceId, smoke, openRepoPath, watch, screenshotPath } = parseArgv();
+const { workspaceId, smoke, openRepoPath, watch, screenshotPath, restarted } = parseArgv();
 if (watch) process.env.VIBESPACE_WATCH = '1'; // opt-in dev hot reload (children inherit)
 
 if (smoke) {
@@ -359,12 +361,60 @@ function claimTaskbarIdentity(win, ws) {
   }, 1500);
 }
 
+// ---------- window geometry memory ----------
+// Per-workspace bounds + maximized state (instances/<id>/window.json), so reopening
+// — and especially ↻ Restart, which relaunches the process — doesn't reset the
+// window to a default-sized box somewhere behind everything.
+function windowStateFile(wsId) {
+  return path.join(U.dataRoot(), 'instances', wsId, 'window.json');
+}
+
+function loadWindowState(wsId) {
+  const s = U.readJson(windowStateFile(wsId), null);
+  if (!s || !s.bounds) return null;
+  // ignore bounds that are no longer on any connected display (monitor unplugged)
+  const b = s.bounds;
+  const visible = screen.getAllDisplays().some(d => {
+    const a = d.workArea;
+    return b.x < a.x + a.width - 40 && b.x + b.width > a.x + 40 && b.y < a.y + a.height - 40 && b.y + b.height > a.y + 40;
+  });
+  return visible ? s : { maximized: s.maximized };
+}
+
+function saveWindowState(win) {
+  const info = winInfo.get(win.id);
+  if (!info || win.isDestroyed() || win.isMinimized()) return;
+  try {
+    U.ensureDir(path.dirname(windowStateFile(info.wsId)));
+    U.writeJsonAtomic(windowStateFile(info.wsId), { bounds: win.getNormalBounds(), maximized: win.isMaximized() });
+  } catch {}
+}
+
+// Bring a (re)launched window to the front. Windows' focus-stealing rules can
+// leave a relaunched process behind the previous foreground window; the brief
+// always-on-top toggle is the standard reliable nudge.
+function bringToFront(win) {
+  if (win.isDestroyed()) return;
+  win.show();
+  win.moveTop();
+  win.focus();
+  if (!win.isFocused()) {
+    win.setAlwaysOnTop(true);
+    win.focus();
+    setTimeout(() => { if (!win.isDestroyed()) win.setAlwaysOnTop(false); }, 400);
+  }
+}
+
 function createWorkspaceWindow(ws, { shot = false } = {}) {
+  const saved = shot ? null : loadWindowState(ws.id);
+  const b = saved && saved.bounds;
   const win = new BrowserWindow({
-    width: 1480,
-    height: 940,
+    width: b ? b.width : 1480,
+    height: b ? b.height : 940,
+    ...(b ? { x: b.x, y: b.y } : {}),
     minWidth: 1020,
     minHeight: 640,
+    show: false, // shown on ready-to-show: no white flash, and we control max/focus
     backgroundColor: '#0d1117',
     autoHideMenuBar: true,
     icon: ws.iconPath,
@@ -373,6 +423,19 @@ function createWorkspaceWindow(ws, { shot = false } = {}) {
   });
   harden(win);
   winInfo.set(win.id, { wsId: ws.id });
+  win.once('ready-to-show', () => {
+    if (shot) return; // screenshot mode shows the window itself
+    // after ↻ Restart: always maximized + focused (Valentin, 2026-09-29);
+    // otherwise restore the remembered maximized state
+    if (restarted || (saved && saved.maximized)) win.maximize();
+    if (restarted) bringToFront(win);
+    else win.show();
+    logger.info(`window shown: maximized=${win.isMaximized()} focused=${win.isFocused()} restarted=${restarted}`);
+  });
+  let geomTimer = null;
+  const saveSoon = () => { clearTimeout(geomTimer); geomTimer = setTimeout(() => saveWindowState(win), 500); };
+  for (const evn of ['resize', 'move', 'maximize', 'unmaximize']) win.on(evn, saveSoon);
+  win.on('close', () => saveWindowState(win));
   logger.info(`workspace window opened: ${ws.name} (${ws.id}) repo=${ws.repoPath}`);
   probeSrc(); // baseline = the code this window is actually running (dev only)
   claimTaskbarIdentity(win, ws);
@@ -598,7 +661,10 @@ function initIpc() {
   // one-click restart onto new code (same relaunch path devwatch uses for main/)
   ipcMain.handle('app:restart', () => {
     logger.info('app restart requested — relaunching to pick up new code');
-    app.relaunch({ args: process.argv.slice(1) });
+    for (const w of BrowserWindow.getAllWindows()) saveWindowState(w);
+    // --restarted: the relaunched window comes back maximized and focused
+    const args = process.argv.slice(1).filter(a => a !== '--restarted');
+    app.relaunch({ args: [...args, '--restarted'] });
     setTimeout(() => app.exit(0), 200);
     return true;
   });

@@ -69,6 +69,18 @@ Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 - Symptom it fixes: agent terminals with a 5-entry PATH (`C:WindowsSystem32…`),
   node/npm/pnpm/python/git not found by name. Needs one VibeSpace restart.
 
+## [0.6.12] — 2026-09-29
+
+### Changed
+- **↻ Restart brings the window back maximized and focused.** The relaunch passes
+  `--restarted`; the new window maximizes and is brought to the front (with an
+  always-on-top nudge if Windows' focus-stealing rules would leave it behind).
+- **Windows remember their geometry** per workspace (`instances/<id>/window.json`:
+  normal bounds + maximized), restored on every open; bounds that are no longer on
+  any display are ignored. Windows are created hidden and shown on
+  `ready-to-show` (no white flash). Verified: restarted → maximized+focused;
+  normal reopen → maximized restored.
+
 ## [0.6.11] — 2026-09-29
 
 ### Fixed
