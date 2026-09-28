@@ -21,7 +21,6 @@ const gitdiff = require('./gitdiff.cjs');
 const fsops = require('./fsops.cjs');
 const srcstate = require('./srcstate.cjs');
 const treewatch = require('./treewatch.cjs');
-const broadcast = require('./broadcast.cjs');
 const updater = require('./updater.cjs');
 
 // ---------- CLI args ----------
@@ -800,21 +799,6 @@ function initIpc() {
       if (!win.isDestroyed()) win.webContents.send('tree:changed');
     }
   });
-  // cross-workspace broadcast: a command written to <dataRoot>/broadcast/cmd.txt
-  // by ANY window is typed into the claude tabs of EVERY open workspace
-  ipcMain.handle('broadcast:send', (e, command) => {
-    const cmd = String(command || '').trim();
-    if (!cmd) return { ok: false };
-    logger.info(`broadcast: ${cmd}`);
-    broadcast.send(cmd);
-    return { ok: true };
-  });
-  broadcast.onData((cmd) => {
-    logger.info(`broadcast received: ${cmd}`);
-    for (const win of BrowserWindow.getAllWindows()) {
-      if (!win.isDestroyed()) win.webContents.send('broadcast:run', cmd);
-    }
-  });
 }
 
 // periodic state save (captures session ids discovered after the last renderer push)
@@ -829,8 +813,6 @@ function initStateFlush() {
   // new-VibeSpace-code detection (dev only; no-op packaged)
   probeSrc();
   setInterval(probeSrc, 30000).unref?.();
-  // cross-workspace agent broadcasts (watched in every workspace process)
-  broadcast.start();
 }
 
 // ---------- boot ----------

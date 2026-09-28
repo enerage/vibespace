@@ -98,23 +98,6 @@ export function init(opts) {
   $('#btn-new-term').onclick = () => createTab({ name: nextName('term'), cwd: repoPath });
   $('#btn-update').onclick = updateRestartAll;
 
-  // 📨 Sync Docs: broadcast /sync-docs to every claude tab in EVERY open workspace
-  $('#btn-docs-sync').onclick = async () => {
-    const r = await vs.broadcastSend('/sync-docs').catch(() => null);
-    if (r && r.ok) toast('Broadcast /sync-docs — every agent in every open workspace is syncing its docs + memory', 'ok');
-    else toast('Broadcast failed', 'err');
-  };
-  vs.onBroadcastRun((cmd) => {
-    let n = 0;
-    for (const tab of tabs.values()) {
-      if (tab.isClaude && !tab.dead) {
-        vs.ptyWrite(tab.id, cmd + '\r');
-        n++;
-      }
-    }
-    if (n) toast(`Running ${cmd} in ${n} agent${n > 1 ? 's' : ''}`, 'ok');
-  });
-
   // the ⟳ button only exists when it has something to do: claude auto-updates in
   // the background, and the button restarts agents ONTO that new version — so it
   // stays hidden until the on-disk version differs from what these agents run

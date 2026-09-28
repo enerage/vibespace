@@ -340,20 +340,6 @@ async function runSmoke() {
     }
   }
 
-  // 16. cross-workspace broadcast (the /sync-docs transport)
-  {
-    const bc = require('./broadcast.cjs');
-    let got = null;
-    bc.onData((cmd) => { got = cmd; });
-    bc.start();
-    bc.send('/sync-docs');
-    const deadline = Date.now() + 3000;
-    while (!got && Date.now() < deadline) await new Promise(r => setTimeout(r, 100));
-    check('broadcast send/receive round-trip', got === '/sync-docs', `got=${got}`);
-    bc.stop();
-    try { fs.rmSync(path.dirname(bc._cmdFile()), { recursive: true, force: true }); } catch {}
-  }
-
   // 17. PATH rebuild from registry (the stripped/mangled-PATH class of bugs)
   {
     const rebuilt = U.rebuildPath('C:\\Windows;C:\\Windows;junk;C:Windows');

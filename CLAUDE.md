@@ -15,8 +15,7 @@ Knowledge is tracked **as we go**, never batched for later:
 - New task/idea → `TODO.md`. Done task → checked off.
 - User preference or project fact → your agent memory (with Why + How-to-apply).
 - Valentin says **"update all docs"** → run the `/sync-docs` skill (the full sweep).
-  The 📨 Sync Docs button merely broadcasts that command to every workspace —
-  optional sugar, the rule is the point.
+  It's a rule, not a UI feature — there is deliberately no button for it.
 - A task is not done until the docs above are current. "I'll document it later"
   is how knowledge dies.
 
@@ -103,12 +102,10 @@ Key facts encoded in `main/sessions.cjs`:
   badge. Change the word set and all three of those together.
 - Keys: Ctrl+P file finder · Ctrl+F terminal search (active tab) · Ctrl+Shift+U
   jump-to-attention · Ctrl+Shift+D diagnostics.
-- **📨 Sync Docs** (0.6.0): topbar button broadcasts `/sync-docs` to every claude
-  tab in EVERY open workspace (transport: `main/broadcast.cjs` watches
-  `<dataRoot>/broadcast/cmd.txt`; each workspace process types the command into
-  its own claude tabs). The `.claude/skills/sync-docs` skill (this repo) is the
-  ritual: CHANGELOG/DECISIONS/CLAUDE/TODO/README + agent memory, docs only.
-  Copy the skill folder into any repo that should join the ritual.
+- **`/sync-docs` skill** (`.claude/skills/sync-docs`): the "update all docs" ritual —
+  CHANGELOG/DECISIONS/CLAUDE/TODO/README + agent memory, docs only. Copy the skill
+  folder into any repo that should join the ritual. (A 📨 broadcast button existed
+  briefly in 0.6.0 and was removed in 0.6.6 — Valentin wanted a rule, not a button.)
 - **⟳ update button is conditional** (0.5.1): claude auto-updates in the background;
   the button restarts agents onto the new version and only renders when
   disk version ≠ the window's baseline (`main/index.cjs` claudeBaselines).

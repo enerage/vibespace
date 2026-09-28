@@ -48,7 +48,6 @@ VibeSpace is that place — built for people who live in agents all day.
 | ⟳ **Smart update button** | appears only when Claude Code's background auto-update left a new version on disk — one click restarts all agents onto it |
 | ↻ **Smart restart button** | appears only when VibeSpace's own code changed — restart on your schedule, never mid-agent-run |
 | 🏷 **Logos** | click the logo to give the workspace its own icon; pins refresh automatically |
-| 📨 **Sync Docs** | one click broadcasts `/sync-docs` to every agent in every open workspace — they all update their repo docs, decision log, and memory (ship the included skill to each repo) |
 | 📋 **Windows integration** | Explorer right-click → "Open with VibeSpace", per-workspace taskbar pins, taskbar badges |
 
 ## Install

@@ -69,6 +69,13 @@ Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 - Symptom it fixes: agent terminals with a 5-entry PATH (`C:WindowsSystem32…`),
   node/npm/pnpm/python/git not found by name. Needs one VibeSpace restart.
 
+## [0.6.6] — 2026-09-28
+
+### Removed
+- **📨 Sync Docs button and its broadcast transport** (`main/broadcast.cjs`, IPC,
+  preload bridge, smoke test). "Update all docs" is a standing rule for agents
+  (CLAUDE.md "How we work" + the `/sync-docs` skill), not a UI feature.
+
 ## [0.6.5] — 2026-09-28
 
 ### Fixed — new/re-logo'd workspaces showing the VibeSpace logo when pinned
