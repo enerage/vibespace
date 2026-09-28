@@ -100,6 +100,16 @@ function copyIn(source, destDir) {
   return path.basename(target);
 }
 
+// Jail check for tree file operations: return the resolved absolute path only
+// if it lives STRICTLY INSIDE repoRoot, else null. Compare is case-insensitive
+// (Windows drive-letter casing varies); the +path.sep guard means a
+// sibling-prefix path (root D:\a vs D:\ab\x) must NOT count as inside.
+function jailed(repoRoot, p) {
+  const r = path.resolve(p);
+  const root = path.resolve(repoRoot);
+  return r.toLowerCase().startsWith(root.toLowerCase() + path.sep) ? r : null;
+}
+
 module.exports = {
   copyIn,
   ROOT,
@@ -108,6 +118,7 @@ module.exports = {
   IGNORED_NAMES,
   IGNORED_SUFFIXES,
   isIgnoredPath,
+  jailed,
   ensureDir,
   mungeClaudeDir,
   claudeProjectsDir,

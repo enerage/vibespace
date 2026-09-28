@@ -1,7 +1,8 @@
-import { $, el, toast } from './common.js';
+import { $, el, toast, askText } from './common.js';
 
 let rootPath = '';
 let onOpenFile = () => {};
+let hooks = { onRename: null, onDeleted: null }; // optional, from init ops
 let gitFiles = null; // Map: repo-relative path (forward slashes) -> M|A|U|D
 let gitDirs = new Map(); // derived: dir path -> strongest status found under it
 const expanded = new Set(); // absolute dir paths currently expanded (persisted)
@@ -10,9 +11,13 @@ let rebuildQueued = false;
 
 const GIT_RANK = { U: 1, A: 2, D: 2, M: 3 };
 
-export function init(root, onOpen, savedExpanded) {
+export function init(root, onOpen, savedExpanded, ops = {}) {
   rootPath = root;
   onOpenFile = onOpen;
+  hooks = {
+    onRename: typeof ops.onRename === 'function' ? ops.onRename : null,
+    onDeleted: typeof ops.onDeleted === 'function' ? ops.onDeleted : null,
+  };
   expanded.clear();
   // first run (no saved list): root expanded; later runs: exactly what was open
   for (const p of (Array.isArray(savedExpanded) ? savedExpanded : [root])) expanded.add(p);
@@ -34,6 +39,53 @@ export function init(root, onOpen, savedExpanded) {
   pane.addEventListener('drop', (ev) => {
     ev.preventDefault();
     dropFiles(ev, rootPath);
+  });
+
+  // context menu: delegated on the pane so it survives rebuilds. Lives on
+  // document.body (NOT inside #tree) for the same reason.
+  pane.addEventListener('contextmenu', (ev) => {
+    const row = ev.target.closest('.tree-row');
+    if (!row) {
+      ev.preventDefault();
+      showCtxMenu(ev.clientX, ev.clientY, [
+        { label: 'New file', run: () => newFileIn(rootPath) },
+        { label: 'New folder', run: () => newFolderIn(rootPath) },
+      ]);
+      return;
+    }
+    if (!('rel' in row.dataset)) return;
+    ev.preventDefault();
+    const rel = row.dataset.rel;
+    if (row.dataset.dir) {
+      const items = [
+        { label: 'New file here', run: () => newFileIn(absOf(rel)) },
+        { label: 'New folder here', run: () => newFolderIn(absOf(rel)) },
+      ];
+      if (rel) { // the repo root itself is never renamed or deleted
+        items.push({ label: 'Rename', run: () => startRename(rel) });
+        items.push({ label: 'Delete', danger: true, run: () => startDelete(rel, true) });
+      }
+      showCtxMenu(ev.clientX, ev.clientY, items);
+    } else {
+      showCtxMenu(ev.clientX, ev.clientY, [
+        { label: 'New file', run: () => newFileIn(absOf(parentRelOf(rel))) },
+        { label: 'Rename', run: () => startRename(rel) },
+        { label: 'Delete', danger: true, run: () => startDelete(rel, false) },
+      ]);
+    }
+  });
+
+  // F2 renames the active row — only when nothing else holds focus
+  // (inputs, Monaco, xterm all own their key handling)
+  document.addEventListener('keydown', (ev) => {
+    if (ev.key !== 'F2' || ev.ctrlKey || ev.altKey || ev.shiftKey || ev.metaKey) return;
+    if (ctxMenu || activeRel == null) return;
+    const a = document.activeElement;
+    if (a && a !== document.body) return;
+    const row = document.querySelector('#tree .tree-row.active');
+    if (!row || row.dataset.dir === undefined || !('rel' in row.dataset) || !row.dataset.rel) return;
+    ev.preventDefault();
+    startRename(row.dataset.rel);
   });
 }
 
@@ -194,4 +246,123 @@ function icon(name) {
 
 function escape(s) {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// ---------- context menu + file operations ----------
+
+// rows store repo-relative paths (forward slashes); join with '/' for fs calls
+// (Node accepts that on Windows). expanded keys, though, come from fsList
+// (path.join → backslashes), so record both join forms when expanding.
+function absOf(rel) { return rel ? rootPath + '/' + rel : rootPath; }
+function nameOf(rel) { return rel.split('/').pop(); }
+function parentRelOf(rel) { const i = rel.lastIndexOf('/'); return i < 0 ? '' : rel.slice(0, i); }
+function expandDir(dirAbs) {
+  expanded.add(dirAbs);
+  expanded.add(dirAbs.replace(/\//g, '\\'));
+}
+
+let ctxMenu = null;
+
+function showCtxMenu(x, y, items) {
+  closeCtxMenu();
+  const menu = el('div', 'ctx-menu');
+  for (const it of items) {
+    const item = el('div', 'ctx-item' + (it.danger ? ' danger' : ''), it.label);
+    item.onclick = (ev) => { ev.stopPropagation(); closeCtxMenu(); it.run(); };
+    menu.appendChild(item);
+  }
+  document.body.appendChild(menu);
+  ctxMenu = menu;
+  const r = menu.getBoundingClientRect(); // keep it on screen
+  menu.style.left = Math.max(8, Math.min(x, window.innerWidth - r.width - 8)) + 'px';
+  menu.style.top = Math.max(8, Math.min(y, window.innerHeight - r.height - 8)) + 'px';
+  // close on any outside click / Esc / window blur / resize / scroll
+  window.addEventListener('mousedown', ctxCloser, true);
+  window.addEventListener('keydown', ctxCloser, true);
+  window.addEventListener('blur', ctxCloser);
+  window.addEventListener('resize', ctxCloser);
+  window.addEventListener('scroll', ctxCloser, true);
+}
+
+function ctxCloser(ev) {
+  if (!ctxMenu) return;
+  if (ev.type === 'keydown' && ev.key !== 'Escape') return;
+  if (ev.type === 'mousedown' && ctxMenu.contains(ev.target)) return; // let item clicks run
+  closeCtxMenu();
+}
+
+function closeCtxMenu() {
+  if (!ctxMenu) return;
+  const m = ctxMenu;
+  ctxMenu = null;
+  m.remove();
+  window.removeEventListener('mousedown', ctxCloser, true);
+  window.removeEventListener('keydown', ctxCloser, true);
+  window.removeEventListener('blur', ctxCloser);
+  window.removeEventListener('resize', ctxCloser);
+  window.removeEventListener('scroll', ctxCloser, true);
+}
+
+async function newFileIn(dirAbs) {
+  const name = await askText('New file', '');
+  if (name === null) return;
+  const trimmed = name.trim();
+  if (!trimmed) { toast('File name cannot be empty', 'err'); return; }
+  try {
+    const res = await vs.fsCreate(dirAbs, trimmed);
+    expandDir(dirAbs);
+    queueRebuild(); // watcher also fires (~700ms); this makes it near-immediate
+    onOpenFile(res.path, trimmed);
+  } catch (e) {
+    toast('New file failed: ' + (e.message || e), 'err');
+  }
+}
+
+async function newFolderIn(dirAbs) {
+  const name = await askText('New folder', '');
+  if (name === null) return;
+  const trimmed = name.trim();
+  if (!trimmed) { toast('Folder name cannot be empty', 'err'); return; }
+  try {
+    await vs.fsMkdir(dirAbs, trimmed);
+    expandDir(dirAbs + '/' + trimmed);
+    queueRebuild();
+  } catch (e) {
+    toast('New folder failed: ' + (e.message || e), 'err');
+  }
+}
+
+async function startRename(rel) {
+  const name = nameOf(rel);
+  const abs = absOf(rel);
+  const base = abs.slice(0, abs.length - name.length); // abs ends with the name
+  const next = await askText('Rename', name);
+  if (next === null) return;
+  const trimmed = next.trim();
+  if (!trimmed) { toast('Name cannot be empty', 'err'); return; }
+  if (trimmed === name) return;
+  try {
+    const to = base + trimmed;
+    await vs.fsRename(abs, to);
+    if (hooks.onRename) hooks.onRename(abs, to);
+    queueRebuild();
+  } catch (e) {
+    toast('Rename failed: ' + (e.message || e), 'err');
+  }
+}
+
+async function startDelete(rel, isDir) {
+  const name = nameOf(rel);
+  const abs = absOf(rel);
+  const msg = isDir
+    ? `Delete folder "${name}" and everything inside it? (moved to Recycle Bin)`
+    : `Delete "${name}"? (moved to Recycle Bin)`;
+  if (!window.confirm(msg)) return;
+  try {
+    await vs.fsDelete(abs);
+    if (hooks.onDeleted) hooks.onDeleted(abs);
+    queueRebuild();
+  } catch (e) {
+    toast('Delete failed: ' + (e.message || e), 'err');
+  }
 }

@@ -24,14 +24,17 @@ itself while an agent runs in the same window.
       Ctrl+Shift+U jump, unread markers, taskbar overlay badge.
 - [ ] Last-message preview per session (tooltip from the tracked .jsonl) —
       RESEARCH-USER-PAIN.md shortlist #5.
-- [ ] Per-agent git diff review in the preview pane (Monaco DiffEditor) —
-      RESEARCH-USER-PAIN.md shortlist #4.
+- [x] Per-agent git diff review in the preview pane (done 0.6.0) — pinned ⟳
+      Changes tab, Monaco DiffEditor, HEAD-vs-worktree incl. untracked.
+- [x] Tree file operations (done 0.6.0) — context menu: new file/folder,
+      rename (F2), delete to Recycle Bin; fs IPC jailed to the workspace.
 - [x] **Session picker on restore** (done 0.5.0) — dead saved session → claude's
       interactive `--resume` picker opens in the tab.
 - [x] **Tree polish** (done 0.5.0) — expanded folders remembered; git status colors
       (porcelain, cached main-side); ignore list extended.
 - [x] **File finder Ctrl+P** (done 0.5.0) — fuzzy palette over the repo index.
-- [ ] **Editor tabs** (M) — multiple open files with tabs instead of one preview at a time.
+- [x] **Editor tabs** (done 0.6.0) — dirty dots, per-tab edit state, persisted
+      across reloads, agent-edited files refresh in place.
 - [ ] Full-text grep panel (S/M).
 
 ## Session tracking robustness
@@ -55,7 +58,9 @@ itself while an agent runs in the same window.
 ## Terminal
 - [x] Search inside terminal (done 0.5.0, @xterm/addon-search + Ctrl+F bar).
 - [ ] Split panes inside a tab.
-- [ ] Link handler: open `D:\file.cs:123` from claude output in the preview pane.
+- [x] Link handler: open `D:\file.cs:123` from claude output in the preview
+      pane (done 0.6.0 — xterm link provider; relative paths resolve against
+      the terminal cwd).
 
 ## Windows integration
 - [ ] Investigate Windows 11 **modern** context menu entry (IExplorerCommand/

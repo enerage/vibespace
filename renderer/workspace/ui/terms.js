@@ -6,6 +6,7 @@ import { $, el, toast } from './common.js';
 let wsId;
 let repoPath;
 let persist = () => {};
+let openFile = null; // (path, name, line) — file:line links hand off to the viewer
 
 const tabs = new Map(); // termId -> tab record
 let activeId = null;
@@ -35,6 +36,7 @@ export function init(opts) {
   wsId = opts.wsId;
   repoPath = opts.repoPath;
   persist = opts.persist || persist;
+  openFile = opts.openFile || openFile;
 
   vs.onPtyData((termId, chunk) => {
     const tab = tabs.get(termId);
@@ -92,6 +94,23 @@ export function init(opts) {
   $('#btn-new-claude').onclick = () => createTab({ name: nextName('agent'), cwd: repoPath, claude: true });
   $('#btn-new-term').onclick = () => createTab({ name: nextName('term'), cwd: repoPath });
   $('#btn-update').onclick = updateRestartAll;
+
+  // 📨 Sync Docs: broadcast /sync-docs to every claude tab in EVERY open workspace
+  $('#btn-docs-sync').onclick = async () => {
+    const r = await vs.broadcastSend('/sync-docs').catch(() => null);
+    if (r && r.ok) toast('Broadcast /sync-docs — every agent in every open workspace is syncing its docs + memory', 'ok');
+    else toast('Broadcast failed', 'err');
+  };
+  vs.onBroadcastRun((cmd) => {
+    let n = 0;
+    for (const tab of tabs.values()) {
+      if (tab.isClaude && !tab.dead) {
+        vs.ptyWrite(tab.id, cmd + '\r');
+        n++;
+      }
+    }
+    if (n) toast(`Running ${cmd} in ${n} agent${n > 1 ? 's' : ''}`, 'ok');
+  });
 
   // the ⟳ button only exists when it has something to do: claude auto-updates in
   // the background, and the button restarts agents ONTO that new version — so it
@@ -277,6 +296,61 @@ function wireClipboard(term) {
   });
 }
 
+// ---- file:line links ---------------------------------------------------------
+// Clicking D:\repo\src\app.js:42 (or src/app.js:42) in claude's output opens the
+// file in the preview at that line. Uses xterm's core registerLinkProvider —
+// no vendored addon. The lookbehinds keep URLs (https://host/x:1) and paths
+// already matched as absolute from producing duplicate/false hits; the \d+
+// anchor means a drive colon can never read as a line number.
+const ABS_PATH_LINE = /(?<![\w./])([A-Za-z]:(?:[\\/][^\s:"'<>|]+)+):(\d+)(?::(\d+))?/g;
+const REL_PATH_LINE = /(?<![\w.\\/:])([\w][\w.\-]*(?:[\\/][^\s:"'<>|]+)+):(\d+)(?::(\d+))?/g;
+// quoted paths may contain spaces — claude quotes those; requires a separator
+// so arbitrary quoted "text: 5" doesn't light up
+const QUOTED_PATH_LINE = /"((?:[A-Za-z]:)?[^"]*?[\\/][^"]*?):(\d+)"/g;
+
+const baseName = (p) => p.split(/[\\/]/).pop();
+
+async function openPathAt(tab, rawPath, line) {
+  const p = rawPath.replace(/^["']+|["']+$/g, ''); // claude quotes paths with spaces
+  const isAbs = /^[A-Za-z]:[\\/]/.test(p) || p.startsWith('\\\\');
+  if (isAbs) { if (openFile) openFile(p, baseName(p), line); return; }
+  // relative: try the terminal's spawn cwd first, then the workspace root
+  for (const base of [tab.cwd, repoPath]) {
+    if (!base) continue;
+    const cand = base.replace(/[\\/]+$/, '') + '/' + p;
+    try { await vs.fsRead(cand); } catch { continue; } // existence check
+    if (openFile) openFile(cand, baseName(p), line);
+    return;
+  }
+  toast('Not found: ' + p, 'err');
+}
+
+function registerFileLinks(term, tab) {
+  try {
+    term.registerLinkProvider({
+      provideLinks(lineNo, cb) {
+        try {
+          const row = term.buffer.active.getLine(lineNo);
+          const text = row ? row.translateToString(true) : '';
+          if (!text) return cb(undefined);
+          const hits = [];
+          const inHit = (i) => hits.some(h => i >= h.start && i < h.start + h.len);
+          const add = (m) => hits.push({ start: m.index, len: m[0].length, path: m[1], line: +m[2] });
+          for (const m of text.matchAll(QUOTED_PATH_LINE)) add(m); // quoted (spaces) first…
+          for (const m of text.matchAll(ABS_PATH_LINE)) if (!inHit(m.index)) add(m); // …then unquoted
+          for (const m of text.matchAll(REL_PATH_LINE)) if (!inHit(m.index)) add(m);
+          if (!hits.length) return cb(undefined);
+          cb(hits.map(h => ({
+            range: { start: { x: h.start + 1, y: lineNo }, end: { x: Math.min(h.start + h.len, term.cols), y: lineNo } },
+            text: text.slice(h.start, h.start + h.len),
+            activate: () => openPathAt(tab, h.path, h.line),
+          })));
+        } catch { cb(undefined); }
+      },
+    });
+  } catch {} // xterm without link-provider support — links simply don't light up
+}
+
 export function createTab({ name = 'agent', cwd = repoPath, claude = false, resumeId = null, activate = true, termId = null, attachBuffer = null, savedIsClaude = null, savedSessionId = null, pickSession = false } = {}) {
   const id = termId || newTermId();
   const host = el('div', 'term-host');
@@ -305,6 +379,7 @@ export function createTab({ name = 'agent', cwd = repoPath, claude = false, resu
     isClaude: savedIsClaude !== null ? Boolean(savedIsClaude) : Boolean(claude || resumeId || pickSession),
   };
   tabs.set(id, tab);
+  registerFileLinks(term, tab);
   renderTabBar();
   if (activate || tabs.size === 1) activateTab(id);
 
@@ -448,12 +523,12 @@ function renderTabBar() {
       ev.stopPropagation();
       startRename(t, label, tab);
     };
+    wireTabDrag(bar, t);
 
     bar.appendChild(t);
   }
 }
 
-    wireTabDrag(bar, t);
 // ---- drag to reorder tabs ----------------------------------------------------
 // Follows the splitter drag rules: window-level capture listeners for the drag,
 // absolute clientX, NO setPointerCapture (breaks under remote-control software).

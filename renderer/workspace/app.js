@@ -3,6 +3,7 @@ import * as tree from './ui/tree.js';
 import * as viewer from './ui/viewer.js';
 import * as terms from './ui/terms.js';
 import * as finder from './ui/finder.js';
+import * as diffpane from './ui/diff.js';
 
 const wsId = new URLSearchParams(location.search).get('id');
 let ws = null;
@@ -19,6 +20,7 @@ function persistNow() {
     expandedFolders: tree.expandedPaths(),
     termHeight: Math.round(termsRect.height),
     termWidth: Math.round(termsRect.width),
+    viewer: viewer.snapshot(),
   });
 }
 const persist = debounce(persistNow, 350);
@@ -57,9 +59,8 @@ function wireLayoutToggle() {
       toast('Logo update failed: ' + (e.message || e), 'err');
     }
   };
-  $('#btn-logo').onclick = changeLogo;
   const logoImg = $('#ws-logo');
-  logoImg.title = 'Change this workspace’s logo';
+  logoImg.title = 'Change this workspace’s logo — window icon updates live; re-pin the taskbar shortcut to refresh it';
   logoImg.onclick = changeLogo;
 
   // drop an image ON the logo to set it (drag a png from the desktop → logo)
@@ -197,13 +198,33 @@ async function main() {
   wireLayoutToggle();
 
   viewer.init(persist);
-  tree.init(ws.repoPath, (path, name) => viewer.open(path, name), state.expandedFolders);
+  viewer.restore(state.viewer?.openFiles || [], state.viewer?.activePath);
+  // git diff review pane: pinned "Changes" tab + Diff toolbar button
+  diffpane.init(ws.repoPath, (p, n) => viewer.open(p, n));
+  viewer.setPinnedTab('⟳ Changes', (on) => (on ? diffpane.show() : diffpane.hide()));
+  $('#btn-diff').onclick = () => viewer.toggleChangesTab();
+  // second tree:changed subscriber alongside tree.js — preload wraps each cb in its
+  // own ipcRenderer.on listener, so both fire
+  vs.onTreeChanged(() => viewer.onFilesChanged());
+  tree.init(ws.repoPath, (path, name) => viewer.open(path, name), state.expandedFolders, {
+    // tabs are keyed by fsList/fsRead paths (backslashes); the tree joins with '/'
+    onRename: (from, to) => viewer.renameTab(from.replace(/\//g, '\\'), to.replace(/\//g, '\\')),
+    // close every open tab at or under the deleted path (separator/case-insensitive)
+    onDeleted: (abs) => {
+      const gone = abs.replace(/[\\/]+$/, '').replace(/\\/g, '/').toLowerCase() + '/';
+      for (const f of viewer.snapshot().openFiles) {
+        const open = f.path.replace(/\\/g, '/').toLowerCase();
+        if (open + '/' === gone || open.startsWith(gone)) viewer.closeTab(f.path, { force: true });
+      }
+    },
+  });
   finder.init(ws.repoPath, (path, name) => viewer.open(path, name));
 
   const shot = new URLSearchParams(location.search).get('shot');
   terms.init({
     wsId,
     repoPath: ws.repoPath,
+    openFile: (p, n, l) => viewer.openAt(p, n, l), // file:line links → preview
     savedTerminals: state.terminals,
     autoResume: $('#auto-resume').checked,
     persist,

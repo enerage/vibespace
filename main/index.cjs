@@ -13,8 +13,11 @@ const ptyhost = require('./ptyhost.cjs');
 const sessions = require('./sessions.cjs');
 const status = require('./status.cjs');
 const gitstatus = require('./gitstatus.cjs');
+const gitdiff = require('./gitdiff.cjs');
+const fsops = require('./fsops.cjs');
 const srcstate = require('./srcstate.cjs');
 const treewatch = require('./treewatch.cjs');
+const broadcast = require('./broadcast.cjs');
 const updater = require('./updater.cjs');
 
 // ---------- CLI args ----------
@@ -550,7 +553,22 @@ function initIpc() {
   });
 
   // fs
+  // The repo root of the window that sent the event — tree file ops are jailed
+  // to it, so a renderer can only ever touch its own workspace's files.
+  const repoFor = (e) => {
+    const win = BrowserWindow.fromWebContents(e.sender);
+    const wsId = win && winInfo.get(win.id)?.wsId;
+    const ws = wsId && workspaces.get(wsId);
+    return ws ? ws.repoPath : null;
+  };
   ipcMain.handle('git:status', (e, repoPath) => (repoPath ? gitstatus.status(repoPath) : null));
+  // Changes tab: HEAD-vs-worktree content pairs (null = no git / not a repo);
+  // the requested repoPath must be the sender's own workspace (jailed)
+  ipcMain.handle('git:diff', async (e, repoPath, opts) => {
+    const root = repoFor(e);
+    if (!root || !U.jailed(root, repoPath)) return null;
+    return gitdiff.diff(root, opts);
+  });
   ipcMain.handle('fs:list', (e, dir) => {
     if (!fs.existsSync(dir)) return { entries: [] };
     const out = [];
@@ -579,19 +597,59 @@ function initIpc() {
     return { content: buf.toString('utf8'), size: st.size };
   });
   ipcMain.handle('fs:write', (e, file, content) => {
-    fs.writeFileSync(file, content, 'utf8');
+    const root = repoFor(e);
+    const resolved = root && U.jailed(root, file);
+    if (!resolved) throw new Error('outside workspace');
+    fs.writeFileSync(resolved, content, 'utf8');
     return true;
   });
-  // drag-and-drop into the tree: copy files into a folder, never overwriting
+  // drag-and-drop into the tree: copy files into a folder, never overwriting.
+  // Sources stay arbitrary absolute paths (that's the drag origin) — only the
+  // destination folder is jailed to the workspace.
   ipcMain.handle('fs:copyInto', (e, { sources, destDir }) => {
-    if (!Array.isArray(sources) || !destDir || !fs.existsSync(destDir)) return { copied: [], error: 'bad args' };
+    const dest = U.jailed(repoFor(e), destDir);
+    if (!Array.isArray(sources) || !dest || !fs.existsSync(dest)) return { copied: [], error: 'bad args' };
     const copied = [];
     for (const s of sources) {
       try {
-        if (typeof s === 'string' && fs.existsSync(s) && fs.statSync(s).isFile()) copied.push(U.copyIn(s, destDir));
+        if (typeof s === 'string' && fs.existsSync(s) && fs.statSync(s).isFile()) copied.push(U.copyIn(s, dest));
       } catch {}
     }
     return { copied };
+  });
+  // tree file operations: create / mkdir / rename / delete (to Recycle Bin).
+  // Each busts the git-status cache so tree colors refresh right away.
+  ipcMain.handle('fs:create', (e, { dirPath, fileName }) => {
+    const root = repoFor(e);
+    if (!root) throw new Error('no workspace');
+    const res = fsops.create(root, dirPath, fileName);
+    gitstatus.bust(root);
+    gitdiff.bust(root);
+    return res;
+  });
+  ipcMain.handle('fs:mkdir', (e, { dirPath, name }) => {
+    const root = repoFor(e);
+    if (!root) throw new Error('no workspace');
+    const res = fsops.mkdir(root, dirPath, name);
+    gitstatus.bust(root);
+    gitdiff.bust(root);
+    return res;
+  });
+  ipcMain.handle('fs:rename', (e, { from, to }) => {
+    const root = repoFor(e);
+    if (!root) throw new Error('no workspace');
+    const res = fsops.rename(root, from, to);
+    gitstatus.bust(root);
+    gitdiff.bust(root);
+    return res;
+  });
+  ipcMain.handle('fs:delete', async (e, { path }) => {
+    const root = repoFor(e);
+    if (!root) throw new Error('no workspace');
+    const res = await fsops.remove(root, path);
+    gitstatus.bust(root);
+    gitdiff.bust(root);
+    return res;
   });
   ipcMain.handle('fs:reveal', (e, file) => { shell.showItemInFolder(file); return true; });
 
@@ -694,6 +752,21 @@ function initIpc() {
       if (!win.isDestroyed()) win.webContents.send('tree:changed');
     }
   });
+  // cross-workspace broadcast: a command written to <dataRoot>/broadcast/cmd.txt
+  // by ANY window is typed into the claude tabs of EVERY open workspace
+  ipcMain.handle('broadcast:send', (e, command) => {
+    const cmd = String(command || '').trim();
+    if (!cmd) return { ok: false };
+    logger.info(`broadcast: ${cmd}`);
+    broadcast.send(cmd);
+    return { ok: true };
+  });
+  broadcast.onData((cmd) => {
+    logger.info(`broadcast received: ${cmd}`);
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) win.webContents.send('broadcast:run', cmd);
+    }
+  });
 }
 
 // periodic state save (captures session ids discovered after the last renderer push)
@@ -708,6 +781,8 @@ function initStateFlush() {
   // new-VibeSpace-code detection (dev only; no-op packaged)
   probeSrc();
   setInterval(probeSrc, 30000).unref?.();
+  // cross-workspace agent broadcasts (watched in every workspace process)
+  broadcast.start();
 }
 
 // ---------- boot ----------

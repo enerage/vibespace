@@ -2,14 +2,62 @@
 
 Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 
+## [0.6.0] — 2026-09-27 (evening)
+
+### Added
+- **Editor tabs**: the preview pane is now a tabbed editor — every opened file
+  gets a pill (dirty dot, × and middle-click close with an unsaved-changes
+  confirm), each tab remembers its own cursor/scroll and Edit/Read-only state,
+  and open tabs + the active one survive window reloads via workspace state.
+  Files edited on disk by agents refresh in place (unsaved edits always win);
+  files deleted on disk close silently. Binary/too-large files open as
+  placeholder tabs.
+- **Tree file operations**: right-click the tree — New file / New folder
+  (rows, folders, and the pane background for repo root), Rename (F2 too), and
+  Delete to the **Recycle Bin** with a confirm. Name entry uses a small modal
+  (Electron has no native prompt). Renames rekey open editor tabs (unsaved
+  edits follow the file); deletes force-close tabs under the path. Git colors
+  refresh immediately after each operation.
+- **Clickable file:line links in terminals**: claude's output mentioning
+  `D:\repo\src\app.js:42` or `src/app.js:42` lights up — click to open the
+  file in the preview at that line (relative paths resolve against the
+  terminal's cwd, then the repo root; quoted paths with spaces work). Uses
+  xterm's link-provider API, no new dependency. Known limit: unquoted paths
+  containing spaces don't linkify.
+- **⟳ Changes tab (git diff review)**: a pinned tab at the end of the strip
+  (or the Diff toolbar button) opens a side-by-side Monaco diff of all
+  uncommitted changes — worktree + index vs HEAD, untracked included, binary
+  and huge files skipped, CRLF normalized so Windows checkouts diff cleanly.
+  Per-file "open in tab" and refresh; 3 s cache, busted by tree operations.
+
+### Changed
+- **fs IPC is now jailed to the workspace**: `fs:write` and `fs:copyInto`
+  destinations must live inside the sending window's own repo root (path
+  resolve + case-insensitive prefix check) — previously any absolute path was
+  writable. New `fs:create/mkdir/rename/delete` channels carry the same jail
+  (`main/util.cjs` `jailed()`). Smoke grows to 42 checks: jail accept/reject,
+  fsops round-trip incl. a real Recycle-Bin move, and a temp-git-repo diff
+  fixture.
+
+## [0.6.0] — 2026-09-28
+
+### Added — "update all docs" system
+- **📨 Sync Docs button** (workspace topbar): broadcasts `/sync-docs` to every
+  Claude agent tab in every open workspace — one click, all agents sync. Transport
+  is a watched trigger file (`~/.vibespace/broadcast/cmd.txt`), so workspaces
+  running as separate processes all receive it, including the sender's own agents.
+- **`/sync-docs` skill** (`.claude/skills/sync-docs`): the docs ritual — CHANGELOG,
+  DECISIONS.md (new, flat decision log), CLAUDE.md lessons, TODO re-triage, README
+  drift check, and agent memory updates. Docs and memory only, never code.
+  Copy the skill folder into other repos to enroll them.
+
 ## [0.5.5] — 2026-09-27 (afternoon, part 2)
+
+### Added
 - **Drag to reorder tabs**: grab a tab and drop it anywhere in the bar — order
   persists in the workspace state. Follows the splitter drag rules (window
   capture listeners, no `setPointerCapture`); a 4 px threshold keeps clicks
   and the double-click rename from ever starting a drag.
-
-
-### Added
 - **Drag & drop into the tree**: drop files from Explorer onto any folder row
   (green highlight) or the tree background (repo root) — files are COPIED in,
   never overwriting (`name (2).ext` collision rename). The live tree watcher
@@ -18,6 +66,9 @@ Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
   logo — same flow as the 🏷 button / clicking the logo.
 
 ### Changed
+- **Removed the duplicate 🏷 Logo… header button** — the top-left workspace
+  logo already changes it on click (and accepts dropped images); the button's
+  re-pin hint moved into the logo's tooltip.
 - **Red light no longer cries wolf**: the idle "waiting for your input" nudge
   (fires ~60 s after an agent finishes) used to flip finished tabs from green
   to red, making both colors mean the same thing. The Notification hook now

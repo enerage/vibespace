@@ -20,8 +20,8 @@
         <input type="checkbox" id="auto-resume" checked />
         <span>auto-resume agents on open</span>
       </label>
+      <button id="btn-docs-sync" class="btn small" title="Broadcast /sync-docs to every Claude agent in every open workspace — they all update their repo docs, decisions, and memory">📨 Sync Docs</button>
       <button id="btn-app-restart" class="btn small hidden" title="VibeSpace code changed — restart to pick it up (every agent conversation resumes)">↻ Restart VibeSpace</button>
-      <button id="btn-logo" class="btn small ghost" title="Change this workspace's logo — window icon updates live; re-pin the taskbar shortcut to refresh it">🏷 Logo…</button>
       <button id="btn-layout" class="btn small ghost" title="Terminals are at the bottom — click to move them to the right side">⇄ Layout</button>
       <button id="btn-update" class="btn primary" title="Run claude update once, then relaunch every agent on the new version, resuming each conversation">
         ⟳ Update &amp; Restart All
@@ -45,8 +45,11 @@
               <button id="btn-edit" class="btn small">Edit</button>
               <button id="btn-save" class="btn small" disabled>Save</button>
               <button id="btn-reveal" class="btn small ghost" title="Reveal in Explorer">⌕</button>
+              <button id="btn-diff" class="btn small ghost" title="Review uncommitted changes (Changes tab)">Diff</button>
             </div>
           </div>
+          <div id="file-tabbar"><div id="file-tabs"></div></div>
+          <div id="diff-host" class="hidden"><div id="diff-files"></div><div id="diff-editor"></div><div id="diff-empty"><p>No uncommitted changes.</p></div></div>
           <div id="monaco-host"></div>
           <div id="viewer-placeholder">
             <p>Select a file from the tree to preview it.</p>
@@ -81,6 +84,17 @@
       <h3 id="update-title">Updating Claude Code…</h3>
       <pre id="update-log"></pre>
       <div id="update-status"></div>
+    </div>
+  </div>
+
+  <div id="ask-modal" class="hidden">
+    <div class="ask-box">
+      <p id="ask-title"></p>
+      <input id="ask-input" type="text" spellcheck="false" />
+      <div class="ask-row">
+        <button id="ask-cancel" class="btn small">Cancel</button>
+        <button id="ask-ok" class="btn small primary">OK</button>
+      </div>
     </div>
   </div>
 

@@ -246,6 +246,114 @@ async function runSmoke() {
     try { fs.rmSync(srcDir, { recursive: true, force: true }); } catch {}
   }
 
+  // 16. tree file operations: jail guard + fsops create/mkdir/rename/remove
+  {
+    const os = require('node:os');
+    const fsops = require('./fsops.cjs');
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'vibespace-fsops-'));
+    const nested = path.join(root, 'sub');
+    fs.mkdirSync(nested);
+
+    // jail guard
+    const inside = path.join(root, 'sub', 'x.txt');
+    check('jailed accepts nested path', U.jailed(root, inside) === path.resolve(inside), U.jailed(root, inside) || 'null');
+    check('jailed rejects .. escape', U.jailed(root, path.join(root, '..', 'escape.txt')) === null);
+    const sibling = path.join(path.dirname(root), path.basename(root) + 'suffix'); // D:\a vs D:\ab
+    check('jailed rejects sibling-prefix path', U.jailed(root, sibling) === null, sibling);
+    const otherDrive = (root[0].toUpperCase() === 'Q' ? 'Z' : 'Q') + ':\\elsewhere\\file.txt';
+    check('jailed rejects other-drive path', U.jailed(root, otherDrive) === null, otherDrive);
+
+    // create + guards
+    const made = fsops.create(root, nested, 'newfile.ts');
+    check('fsops.create makes empty file', made.path === path.join(nested, 'newfile.ts') && fs.existsSync(made.path) && fs.statSync(made.path).size === 0, made.path);
+    let threw = false; try { fsops.create(root, nested, 'newfile.ts'); } catch { threw = true; }
+    check('fsops.create refuses existing target', threw);
+    threw = false; try { fsops.create(root, nested, 'a/b.ts'); } catch { threw = true; }
+    check('fsops.create refuses name with separator', threw);
+    threw = false; try { fsops.create(root, path.dirname(root), 'x.ts'); } catch { threw = true; }
+    check('fsops.create refuses dir outside root', threw);
+
+    // mkdir
+    const md = fsops.mkdir(root, nested, 'newdir');
+    check('fsops.mkdir makes dir', fs.existsSync(md.path) && fs.statSync(md.path).isDirectory(), md.path);
+
+    // rename + guard
+    const renamed = path.join(nested, 'renamed.ts');
+    check('fsops.rename moves inside jail', fsops.rename(root, made.path, renamed) === true && fs.existsSync(renamed) && !fs.existsSync(made.path));
+    threw = false; try { fsops.rename(root, renamed, path.join(path.dirname(root), 'stolen.ts')); } catch { threw = true; }
+    check('fsops.rename refuses destination outside root', threw);
+
+    // remove: real Recycle-Bin move (smoke runs inside app whenReady, so
+    // shell.trashItem is available); guards are sync throws.
+    let gone = null;
+    try { gone = await fsops.remove(root, renamed); } catch (err) { gone = err; }
+    check('fsops.remove trashes via shell.trashItem', gone === true && !fs.existsSync(renamed), gone instanceof Error ? gone.message : 'ok');
+    threw = false; try { await fsops.remove(root, path.join(path.dirname(root), 'other.txt')); } catch { threw = true; }
+    check('fsops.remove refuses outside root', threw);
+    threw = false; try { await fsops.remove(root, path.join(root, 'nope.txt')); } catch { threw = true; }
+    check('fsops.remove refuses nonexistent', threw);
+
+    try { fs.rmSync(root, { recursive: true, force: true }); } catch {}
+  }
+
+  // 17. gitdiff: CRLF normalization + end-to-end pairs on a temp git repo
+  {
+    const os = require('node:os');
+    const gitdiff = require('./gitdiff.cjs');
+    check('gitdiff _normalize strips CRLF', gitdiff._normalize('a\r\nb\r\n') === 'a\nb\n' && gitdiff._normalize('a\nb') === 'a\nb');
+    const gitOk = await new Promise((res) => {
+      const p = require('node:child_process').spawn('git', ['--version'], { windowsHide: true });
+      p.on('error', () => res(false));
+      p.on('close', (c) => res(c === 0));
+    });
+    if (!gitOk) {
+      check('gitdiff end-to-end (git on PATH)', true, 'skipped — git not on PATH');
+    } else {
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), 'vibespace-gitdiff-'));
+      const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'vibespace-nogit-'));
+      const exec = (args) => new Promise((res) => {
+        const p = require('node:child_process').spawn('git', args, { cwd: root, windowsHide: true });
+        p.on('error', () => res(false));
+        p.on('close', (c) => res(c === 0));
+      });
+      await exec(['init']);
+      await exec(['config', 'user.email', 'smoke@vibespace.local']);
+      await exec(['config', 'user.name', 'VibeSpace Smoke']);
+      fs.writeFileSync(path.join(root, 'a.txt'), 'one\r\ntwo\r\n');
+      fs.writeFileSync(path.join(root, 'del.txt'), 'bye');
+      await exec(['add', 'a.txt', 'del.txt']);
+      await exec(['commit', '-m', 'init']);
+      fs.writeFileSync(path.join(root, 'a.txt'), 'one\r\nTWO\r\n'); // modify
+      const d1 = await gitdiff.diff(root);
+      const by1 = Object.fromEntries((d1?.files || []).map(f => [f.rel, f]));
+      check('gitdiff modified pair (normalized)', by1['a.txt'] && by1['a.txt'].status === 'M'
+        && by1['a.txt'].original.includes('two') && by1['a.txt'].modified.includes('TWO')
+        && !by1['a.txt'].original.includes('\r'), JSON.stringify(by1['a.txt'] || null).slice(0, 80));
+      fs.writeFileSync(path.join(root, 'untracked.txt'), 'fresh');
+      fs.rmSync(path.join(root, 'del.txt')); // delete
+      const d2 = await gitdiff.diff(root, { refresh: true });
+      const by2 = Object.fromEntries((d2?.files || []).map(f => [f.rel, f]));
+      check('gitdiff deleted file empty modified', by2['del.txt'] && by2['del.txt'].status === 'D' && by2['del.txt'].modified === '', JSON.stringify(by2['del.txt'] || null));
+      check('gitdiff untracked counts as added', by2['untracked.txt'] && by2['untracked.txt'].status === 'U' && by2['untracked.txt'].original === '' && by2['untracked.txt'].modified === 'fresh', JSON.stringify(by2['untracked.txt'] || null));
+      check('gitdiff non-repo resolves null', (await gitdiff.diff(empty)) === null);
+      try { fs.rmSync(root, { recursive: true, force: true }); fs.rmSync(empty, { recursive: true, force: true }); } catch {}
+    }
+  }
+
+  // 16. cross-workspace broadcast (the /sync-docs transport)
+  {
+    const bc = require('./broadcast.cjs');
+    let got = null;
+    bc.onData((cmd) => { got = cmd; });
+    bc.start();
+    bc.send('/sync-docs');
+    const deadline = Date.now() + 3000;
+    while (!got && Date.now() < deadline) await new Promise(r => setTimeout(r, 100));
+    check('broadcast send/receive round-trip', got === '/sync-docs', `got=${got}`);
+    bc.stop();
+    try { fs.rmSync(path.dirname(bc._cmdFile()), { recursive: true, force: true }); } catch {}
+  }
+
   // 8. pty echo (powershell)
   const echo = await ptyEchoTest();
   check('pty spawn + echo (powershell)', echo.ok, echo.detail);

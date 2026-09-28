@@ -48,4 +48,10 @@ function status(repoPath, ttlMs = 3000) {
   });
 }
 
-module.exports = { status, _parsePorcelain: parsePorcelain };
+// Drop the cached entry for a repo (tree file ops just changed the worktree) so
+// the next git:status re-spawns immediately instead of serving up to 3 s stale.
+function bust(repoPath) {
+  cache.delete(repoPath);
+}
+
+module.exports = { status, bust, _parsePorcelain: parsePorcelain };

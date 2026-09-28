@@ -70,13 +70,95 @@ body { margin: 0; background: var(--bg); color: var(--text); font: 13.5px/1.45 "
 #viewer-actions { display: flex; gap: 6px; }
 #monaco-host { flex: 1; min-height: 0; }
 #viewer-placeholder {
-  position: absolute; left: 0; right: 0; top: 34px; bottom: 0;
+  position: absolute; left: 0; right: 0; top: 64px; bottom: 0;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   color: var(--dim); gap: 4px;
 }
 #viewer-placeholder.hidden { display: none; }
 #viewer { position: relative; }
 .dim { color: var(--dim); font-size: 12px; }
+
+/* ---------- editor file tabs (one pill per open file) ---------- */
+#file-tabbar {
+  height: 30px; flex: none;
+  display: flex; align-items: center;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+}
+#file-tabs {
+  flex: 1; min-width: 0;
+  display: flex; align-items: center; gap: 4px;
+  padding: 0 6px;
+  overflow-x: auto;
+}
+#file-tabs::-webkit-scrollbar { height: 3px; }
+#file-tabs::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+.ftab {
+  display: flex; align-items: center; gap: 6px;
+  padding: 3px 6px 3px 10px;
+  border: 1px solid var(--border); border-radius: 7px;
+  background: var(--panel-2);
+  font-size: 12.3px; cursor: pointer; white-space: nowrap;
+  max-width: 180px;
+}
+.ftab.active { border-color: var(--accent); background: #20293a; }
+.ftab .label { overflow: hidden; text-overflow: ellipsis; }
+.ftab .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); margin-left: 4px; flex: none; }
+.ftab .close {
+  width: 16px; height: 16px; border-radius: 4px; flex: none;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--dim); font-size: 11px;
+}
+.ftab .close:hover { background: #3a4048; color: var(--text); }
+.ftab.pinned { margin-left: auto; background: transparent; border-style: dashed; color: var(--dim); }
+.ftab.pinned.active { color: var(--text); border-style: solid; }
+
+/* ---------- git diff review pane (pinned "Changes" tab) ---------- */
+#diff-host { flex: 1; min-height: 0; display: flex; position: relative; }
+#diff-host.hidden { display: none; }
+#diff-files {
+  width: 220px; flex: none; overflow-y: auto;
+  border-right: 1px solid var(--border);
+  padding: 6px 4px; background: var(--panel);
+  user-select: none;
+}
+.diff-head {
+  display: flex; align-items: center; gap: 6px;
+  padding: 2px 6px 6px;
+  font-size: 11px; font-weight: 600; color: var(--dim);
+  letter-spacing: 0.4px; text-transform: uppercase;
+}
+.diff-head .spacer { min-width: 4px; }
+.diff-file {
+  display: flex; align-items: center; gap: 6px;
+  padding: 3px 6px; border-radius: 5px;
+  cursor: pointer; white-space: nowrap; font-size: 12.3px;
+}
+.diff-file:hover { background: #1c2129; }
+.diff-file.active { background: rgba(110, 156, 255, 0.16); color: #b9cfff; }
+.diff-file .st { flex: none; width: 12px; font-size: 11px; font-weight: 700; text-align: center; }
+/* same letters/colors as the tree's git status (git-m/git-a/git-u/git-d) */
+.diff-file .st.git-m { color: #d29222; }
+.diff-file .st.git-a { color: #3fb950; }
+.diff-file .st.git-d { color: #f85149; }
+.diff-file .st.git-u { color: #7ee787; }
+.diff-file .rel { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.diff-file .mini {
+  flex: none; visibility: hidden;
+  width: 16px; height: 16px; border-radius: 4px;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--dim); font-size: 11px;
+}
+.diff-file:hover .mini { visibility: visible; }
+.diff-file .mini:hover { background: #3a4048; color: var(--text); }
+#diff-editor { flex: 1; min-height: 0; }
+#diff-editor.hidden { display: none; }
+#diff-empty {
+  position: absolute; left: 0; right: 0; top: 0; bottom: 0;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--dim);
+}
 
 /* ---------- file tree ---------- */
 #tree { user-select: none; }
@@ -235,6 +317,45 @@ body { margin: 0; background: var(--bg); color: var(--text); font: 13.5px/1.45 "
 .finder-item .finder-dir { color: var(--dim); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; }
 .finder-item.sel { background: rgba(110, 156, 255, 0.16); }
 .finder-item.sel .finder-name { color: #b9cfff; }
+
+/* ---------- ask (rename / new file) modal — Electron has no window.prompt ---------- */
+#ask-modal {
+  position: fixed; inset: 0; z-index: 120;
+  background: rgba(4, 8, 14, 0.66);
+  display: flex; align-items: center; justify-content: center;
+  backdrop-filter: blur(2px);
+}
+#ask-modal.hidden { display: none; }
+.ask-box {
+  width: min(420px, 90vw);
+  background: var(--panel);
+  border: 1px solid var(--border); border-radius: 12px;
+  padding: 16px 18px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.55);
+}
+#ask-title { margin: 0 0 10px; font-size: 14px; font-weight: 600; }
+#ask-input {
+  width: 100%; padding: 8px 10px;
+  background: var(--bg); color: var(--text);
+  border: 1px solid var(--border); border-radius: 8px;
+  font: 13px Consolas, "Cascadia Mono", monospace; outline: none;
+}
+#ask-input:focus { border-color: var(--accent); }
+.ask-row { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+
+/* ---------- tree context menu ---------- */
+.ctx-menu {
+  position: absolute; z-index: 300;
+  min-width: 180px; padding: 4px;
+  background: var(--panel);
+  border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: 0 12px 32px rgba(0,0,0,0.5);
+  font-size: 12.5px;
+}
+.ctx-item { padding: 6px 10px; border-radius: 6px; cursor: pointer; white-space: nowrap; }
+.ctx-item:hover { background: rgba(110, 156, 255, 0.16); }
+.ctx-item.danger { color: var(--danger); }
+.ctx-item.danger:hover { background: rgba(248, 81, 73, 0.14); }
 
 /* ---------- toasts ---------- */
 #toasts { position: fixed; right: 16px; bottom: 16px; display: flex; flex-direction: column; gap: 8px; z-index: 200; }
