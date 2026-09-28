@@ -2,7 +2,7 @@
 const os = require('node:os');
 const path = require('node:path');
 const fs = require('node:fs');
-const { execSync } = require('node:child_process');
+const { execFileSync } = require('node:child_process');
 
 const ROOT = path.resolve(__dirname, '..');
 
@@ -115,9 +115,16 @@ function jailed(repoRoot, p) {
 // spawned from stripped environments (agent shells etc.) inherit a gutted PATH —
 // rebuilding it from the registry gives every pty and every spawned child the
 // full user+machine PATH regardless of how the window was launched.
+// reg.exe is called by ABSOLUTE path, never by name: under exactly the broken PATH
+// this function exists to repair, a bare `reg` is not found, the read silently
+// returns '' and the "rebuild" keeps only the mangled leftovers.
+function regExe() {
+  return path.join(process.env.SystemRoot || process.env.windir || 'C:\\Windows', 'System32', 'reg.exe');
+}
+
 function readRegistryPath(key) {
   try {
-    const out = execSync(`reg query "${key}" /v PATH`, { encoding: 'utf8', windowsHide: true, timeout: 4000 });
+    const out = execFileSync(regExe(), ['query', key, '/v', 'PATH'], { encoding: 'utf8', windowsHide: true, timeout: 4000 });
     const m = out.match(/^\s*PATH\s+REG_(?:EXPAND_)?SZ\s+(.+)$/mi);
     return m ? m[1].trim() : '';
   } catch {
@@ -137,7 +144,9 @@ function rebuildPath(inherited = process.env.PATH || '') {
   for (const p of `${machine};${user};${inherited}`.split(';')) {
     const t = p.trim();
     const key = t.toLowerCase().replace(/\\+$/, '');
-    if (!t || seen.has(key)) continue;
+    // "C:Windows" is drive-RELATIVE and statSync resolves it to C:\Windows, so the
+    // exists-check alone would keep it — require a real absolute path first
+    if (!t || seen.has(key) || !path.win32.isAbsolute(t)) continue;
     // drop entries that don't exist — mangled ones ("C:Windows", backslashes eaten
     // by an agent-spawned chain) and leftovers from unset %vars% die here
     try {

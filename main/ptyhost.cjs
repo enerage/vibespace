@@ -48,10 +48,13 @@ function ensureClaudeOnPath(env) {
 // system-critical entries so every VibeSpace terminal is fully usable regardless of
 // how its window was launched.
 function repairPath(env) {
+  // built with path.join, not literals: 'C:\Windows\...\v1.0' in a JS string is
+  // "C:Windows...<vertical-tab>1.0" — this very function was injecting mangled entries
+  const sysRoot = process.env.SystemRoot || process.env.windir || 'C:\\Windows';
   const mustHave = [
-    'C:\Windows\System32',
-    'C:\Windows\System32\WindowsPowerShell\v1.0',
-    'C:\Windows',
+    path.join(sysRoot, 'System32'),
+    path.join(sysRoot, 'System32', 'WindowsPowerShell', 'v1.0'),
+    sysRoot,
   ];
   const parts = (env.PATH || '').split(';').map(s => s.trim()).filter(Boolean);
   const have = new Set(parts.map(p => p.toLowerCase()));

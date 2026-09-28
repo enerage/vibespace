@@ -39,6 +39,22 @@ Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
   fsops round-trip incl. a real Recycle-Bin move, and a temp-git-repo diff
   fixture.
 
+## [0.6.2] — 2026-09-28 (evening)
+
+### Fixed — 0.6.1's PATH rebuild silently did nothing in the case it was for
+- **`reg` was called by name**, so from a mangled PATH (the exact case the rebuild
+  exists for) it wasn't found, the registry read returned '' and only the inherited
+  junk survived. Now `execFileSync` on `%SystemRoot%\System32\reg.exe`, no shell.
+- **`repairPath` itself injected the mangled entries**: its literals
+  `'C:\Windows\System32\WindowsPowerShell\v1.0'` are JS escapes ("C:Windows…" plus
+  a vertical-tab char from `\v`). Now built with `path.join` from `SystemRoot`.
+- **Drive-relative entries dropped**: `C:Windows` passed the exists-check (statSync
+  resolves it to C:\Windows); rebuild now requires `path.win32.isAbsolute`.
+- Smoke: new check rebuilds FROM a mangled PATH — the old check ran from a healthy
+  shell where `reg` resolved, which is why 0.6.1 passed while broken. 45/45.
+- Symptom it fixes: agent terminals with a 5-entry PATH (`C:WindowsSystem32…`),
+  node/npm/pnpm/python/git not found by name. Needs one VibeSpace restart.
+
 ## [0.6.1] — 2026-09-28
 
 ### Fixed — the stripped/mangled PATH class of bugs, for real

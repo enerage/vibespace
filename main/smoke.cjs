@@ -360,6 +360,12 @@ async function runSmoke() {
     const parts = rebuilt.split(';');
     const dupes = parts.length !== new Set(parts.map(p => p.toLowerCase())).size;
     check('PATH rebuild: registry entries + dedupe', rebuilt.toLowerCase().includes('windows\\system32') && !dupes && !parts.includes('junk'), `${parts.length} entries`);
+    // the real-world case: rebuild must work FROM a mangled PATH (reg.exe unreachable by name)
+    const saved = process.env.PATH;
+    process.env.PATH = 'C:Windows;C:WindowsSystem32';
+    let fromMangled = '';
+    try { fromMangled = U.rebuildPath(); } finally { process.env.PATH = saved; }
+    check('PATH rebuild works from a mangled PATH', fromMangled.toLowerCase().includes('windows\\system32') && fromMangled.split(';').length > 3 && !fromMangled.split(';').includes('C:Windows'), `${fromMangled.split(';').length} entries`);
   }
 
   // 8. pty echo (powershell)
