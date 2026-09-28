@@ -405,6 +405,36 @@ async function runSmoke() {
     check('default icons are per-workspace letter marks', ha !== hb && ha !== happ && fs.statSync(a).size > 1000, `${ha.slice(0, 8)} vs ${hb.slice(0, 8)}`);
   }
 
+  // 21. terminal env has ONE path key and resolves user-PATH tools by name
+  //     (the Path/PATH duplicate-key bug that broke node/python/MCP servers)
+  {
+    const e = ptyhost._withSinglePath({ Path: 'full', PATH: 'stripped', path: 'x', Other: '1' }, 'final');
+    const pathKeys = Object.keys(e).filter(k => k.toUpperCase() === 'PATH');
+    check('pty env collapses to a single Path key', pathKeys.length === 1 && e.Path === 'final' && e.Other === '1', pathKeys.join(','));
+    const r = await new Promise((resolve) => {
+      let buf = '';
+      const termId = 'smokeenv';
+      const marker = `__ENV_${Date.now()}__`;
+      const timer = setTimeout(() => { ptyhost.onData(() => {}); ptyhost.kill(termId); resolve({ ok: false, detail: 'timeout: ' + buf.slice(-200) }); }, 20000);
+      ptyhost.onData((id, chunk) => {
+        if (id !== termId) return;
+        buf += chunk;
+        const flat = buf.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '').replace(/\r?\n/g, '');
+        // the typed command echoes the marker too; the OUTPUT is "NODE=<path>|…"
+        // with no quote after "=" — wait for that form specifically
+        const m = flat.match(new RegExp(marker + 'NODE=([^"|]*)\\|NPMDIR=(\\d+)\\|' + marker + 'END'));
+        if (!m) return;
+        clearTimeout(timer);
+        ptyhost.onData(() => {});
+        ptyhost.kill(termId);
+        resolve({ ok: /node\.exe$/i.test(m[1].trim()) && Number(m[2]) > 0, detail: `node=${m[1].trim() || 'NOT FOUND'} npmDirsOnPath=${m[2]}` });
+      });
+      try { ptyhost.create(termId, U.BIN_ROOT, 200, 30); } catch (err) { clearTimeout(timer); resolve({ ok: false, detail: 'spawn: ' + err.message }); return; }
+      setTimeout(() => ptyhost.write(termId, `Write-Output ("${marker}NODE=" + (Get-Command node -ErrorAction SilentlyContinue).Source + "|NPMDIR=" + (($env:Path -split ';') -match 'Roaming\\\\npm').Count + "|${marker}END")\r`), 900);
+    });
+    check('terminal resolves node by name (full user PATH reaches ptys)', r.ok, r.detail);
+  }
+
   // 8. pty echo (powershell)
   const echo = await ptyEchoTest();
   check('pty spawn + echo (powershell)', echo.ok, echo.detail);

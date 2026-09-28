@@ -34,10 +34,33 @@ function available() {
   return Boolean(pty);
 }
 
+// Windows stores the variable as "Path"; process.env is case-insensitive, but a
+// COPY ({ ...process.env }) is a plain object where "Path" and "PATH" are two
+// different keys. Writing env.PATH on the copy used to ADD a second, stripped
+// PATH next to the full "Path" — and the stripped one won in the child's
+// environment block (the "node/python/mcp-postgres not found in VibeSpace
+// terminals" bug, 2026-09-29). Always collapse to ONE key.
+function withSinglePath(env, value) {
+  for (const k of Object.keys(env)) {
+    if (k.toUpperCase() === 'PATH') delete env[k];
+  }
+  env.Path = value;
+  return env;
+}
+
+function readPath(env) {
+  for (const k of Object.keys(env)) {
+    if (k.toUpperCase() === 'PATH' && env[k]) return env[k];
+  }
+  return '';
+}
+
 function ensureClaudeOnPath(env) {
   const claudeDir = path.join(os.homedir(), '.local', 'bin');
   if (fs.existsSync(claudeDir)) {
-    env.PATH = `${claudeDir};${env.PATH || ''}`;
+    const cur = readPath(env);
+    const already = cur.toLowerCase().split(';').some(p => p.trim().replace(/\\+$/, '') === claudeDir.toLowerCase());
+    if (!already) withSinglePath(env, `${claudeDir};${cur}`);
   }
   return env;
 }
@@ -56,19 +79,21 @@ function repairPath(env) {
     path.join(sysRoot, 'System32', 'WindowsPowerShell', 'v1.0'),
     sysRoot,
   ];
-  const parts = (env.PATH || '').split(';').map(s => s.trim()).filter(Boolean);
+  const parts = readPath(env).split(';').map(s => s.trim()).filter(Boolean);
   const have = new Set(parts.map(p => p.toLowerCase()));
   for (const dir of mustHave) {
     if (!have.has(dir.toLowerCase())) parts.unshift(dir);
   }
-  env.PATH = parts.join(';');
-  return env;
+  return withSinglePath(env, parts.join(';'));
 }
 
 function create(termId, cwd, cols = 120, rows = 30, wsId = null) {
   if (!pty) throw new Error('node-pty is not available — run: npm install && npm run rebuild');
   if (sessions.has(termId)) kill(termId);
-  const env = repairPath(ensureClaudeOnPath({ ...process.env, TERM: 'xterm-256color', COLORTERM: 'truecolor' }));
+  // start from ONE path key holding the full value (process.env.PATH reads the
+  // real, registry-rebuilt value case-insensitively)
+  const base = withSinglePath({ ...process.env, TERM: 'xterm-256color', COLORTERM: 'truecolor' }, process.env.PATH || '');
+  const env = repairPath(ensureClaudeOnPath(base));
   // claude hooks (injected via `claude --settings`) append working|waiting|done to
   // this file; main watches the directory and turns it into tab status lights
   let statusFile = null;
@@ -183,6 +208,7 @@ module.exports = {
   alive,
   list,
   busyNow,
+  _withSinglePath: withSinglePath,
   onData: (fn) => { dataListener = fn; },
   onExit: (fn) => { exitListener = fn; },
 };

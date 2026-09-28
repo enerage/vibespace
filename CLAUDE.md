@@ -35,6 +35,12 @@ Knowledge is tracked **as we go**, never batched for later:
   If you give both panes grow/shrink, the divider stops tracking the pointer 1:1.
 - **xterm refit is throttled** (`terms.js`: 120 ms during drags, once on release).
   Per-pixel `fit()` → pty resize → ConPTY reflow is a visible storm.
+- **Env copies on Windows: `Path`, not `PATH`.** `process.env` is case-insensitive,
+  but `{ ...process.env }` is a plain object — writing `env.PATH` on the copy adds
+  a SECOND key and the child may see the wrong one. Always go through ptyhost's
+  `withSinglePath`/`readPath`. This one bug caused a day of "node/python/MCP not
+  found in VibeSpace terminals" (2026-09-29). Also: never write Windows paths as JS
+  string literals (`'C:\Windows'` → `C:Windows`); build them with `path.join`.
 - **Right-click belongs to the app when it tracks the mouse.** Claude Code turns on
   mouse tracking after its trust screen and pastes on right-click itself; our
   contextmenu paste must skip when `term.modes.mouseTrackingMode !== 'none'` or

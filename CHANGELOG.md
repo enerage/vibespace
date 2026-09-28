@@ -69,6 +69,21 @@ Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 - Symptom it fixes: agent terminals with a 5-entry PATH (`C:WindowsSystem32…`),
   node/npm/pnpm/python/git not found by name. Needs one VibeSpace restart.
 
+## [0.6.9] — 2026-09-29
+
+### Fixed — the actual cause of "node / python / MCP servers not found" in terminals
+- ptyhost copied the environment (`{ ...process.env }`) and then read/wrote
+  `env.PATH`. On Windows the variable is `Path`; in a plain object copy `Path` and
+  `PATH` are **two keys**, so every terminal got the full `Path` *plus* a stripped
+  `PATH` (`.local\bin` + 3 System dirs) — and the stripped one won. Result: node,
+  python, pnpm and stdio MCP servers launched by bare name (`mcp-postgres`, `node
+  …/index.js` → pg-*, raze, reddit-rss "CONNECTION_CLOSED") all failed inside
+  VibeSpace terminals. The 0.6.1 registry rebuild was correct but never reached
+  ptys because of this. Now the pty env always has exactly one `Path` key.
+- Smoke: 50 — incl. a real pty that must resolve `node` by name with the user npm
+  dir on PATH, launched from a deliberately stripped shell.
+- Existing terminals keep their broken env until their window is restarted.
+
 ## [0.6.8] — 2026-09-29
 
 ### Changed — attention toasts name the workspace AND the agent
