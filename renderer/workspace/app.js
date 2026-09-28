@@ -94,9 +94,11 @@ function wireLayoutToggle() {
   // auto-resume (busy agents get interrupted — the confirm says so)
   const restartBtn = $('#btn-app-restart');
   restartBtn.onclick = async () => {
-    const busy = await vs.ptyBusy().catch(() => false);
-    const msg = busy
-      ? 'Restart VibeSpace to pick up the new code?\n\nSome agents look busy right now — they will be interrupted and their conversations resumed on restart.'
+    persistNow(); // main needs fresh tab names/ids to answer who is busy
+    const r = await vs.ptyBusy(wsId).catch(() => null);
+    const names = (r && r.names) || [];
+    const msg = names.length
+      ? `Restart VibeSpace to pick up the new code?\n\n${names.join(', ')} ${names.length > 1 ? 'are' : 'is'} working right now — ${names.length > 1 ? 'they' : 'it'} will be interrupted and resumed on restart.`
       : 'Restart VibeSpace to pick up the new code?\n\nEvery agent conversation resumes automatically.';
     if (!confirm(msg)) return;
     restartBtn.disabled = true;

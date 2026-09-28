@@ -69,6 +69,22 @@ Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 - Symptom it fixes: agent terminals with a 5-entry PATH (`C:WindowsSystem32…`),
   node/npm/pnpm/python/git not found by name. Needs one VibeSpace restart.
 
+## [0.6.11] — 2026-09-29
+
+### Fixed
+- **"Some agents seem busy" false alarm on ↻ Restart** with one idle (green) agent.
+  The check counted any terminal input/output in the last 5 s — and with Claude's
+  mouse tracking on, merely moving the mouse toward the button sends input. Now a
+  tab with a status light is busy only while its light is **working** *and* it's
+  still producing output (a stuck light after an interrupt doesn't count); tabs
+  without a light count recent OUTPUT only. Input never counts. The confirm names
+  the busy agents. Verified via CDP: green + activity → not busy; amber + output →
+  names the agent; amber but silent 16 s → not busy.
+- **Status hooks capped at 10 s** (`timeout: 10`). A cold Git Bash start under load
+  once took ~30 s (Claude's default cap) and, because UserPromptSubmit hooks block
+  the prompt, delayed the user's message by 30 s. Root cause not reproducible
+  (warm runs ~100 ms, broken-env runs too); the cap bounds the worst case.
+
 ## [0.6.10] — 2026-09-29
 
 ### Fixed

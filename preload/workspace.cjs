@@ -32,7 +32,7 @@ contextBridge.exposeInMainWorld('vs', {
 
   restartAll: (wsId) => ipcRenderer.invoke('updater:restartAll', wsId),
   appRestart: () => ipcRenderer.invoke('app:restart'),
-  ptyBusy: () => ipcRenderer.invoke('pty:busy'),
+  ptyBusy: (wsId) => ipcRenderer.invoke('pty:busy', wsId),
   claudeVersion: () => ipcRenderer.invoke('util:claudeVersion'),
   openLogs: () => ipcRenderer.invoke('util:openLogs'),
   pickLogo: () => ipcRenderer.invoke('dialog:pickLogo'),

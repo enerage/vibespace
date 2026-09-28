@@ -129,7 +129,10 @@ function probeSrc() {
 // click-to-focus, and a taskbar overlay badge.
 function ensureHookSettings(wsId) {
   const file = path.join(U.dataRoot(), 'instances', wsId, 'claude-hook-settings.json');
-  const hook = (s) => ({ hooks: [{ type: 'command', command: `echo ${s} >> "$VIBESPACE_TERM_STATUS"` }] });
+  // timeout 10s: UserPromptSubmit hooks BLOCK the prompt until they finish, and a
+  // cold Git Bash start under load once took ~30s (Claude's default cap) —
+  // delaying the user's message. Worst case now: one status update skipped.
+  const hook = (s) => ({ hooks: [{ type: 'command', command: `echo ${s} >> "$VIBESPACE_TERM_STATUS"`, timeout: 10 }] });
   const settings = {
     hooks: {
       UserPromptSubmit: [hook('working')],
@@ -174,6 +177,8 @@ async function ensureOverlayIcons() {
     }
   }
 }
+
+const termStatus = new Map(); // termId -> last hook-reported status (working|waiting|done)
 
 function termName(wsId, termId) {
   const terms = rendererState.get(wsId)?.terminals;
@@ -597,7 +602,24 @@ function initIpc() {
     setTimeout(() => app.exit(0), 200);
     return true;
   });
-  ipcMain.handle('pty:busy', () => ptyhost.busyNow());
+  // "Are my agents busy?" for the restart confirm. Claude tabs trust their status
+  // light (hook-reported): busy only while 'working' AND still producing output
+  // (an interrupted turn can leave 'working' behind with no Stop hook). Plain
+  // shells: recent OUTPUT only. Input never counts — with claude's mouse tracking
+  // on, just moving the mouse toward the button sends input (the false alarm).
+  ipcMain.handle('pty:busy', (e, wsId) => {
+    const terms = rendererState.get(wsId)?.terminals || [];
+    const names = [];
+    for (const t of terms) {
+      const age = ptyhost.outputAge(t.termId);
+      // any tab with a hook-reported status is judged by it (also covers claude
+      // typed by hand in a "+ Terminal" tab); status-less tabs by output alone
+      const st = termStatus.get(t.termId);
+      const busy = st ? st === 'working' && age < 15000 : age < 5000;
+      if (busy) names.push(t.name || t.termId);
+    }
+    return { busy: names.length > 0, names };
+  });
   ipcMain.handle('state:load', (e, id) => loadState(id));
   ipcMain.handle('state:save', (e, id, state) => {
     rendererState.set(id, state);
@@ -782,6 +804,7 @@ function initIpc() {
     }
   });
   ptyhost.onExit((termId) => {
+    termStatus.delete(termId);
     for (const win of BrowserWindow.getAllWindows()) {
       if (!win.isDestroyed()) win.webContents.send('pty:exit', termId);
     }
@@ -793,6 +816,7 @@ function initIpc() {
     }
   });
   status.onData((wsId, termId, st) => {
+    termStatus.set(termId, st);
     logger.info(`term status: ws=${wsId} term=${termId} ${st}`);
     for (const win of workspaceWindowsFor(wsId)) {
       if (!win.isDestroyed()) win.webContents.send('term:status', termId, st);

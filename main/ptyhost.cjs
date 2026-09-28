@@ -11,6 +11,8 @@ try {
 
 const sessions = new Map(); // termId -> IPty
 const lastActivity = new Map(); // termId -> ms of last data in or out (reload guard)
+const lastOutput = new Map(); // termId -> ms of last OUTPUT only (input excluded: with
+// mouse tracking on, merely moving the mouse over claude's terminal sends input)
 const metas = new Map(); // termId -> { cwd, statusFile } — bookkeeping for list()
 const buffers = new Map(); // termId -> { chunks: [], len } — output ring for re-attach
 const BUFFER_CAP = 256 * 1024; // per-terminal bytes kept so a reload can restore scrollback
@@ -118,7 +120,9 @@ function create(termId, cwd, cols = 120, rows = 30, wsId = null) {
   buffers.set(termId, { chunks: [], len: 0 });
   logger.info(`pty spawn: ${termId} cwd=${cwd}`);
   proc.onData(chunk => {
-    lastActivity.set(termId, Date.now());
+    const t = Date.now();
+    lastActivity.set(termId, t);
+    lastOutput.set(termId, t);
     pushBuffer(termId, chunk);
     dataListener(termId, chunk);
   });
@@ -129,6 +133,7 @@ function create(termId, cwd, cols = 120, rows = 30, wsId = null) {
     metas.delete(termId);
     buffers.delete(termId);
     lastActivity.delete(termId);
+    lastOutput.delete(termId);
     logger.info(`pty exit: ${termId} code=${exitCode}`);
     exitListener(termId);
   });
@@ -159,6 +164,7 @@ function kill(termId) {
     metas.delete(termId);
     buffers.delete(termId);
     lastActivity.delete(termId);
+    lastOutput.delete(termId);
     try { s.kill(); } catch {}
   }
 }
@@ -180,6 +186,12 @@ function busyNow({ idleMs = 5000, now = Date.now() } = {}) {
     if (now - ts < idleMs) return true;
   }
   return false;
+}
+
+// ms since this terminal last produced output (Infinity if never / dead)
+function outputAge(termId, now = Date.now()) {
+  const ts = lastOutput.get(termId);
+  return ts ? now - ts : Infinity;
 }
 
 // Live ptys with their buffered output, so a reloaded renderer can re-attach to the
@@ -208,6 +220,7 @@ module.exports = {
   alive,
   list,
   busyNow,
+  outputAge,
   _withSinglePath: withSinglePath,
   onData: (fn) => { dataListener = fn; },
   onExit: (fn) => { exitListener = fn; },
