@@ -90,7 +90,33 @@ function repairPath(env) {
   return withSinglePath(env, parts.join(';'));
 }
 
-function create(termId, cwd, cols = 120, rows = 30, wsId = null) {
+// Every VibeSpace terminal defines a `claude` function that adds our hook settings
+// (and the Remote Control name) unless they're already there, so a claude typed by
+// hand is tracked exactly like one VibeSpace launched: without --settings there is
+// no feed, so no session tracking, lights or phone control, and its conversation
+// would be lost on restart (2026-09-29). Subcommands and print/version/help runs pass
+// through untouched: a `-p` run would otherwise report into this tab's feed and pin
+// its session. Sent as -EncodedCommand: no quoting issues and no execution policy.
+const CLAUDE_SUBCOMMANDS = ['agents', 'attach', 'auth', 'auto-mode', 'config', 'doctor', 'gateway', 'import',
+  'install', 'logs', 'mcp', 'migrate-installer', 'plugin', 'project', 'remote-control', 'respawn', 'rm',
+  'setup-token', 'stop', 'ultrareview', 'update'];
+const CLAUDE_WRAPPER = `
+function global:claude {
+  $exe = Get-Command claude -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+  $a = @($args | ForEach-Object { "$_" })
+  $sub = @(${CLAUDE_SUBCOMMANDS.map(s => `'${s}'`).join(',')})
+  $plain = ($a.Count -gt 0 -and $sub -contains $a[0]) -or @($a | Where-Object { $_ -in '-p','--print','-v','--version','-h','--help' }).Count -gt 0
+  if (-not $plain) {
+    if ($env:VIBESPACE_RC_LABEL -and @($a | Where-Object { $_ -in '--remote-control','--rc' }).Count -eq 0) { $a += '--remote-control', $env:VIBESPACE_RC_LABEL }
+    if ($env:VIBESPACE_CLAUDE_SETTINGS -and $a -notcontains '--settings') { $a += '--settings', $env:VIBESPACE_CLAUDE_SETTINGS }
+  }
+  if ($env:VIBESPACE_CLAUDE_DRYRUN) { Write-Output ('VSCLAUDE[' + ($a -join '|') + ']'); return }
+  if (-not $exe) { Write-Error 'claude is not on PATH'; return }
+  & $exe.Source @a
+}`;
+const shellArgs = () => ['-NoLogo', '-NoExit', '-EncodedCommand', Buffer.from(CLAUDE_WRAPPER, 'utf16le').toString('base64')];
+
+function create(termId, cwd, cols = 120, rows = 30, wsId = null, { settingsPath = null, rcLabel = null } = {}) {
   if (!pty) throw new Error('node-pty is not available — run: npm install && npm run rebuild');
   if (sessions.has(termId)) kill(termId);
   // start from ONE path key holding the full value (process.env.PATH reads the
@@ -114,7 +140,10 @@ function create(termId, cwd, cols = 120, rows = 30, wsId = null) {
   // away mode: claude skips phone pushes while this file exists (presence.cjs owns
   // it machine-wide); read at claude launch, so only new agents pick it up
   env.CLAUDE_CLIENT_PRESENCE_FILE = presence.markerPath();
-  const proc = pty.spawn('powershell.exe', ['-NoLogo'], {
+  // read by the `claude` wrapper (CLAUDE_WRAPPER above)
+  if (settingsPath) env.VIBESPACE_CLAUDE_SETTINGS = settingsPath;
+  if (rcLabel) env.VIBESPACE_RC_LABEL = rcLabel;
+  const proc = pty.spawn('powershell.exe', shellArgs(), {
     name: 'xterm-256color',
     cols,
     rows,

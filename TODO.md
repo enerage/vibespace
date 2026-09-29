@@ -108,8 +108,12 @@ Build in this order. Verify the statusLine and HTTP hooks live in a pty before r
 - [ ] Same for pre-feed agents (started before 0.6.16): still heuristic only.
 - [x] Disambiguate two claude launches within ~2 s of each other — solved for
       feed agents (the id arrives tagged with the tab, no timing involved).
-- [ ] Track claude started *manually* inside a plain `+ Terminal` tab (no
-      `--settings`, so no feed; the heuristic doesn't track it either).
+- [x] Track claude started *manually* inside any tab (0.6.23): the shell's
+      `claude` wrapper (ptyhost `CLAUDE_WRAPPER`) adds `--settings` + `--remote-control`,
+      so the feed tracks it. Verified live with a hand-typed `claude --resume <id>`.
+- [ ] Optional: our own ↺ Resume picker (lists this repo's transcripts whatever
+      the drive-letter case, resumes by id). Claude's picker hides lowercase-`d:\`
+      conversations (anthropics/claude-code#90588); drop this if they fix it.
 
 ## Multi-agent / multi-repo
 - [x] **Phone / away mode via Remote Control** (0.6.21, RESEARCH-REMOTE.md) —

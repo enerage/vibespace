@@ -95,6 +95,25 @@ Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
     in, unnoticed, for 12 hours.
   - Grep the log for `tabs:`.
 
+## [0.6.23] — 2026-09-29
+
+### Fixed
+- **A claude you type yourself in a VibeSpace tab is now tracked like one
+  VibeSpace launched.** Before, typing plain `claude` or `claude --resume <id>`
+  started it without our hook settings. That meant no status lights, no session
+  tracking and no phone control, so a restart reopened a fresh claude instead of
+  that conversation. Every VibeSpace terminal now has a `claude` wrapper that
+  adds `--settings` and the `--remote-control` name when they're missing.
+  Subcommands (`claude update`, `attach`, …) and `-p` runs pass through
+  untouched. Verified live: a hand-typed `claude --resume <id>` resumed the
+  conversation, connected Remote Control and ran our hooks. Smoke 72/72.
+- Background: a conversation first started from VS Code or cmd with a lowercase
+  `d:\` is hidden from claude's `/resume` picker and refuses to open there
+  ("This conversation is from a different directory"). That is Claude Code bug
+  anthropics/claude-code#90588. `claude --resume <id>` is not affected.
+
+Takes effect for new tabs after one ↻ Restart.
+
 ## [0.6.22] — 2026-09-29
 
 ### Fixed

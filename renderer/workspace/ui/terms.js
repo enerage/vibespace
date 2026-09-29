@@ -442,7 +442,9 @@ export function createTab({ name = 'agent', cwd = repoPath, claude = false, resu
     if (attachBuffer) term.write(attachBuffer);
     vs.ptyResize(id, Math.max(term.cols, 20), Math.max(term.rows, 10));
   } else {
-    vs.ptyCreate({ termId: id, wsId, cwd, cols: Math.max(term.cols, 20), rows: Math.max(term.rows, 10) })
+    // rcLabel feeds the shell's `claude` wrapper (ptyhost), so a claude typed by
+    // hand gets the same Remote Control name as one we launch
+    vs.ptyCreate({ termId: id, wsId, cwd, cols: Math.max(term.cols, 20), rows: Math.max(term.rows, 10), rcLabel: remote() ? rcLabel(name) : null })
       .then(info => { tab.hookSettings = info && info.settingsPath; })
       .catch(e => toast('Terminal failed: ' + (e.message || e), 'err'));
   }

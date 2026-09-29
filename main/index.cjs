@@ -904,9 +904,9 @@ function initIpc() {
   });
 
   // ptys
-  ipcMain.handle('pty:create', (e, { termId, wsId, cwd, cols, rows }) => {
+  ipcMain.handle('pty:create', (e, { termId, wsId, cwd, cols, rows, rcLabel }) => {
     const settingsPath = ensureHookSettings(wsId);
-    ptyhost.create(termId, cwd, cols, rows, wsId);
+    ptyhost.create(termId, cwd, cols, rows, wsId, { settingsPath, rcLabel: typeof rcLabel === 'string' ? rcLabel : null });
     return { settingsPath };
   });
   // live ptys + buffered output — a freshly loaded renderer uses this to re-attach

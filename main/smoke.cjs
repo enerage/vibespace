@@ -765,6 +765,38 @@ async function runSmoke() {
     check('pty env carries CLAUDE_CLIENT_PRESENCE_FILE', r.ok, r.detail);
   }
 
+  // 23b. the shell's `claude` wrapper (ptyhost CLAUDE_WRAPPER): a hand-typed claude
+  //      gets --remote-control + --settings; subcommands / -p / flags already given
+  //      pass through untouched. Dry-run prints the final args instead of launching.
+  {
+    const cases = [
+      ['claude --resume abc', '--resume|abc|--remote-control|WS · t1|--settings|S.json'],
+      ['claude', '--remote-control|WS · t1|--settings|S.json'],
+      ['claude update', 'update'],
+      ['claude -p hi', '-p|hi'],
+      ['claude --settings X.json --remote-control N', '--settings|X.json|--remote-control|N'],
+    ];
+    const r = await new Promise((resolve) => {
+      let buf = '';
+      const termId = 'smokewrap';
+      const done = (ok, detail) => { clearTimeout(timer); ptyhost.onData(() => {}); ptyhost.kill(termId); resolve({ ok, detail }); };
+      const timer = setTimeout(() => done(false, 'timeout: ' + buf.slice(-300)), 20000);
+      ptyhost.onData((id, chunk) => {
+        if (id !== termId) return;
+        buf += chunk;
+        const flat = buf.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '').replace(/\r?\n/g, '');
+        // outputs only: the echoed command lines never contain "VSCLAUDE["
+        const got = [...flat.matchAll(/VSCLAUDE\[([^\]]*)\]/g)].map(m => m[1]);
+        if (got.length < cases.length) return;
+        const bad = cases.filter((c, i) => got[i] !== c[1]).map(c => c[0]);
+        done(bad.length === 0, bad.length ? 'wrong: ' + bad.join('; ') + ' got=' + JSON.stringify(got) : got.length + ' cases');
+      });
+      try { ptyhost.create(termId, U.BIN_ROOT, 200, 30, null, { settingsPath: 'S.json', rcLabel: 'WS · t1' }); } catch (err) { done(false, 'spawn: ' + err.message); return; }
+      setTimeout(() => ptyhost.write(termId, '$env:VIBESPACE_CLAUDE_DRYRUN=1; ' + cases.map(c => c[0]).join('; ') + '\r'), 900);
+    });
+    check('pty `claude` wrapper adds tracking flags (hand-typed claude)', r.ok, r.detail);
+  }
+
   // 8. pty echo (powershell)
   const echo = await ptyEchoTest();
   check('pty spawn + echo (powershell)', echo.ok, echo.detail);

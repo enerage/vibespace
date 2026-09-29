@@ -93,10 +93,24 @@ Key facts encoded in `main/sessions.cjs`:
 - The heuristic above is now only the fallback for agents without a feed
   (started before 0.6.16). Its known holes (manual `/resume`, near-simultaneous
   launches) remain for those only; see TODO.md.
+- **Without `--settings` there is no feed, so no tracking.** A claude started
+  without it was lost on restart (2026-09-29: a hand-`/resume`d conversation
+  on a pre-feed build). So every pty's PowerShell starts with a `claude`
+  function (ptyhost `CLAUDE_WRAPPER`, sent via `-EncodedCommand`). It adds
+  `--settings $env:VIBESPACE_CLAUDE_SETTINGS` and `--remote-control
+  $env:VIBESPACE_RC_LABEL` unless they're already given, and never touches
+  subcommands or `-p`/`--version`/`--help` (a `-p` run would pin its session
+  onto the tab). `VIBESPACE_CLAUDE_DRYRUN=1` prints the final args (smoke uses
+  this).
+- **Claude's `/resume` picker is case-sensitive about the drive letter**
+  (anthropics/claude-code#90588, open). A session first recorded as `d:\…`
+  (VS Code, cmd) is hidden from the list and refuses to open ("from a
+  different directory"). `claude --resume <id>` works, so restore (by id) is
+  unaffected. Only ↺ Resume and right-click + Claude go through the picker.
 
 ## Developing VibeSpace
 
-- `npm run smoke` — 70 self-tests (as of 0.6.21) incl. pty echo and live session discovery. Run it after
+- `npm run smoke` — 72 self-tests (as of 0.6.23) incl. pty echo and live session discovery. Run it after
   touching main-process code, **from a normal shell**: inside a Claude pty the stripped
   PATH and nested ConPTY break the pty test (`powershell.exe` "File not found" /
   AttachConsole) — prepend System32 to PATH and give it its own console, or just use a
