@@ -42,6 +42,7 @@ VibeSpace is that place — built for people who live in agents all day.
 | 🔔 **Attention toasts** | unfocused agent needs you / finished → Windows notification; click focuses window *and* the exact tab |
 | ⌨️ **Ctrl+Shift+U** | jump to the next tab that needs you |
 | 🌲 **Git-colored tree** | modified / added / untracked / deleted files and folders, refreshed live |
+| 🌿 **Git pane** | **Changes**: side-by-side diff of uncommitted work. **History**: searchable commit list with unpushed ↑, `agent` badges and "new since you looked" dots; click a commit for its files and diffs. Top-bar branch chip shows ahead/behind. Right-click a tree file → Git history. Read-only on purpose: agents do the git work |
 | 🔍 **Ctrl+P** | fuzzy file finder over the whole repo |
 | 🔍 **Ctrl+F** | search inside the active terminal (Monaco keeps its own find) |
 | 💬 **Session tracking** | terminals ↔ conversations are paired automatically; dead sessions reopen Claude's interactive resume picker |
