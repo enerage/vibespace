@@ -1,4 +1,4 @@
-import { $, el, toast, debounce } from './common.js';
+import { $, el, toast, debounce, confirmBox } from './common.js';
 import { monacoTheme, onThemeChange } from './themes.js';
 
 const VS_URL = 'app://local/vendor/monaco-editor/min/vs/';
@@ -251,7 +251,11 @@ export function closeTab(path, { force } = {}) {
   const t = tabs.get(path);
   if (!t) return;
   if (!force && t.model && t.model.getValue() !== t.saved) {
-    if (!confirm(`${t.name} has unsaved changes. Close anyway?`)) return;
+    // async confirm (never window.confirm — see common.js confirmBox): re-enter
+    // with force once the user agrees
+    confirmBox(`${t.name} has unsaved changes. Close anyway?`, { ok: 'Close without saving', danger: true })
+      .then((ok) => { if (ok) closeTab(path, { force: true }); });
+    return;
   }
   const wasActive = path === activePath;
   const order = [...tabs.keys()];

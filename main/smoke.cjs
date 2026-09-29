@@ -180,6 +180,23 @@ async function runSmoke() {
   // 10. status file watcher (supervision signal from injected claude hooks)
   {
     const statusMod = require('./status.cjs');
+    // tab ↔ conversation audit trail (tablog): open snapshot, session change,
+    // close, and the one-time "looks like an agent but untracked" warning
+    {
+      const tl = require('./tablog.cjs');
+      const t0 = 1_000_000;
+      const open = tl.diff('smk', [{ termId: 'a', name: 'A', isClaude: true, claudeSessionId: null }, { termId: 'b', name: 'B', isClaude: false }], t0);
+      const pin = tl.diff('smk', [{ termId: 'a', name: 'A', isClaude: true, claudeSessionId: 's1' }, { termId: 'b', name: 'B', isClaude: false }], t0 + 1000);
+      const gone = tl.diff('smk', [{ termId: 'b', name: 'B', isClaude: false }], t0 + 2000);
+      const late = t0 + tl.UNTRACKED_AFTER_MS + 5000;
+      const w1 = tl.audit('smk', null, { hasFeed: (id) => id === 'b' }, late);
+      const w2 = tl.audit('smk', null, { hasFeed: (id) => id === 'b' }, late + 1000);
+      tl.forget('smk');
+      check('tab log: open/session/close + untracked warning once',
+        open[0] === 'open: 2 tabs' && pin.some(l => l.includes('session — → s1')) && gone.some(l => l.startsWith('- "A"'))
+        && w1.length === 1 && w1[0].includes('"B"') && w1[0].includes('live claude feed') && w2.length === 0,
+        JSON.stringify({ open, pin, gone, w1, w2 }));
+    }
     // HTTP-hook → status word (replaces the blocking Git Bash echo hooks)
     const w = statusMod.wordForHook;
     check('status word from HTTP hooks', w('UserPromptSubmit', {}) === 'working' && w('PreToolUse', { tool_name: 'Bash' }) === 'working'

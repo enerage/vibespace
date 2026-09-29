@@ -15,6 +15,7 @@ const shortcuts = require('./shortcuts.cjs');
 const contextmenu = require('./contextmenu.cjs');
 const ptyhost = require('./ptyhost.cjs');
 const sessions = require('./sessions.cjs');
+const tablog = require('./tablog.cjs');
 const status = require('./status.cjs');
 const gitstatus = require('./gitstatus.cjs');
 const gitdiff = require('./gitdiff.cjs');
@@ -279,6 +280,15 @@ function persistState(wsId) {
   } catch (e) {
     console.error('[vibespace] state save failed:', e.message);
   }
+  // audit trail: which tab holds which conversation, and tabs that look like
+  // agents but would NOT resume on restart (main/tablog.cjs)
+  try {
+    for (const l of tablog.diff(wsId, enriched.terminals)) logger.info(`tabs: ws=${wsId} ${l}`);
+    const opts = { hasFeed: (id) => Boolean(claudefeed.stateOf(id)), alive: (id) => ptyhost.alive(id) };
+    for (const l of tablog.audit(wsId, enriched.terminals, opts)) logger.warn(`tabs: ws=${wsId} ${l}`);
+  } catch (e) {
+    logger.warn('tab log failed: ' + e.message);
+  }
 }
 
 // ---------- protocol ----------
@@ -513,6 +523,7 @@ function createWorkspaceWindow(ws, { shot = false } = {}) {
   win.on('closed', () => {
     winInfo.delete(win.id);
     sessions.stop(ws.id);
+    tablog.forget(ws.id);
     status.stop(ws.id);
     treewatch.stop(ws.id);
     board.stop(ws.id); // deletes <dataRoot>/board/<wsId>.json
@@ -908,8 +919,14 @@ function initIpc() {
   ipcMain.on('pty:write', (e, termId, data) => ptyhost.write(termId, data));
   ipcMain.on('pty:resize', (e, termId, cols, rows) => ptyhost.resize(termId, cols, rows));
   ipcMain.on('pty:kill', (e, termId) => ptyhost.kill(termId));
-  ipcMain.on('pty:claudeStarted', (e, wsId, termId, opts) => sessions.trackClaudeStart(wsId, termId, opts || {}));
-  ipcMain.on('pty:sessionPinned', (e, wsId, termId, sessionId) => sessions.pinSession(wsId, termId, sessionId));
+  ipcMain.on('pty:claudeStarted', (e, wsId, termId, opts) => {
+    logger.info(`claude launch: ws=${wsId} term=${termId}${opts && opts.picker ? ' (resume picker)' : ''}`);
+    sessions.trackClaudeStart(wsId, termId, opts || {});
+  });
+  ipcMain.on('pty:sessionPinned', (e, wsId, termId, sessionId) => {
+    logger.info(`claude resume: ws=${wsId} term=${termId} session=${sessionId}`);
+    sessions.pinSession(wsId, termId, sessionId);
+  });
   // feed state for a (re)loaded renderer: meters show at once after a reload
   ipcMain.handle('feed:snapshot', (e, wsId) => claudefeed.snapshot(wsId));
   // agent board: other workspaces' summaries (read-only), a dir watch while a

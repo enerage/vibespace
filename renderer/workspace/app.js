@@ -1,4 +1,4 @@
-import { $, toast, debounce } from './ui/common.js';
+import { $, toast, debounce, confirmBox } from './ui/common.js';
 import * as tree from './ui/tree.js';
 import * as viewer from './ui/viewer.js';
 import * as terms from './ui/terms.js';
@@ -103,7 +103,7 @@ function wireLayoutToggle() {
     const msg = names.length
       ? `Restart VibeSpace to pick up the new code?\n\n${names.join(', ')} ${names.length > 1 ? 'are' : 'is'} working right now — ${names.length > 1 ? 'they' : 'it'} will be interrupted and resumed on restart.`
       : 'Restart VibeSpace to pick up the new code?\n\nEvery agent conversation resumes automatically.';
-    if (!confirm(msg)) return;
+    if (!(await confirmBox(msg, { ok: 'Restart' }))) return;
     restartBtn.disabled = true;
     try { await vs.appRestart(); } catch { restartBtn.disabled = false; }
   };

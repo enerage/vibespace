@@ -230,6 +230,15 @@ Key facts encoded in `main/sessions.cjs`:
   - `document.hidden` is true for OCCLUDED windows too, not just minimized
     ones. Pollers that skip when hidden must still run once on start and on
     `visibilitychange`.
+- **Never use `window.confirm/alert/prompt` in a workspace window.** On Windows
+  Electron the window gets no real focus back after the native box closes.
+  Keydown still fires, but keypress/beforeinput don't until the window is
+  re-focused, so Space dies in xterm while letters keep working. Use
+  `confirmBox()` from `common.js` (found via keydiag, 2026-09-29).
+- **Tab/session audit trail:** grep the instance log for `tabs:`. It logs the
+  open snapshot, per-change lines and "untracked … would NOT resume" warnings
+  (`main/tablog.cjs`, fed from `persistState`). Check it first when a restart
+  "lost" a conversation.
 - **`/sync-docs` skill** (`.claude/skills/sync-docs`): the "update all docs" ritual —
   CHANGELOG/DECISIONS/CLAUDE/TODO/README + agent memory, docs only. Copy the skill
   folder into any repo that should join the ritual. (A 📨 broadcast button existed

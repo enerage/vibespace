@@ -1,4 +1,4 @@
-import { $, el, toast, askText, showMenu as showCtxMenu, menuOpen } from './common.js';
+import { $, el, toast, askText, confirmBox, showMenu as showCtxMenu, menuOpen } from './common.js';
 
 let rootPath = '';
 let onOpenFile = () => {};
@@ -321,7 +321,7 @@ async function startDelete(rel, isDir) {
   const msg = isDir
     ? `Delete folder "${name}" and everything inside it? (moved to Recycle Bin)`
     : `Delete "${name}"? (moved to Recycle Bin)`;
-  if (!window.confirm(msg)) return;
+  if (!(await confirmBox(msg, { ok: 'Delete', danger: true }))) return;
   try {
     await vs.fsDelete(abs);
     if (hooks.onDeleted) hooks.onDeleted(abs);

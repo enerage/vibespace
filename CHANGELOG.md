@@ -69,6 +69,32 @@ Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 - Symptom it fixes: agent terminals with a 5-entry PATH (`C:WindowsSystem32…`),
   node/npm/pnpm/python/git not found by name. Needs one VibeSpace restart.
 
+## [0.6.24] — 2026-09-29
+
+### Fixed
+- **Space stopped typing in every agent tab until you alt-tabbed twice.**
+  - Cause, from the keydiag logs: every episode started right after a native
+    `confirm()` box (Close tab, ↻ Restart). On Windows, Electron's window gets
+    no real focus event after that box closes. Key presses still arrive, but
+    typed characters are never generated until the window is re-focused.
+  - xterm sends letters straight from the key press, but a plain Space only
+    from the typed character. That's why letters kept working and Space didn't.
+  - Every native dialog in workspace windows is now an in-app `confirmBox()`:
+    close tab, ↻ Restart, ⟳ Update, tree delete, and close unsaved file.
+    Enter = OK, Esc = cancel, and focus goes straight back to the terminal.
+
+### Added
+- **Tab ↔ conversation audit trail in the instance log** (`main/tablog.cjs`):
+  - On window open: every tab, with its kind (claude/plain) and session ID.
+  - After that, one line per change: new tab, closed tab, rename, session
+    `— → <id>`, and kind changes.
+  - Plus `claude launch` / `claude resume` lines.
+  - **Warning:** a tab that looks like an agent (claude tab, or it has a live
+    feed) but still has no conversation ID after 3 minutes is logged once as
+    "a restart would NOT resume it". That's the state the IMPROVE UI tab sat
+    in, unnoticed, for 12 hours.
+  - Grep the log for `tabs:`.
+
 ## [0.6.22] — 2026-09-29
 
 ### Fixed

@@ -117,3 +117,50 @@ export function closeMenu() {
   window.removeEventListener('resize', menuCloser);
   window.removeEventListener('scroll', menuCloser, true);
 }
+
+// ---------- in-page confirm (never window.confirm) ----------
+// Native confirm()/alert() on Windows Electron leave the window without a real
+// focus event after they close: keydown still arrives but keypress/beforeinput
+// never fire until the window is re-focused (Alt / alt-tab). xterm sends a plain
+// Space from keypress, so Space died in every agent tab while letters kept
+// working (keydiag logs, 2026-09-29). Resolves true (OK/Enter) or false
+// (Cancel/Esc/backdrop) and hands focus back to whatever had it (the terminal).
+export function confirmBox(message, { ok = 'OK', cancel = 'Cancel', danger = false } = {}) {
+  return new Promise((resolve) => {
+    const prevFocus = document.activeElement;
+    const back = el('div', 'info-modal');
+    const box = el('div', 'info-box confirm-box');
+    box.appendChild(el('div', 'confirm-msg', message));
+    const actions = el('div', 'info-actions');
+    const no = el('button', 'btn small', cancel);
+    const yes = el('button', 'btn small ' + (danger ? 'danger' : 'primary'), ok);
+    actions.append(no, yes);
+    box.appendChild(actions);
+    back.appendChild(box);
+    document.body.appendChild(back);
+    let done = false;
+    const finish = (v) => {
+      if (done) return;
+      done = true;
+      window.removeEventListener('keydown', onKey, true);
+      back.remove();
+      // back to what had focus; if that was nothing useful (body, or an element
+      // the action removed), the visible terminal — typing must just work again
+      const target = prevFocus && prevFocus !== document.body && prevFocus.isConnected
+        ? prevFocus
+        : [...document.querySelectorAll('.xterm-helper-textarea')].find((t) => t.offsetParent !== null);
+      try { target && target.focus(); } catch {}
+      resolve(v);
+    };
+    // capture + stop: Enter/Esc must not also reach xterm or the app's shortcuts
+    const onKey = (e) => {
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); finish(false); }
+      else if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); finish(true); }
+    };
+    window.addEventListener('keydown', onKey, true);
+    no.onclick = () => finish(false);
+    yes.onclick = () => finish(true);
+    back.addEventListener('mousedown', (e) => { if (e.target === back) finish(false); });
+    yes.focus();
+  });
+}

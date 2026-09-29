@@ -1,4 +1,4 @@
-import { $, el, toast } from './common.js';
+import { $, el, toast, confirmBox } from './common.js';
 import { termTheme, onThemeChange } from './themes.js';
 import { openTabMenu } from './tabmenu.js';
 import * as feedui from './feedui.js';
@@ -608,10 +608,10 @@ function renderTabBar() {
       ev.preventDefault();
       openTabMenu(ev, tab, { rename: () => startRename(t, label, tab), close: () => close.onclick(new MouseEvent('click')) });
     };
-    close.onclick = (ev) => {
+    close.onclick = async (ev) => {
       ev.stopPropagation();
       const hasAgent = tab.sessionId || !tab.dead;
-      if (hasAgent && !confirm(`Close "${tab.name}"?\nIts claude conversation is saved and can be resumed later.`)) return;
+      if (hasAgent && !(await confirmBox(`Close "${tab.name}"?\nIts claude conversation is saved and can be resumed later.`, { ok: 'Close', danger: true }))) return;
       removeTab(tab.id);
     };
     label.ondblclick = (ev) => {
@@ -819,10 +819,11 @@ export function sendToAgent(id, text) {
 async function updateRestartAll() {
   if (updating) return;
   const n = snapshot().length;
-  if (!confirm(
+  if (!(await confirmBox(
     `Update Claude Code and restart all ${n} terminal${n > 1 ? 's' : ''}?\n\n` +
-    'Every agent conversation is resumed automatically on the new version (claude --resume).'
-  )) return;
+    'Every agent conversation is resumed automatically on the new version (claude --resume).',
+    { ok: 'Update & restart' },
+  ))) return;
 
   updating = true;
   updateSnapshot = snapshot();
