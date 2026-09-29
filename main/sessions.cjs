@@ -49,7 +49,7 @@ function trackClaudeStart(wsId, termId, { picker = false } = {}) {
   const state = active.get(wsId);
   if (!state) return;
   const prev = state.terms.get(termId) || {};
-  state.terms.set(termId, { startedAt: Date.now(), sessionId: prev.sessionId, picker });
+  state.terms.set(termId, { startedAt: Date.now(), sessionId: prev.sessionId, picker, feed: prev.feed });
   scheduleScan(wsId);
 }
 
@@ -71,6 +71,22 @@ function pinSession(wsId, termId, sessionId) {
   if (!state) return;
   const prev = state.terms.get(termId) || { startedAt: 0 };
   state.terms.set(termId, { startedAt: prev.startedAt || Date.now(), sessionId });
+}
+
+// Exact mapping from the claude data feed: every statusLine/hook body carries
+// session_id and arrives tagged with our term id (x-vs-term). Primary source for
+// agents with a feed — it follows /clear, /resume and the picker. Marked `feed`
+// so the timing heuristic below never reassigns the term. Only pinned once the
+// transcript exists (claude writes it on the first message), so a restore never
+// tries to resume a conversation that was never saved. Returns true on change.
+function pinFromFeed(wsId, termId, sessionId) {
+  const state = active.get(wsId);
+  if (!state || !sessionId) return false;
+  const prev = state.terms.get(termId) || { startedAt: 0 };
+  if (prev.sessionId === sessionId && prev.feed) return false;
+  if (!sessionExists(wsId, sessionId)) return false; // not written yet — retried on the next tick
+  state.terms.set(termId, { ...prev, startedAt: prev.startedAt || Date.now(), sessionId, picker: false, feed: true });
+  return prev.sessionId !== sessionId;
 }
 
 function getSession(wsId, termId) {
@@ -182,4 +198,4 @@ function sessionIdsFor(wsId) {
   return out;
 }
 
-module.exports = { start, stop, trackClaudeStart, pinSession, getSession, sessionExists, sessionIdsFor, onData, _scan: scan, _pickResumed: pickResumed };
+module.exports = { start, stop, trackClaudeStart, pinSession, pinFromFeed, getSession, sessionExists, sessionIdsFor, onData, _scan: scan, _pickResumed: pickResumed };

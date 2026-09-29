@@ -80,4 +80,4 @@ function versionChanged(a, b) {
   return pa[0] !== pb[0] || pa[1] !== pb[1] || pa[2] !== pb[2];
 }
 
-module.exports = { runClaudeUpdate, claudeVersion, _parseVersion: parseVersion, _versionChanged: versionChanged };
+module.exports = { runClaudeUpdate, claudeVersion, claudeCommand, _parseVersion: parseVersion, _versionChanged: versionChanged };

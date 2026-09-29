@@ -23,6 +23,10 @@ const fsops = require('./fsops.cjs');
 const srcstate = require('./srcstate.cjs');
 const treewatch = require('./treewatch.cjs');
 const updater = require('./updater.cjs');
+const claudefeed = require('./claudefeed.cjs');
+const board = require('./board.cjs');
+const attention = require('./attention.cjs');
+const bgagents = require('./bgagents.cjs');
 const presence = require('./presence.cjs');
 
 // ---------- CLI args ----------
@@ -73,7 +77,9 @@ protocol.registerSchemesAsPrivileged([
 // stable on remote-display setups (RDP / viewer software blanking the window)
 app.disableHardwareAcceleration();
 
-const gotLock = openRepoPath ? true : app.requestSingleInstanceLock();
+// --smoke shares the launcher's default userData, so it must not compete for (or
+// be blocked by) a running launcher's lock — whenReady bails out without it
+const gotLock = (openRepoPath || smoke) ? true : app.requestSingleInstanceLock();
 if (!gotLock) {
   app.quit();
 } else {
@@ -154,6 +160,9 @@ function ensureHookSettings(wsId) {
       Stop: [hook('done')],
     },
   };
+  // claude data feed: statusLine + HTTP hooks on top (claudefeed.cjs); the port
+  // changes every main start and this runs per pty create, so it is always live
+  claudefeed.addSettings(settings);
   try {
     U.ensureDir(path.dirname(file));
     U.writeJsonAtomic(file, settings);
@@ -183,6 +192,7 @@ async function ensureOverlayIcons() {
 }
 
 const termStatus = new Map(); // termId -> last hook-reported status (working|waiting|done)
+const attnTerms = new Map(); // termId -> attention.cjs arbitration state (file vs instant feed)
 
 function termName(wsId, termId) {
   const terms = rendererState.get(wsId)?.terminals;
@@ -190,8 +200,24 @@ function termName(wsId, termId) {
   return (t && t.name) || termId;
 }
 
+// agent board summary for other windows (main/board.cjs): renderer tab list +
+// base status + feed detail, all read from where they already live
+function boardSummary(wsId) {
+  const ws = workspaces.get(wsId);
+  return board.buildSummary({
+    wsId,
+    name: ws && ws.name,
+    terminals: rendererState.get(wsId)?.terminals || [],
+    statusOf: (termId) => termStatus.get(termId),
+    feedOf: (termId) => claudefeed.stateOf(termId),
+    reasonOf: claudefeed.attentionText,
+  });
+}
+
+// st: working|waiting|done from the status files, or 'failed' from the claude feed
+// (StopFailure fires no Stop hook, so the base light would never say so)
 function notifyAttention(wsId, termId, st) {
-  if (st !== 'waiting' && st !== 'done') return;
+  if (st !== 'waiting' && st !== 'done' && st !== 'failed') return;
   const wins = workspaceWindowsFor(wsId);
   if (!wins.length) return;
   // only skip when you're literally looking at THIS agent: focused window AND its
@@ -201,7 +227,12 @@ function notifyAttention(wsId, termId, st) {
   const ws = workspaces.get(wsId);
   const agent = termName(wsId, termId);
   const title = `${(ws && ws.name) || 'VibeSpace'} · ${agent}`;
-  const body = st === 'waiting' ? `${agent} needs your input` : `${agent} finished its turn`;
+  // the feed's reason when it has one ("agent-2 needs permission: Bash — npm test");
+  // pre-feed agents keep the generic text
+  const reason = claudefeed.attentionText(claudefeed.stateOf(termId));
+  const body = st === 'failed' ? `${agent} ${reason || 'turn failed'}`
+    : st === 'waiting' ? `${agent} ${reason || 'needs your input'}`
+    : `${agent} finished its turn`;
   try {
     const n = new Notification({ title, body, icon: ws && ws.iconPath && fs.existsSync(ws.iconPath) ? ws.iconPath : undefined });
     n.on('click', () => {
@@ -211,7 +242,7 @@ function notifyAttention(wsId, termId, st) {
     });
     n.show();
   } catch {}
-  const icon = overlayIcons[st];
+  const icon = overlayIcons[st === 'failed' ? 'waiting' : st]; // a failed turn needs you too: red badge
   if (icon && fs.existsSync(icon)) {
     for (const w of wins) { if (!w.isDestroyed()) { try { w.setOverlayIcon(icon, st); } catch {} } }
   }
@@ -448,7 +479,8 @@ function createWorkspaceWindow(ws, { shot = false } = {}) {
     const message = e.message ?? e.args?.message;
     const source = e.sourceId ?? e.args?.source;
     const line = e.line ?? e.args?.line;
-    if (level >= 2) logger.warn(`renderer: ${message} (${source}:${line})`);
+    // Electron 35+ reports level as a string; the old numeric form is 2=warning, 3=error
+    if (level >= 2 || level === 'warning' || level === 'error') logger.warn(`renderer: ${message} (${source}:${line})`);
   });
   win.webContents.on('did-fail-load', (e, code, desc, url) => {
     logger.error(`did-fail-load ${url} → ${code} ${desc}`);
@@ -458,6 +490,7 @@ function createWorkspaceWindow(ws, { shot = false } = {}) {
   sessions.start(ws.id, ws.repoPath);
   status.start(ws.id, path.join(U.dataRoot(), 'instances', ws.id, 'status'));
   treewatch.start(ws.id, ws.repoPath); // live file-tree refresh (agents write files)
+  board.start(ws.id, () => boardSummary(ws.id)); // other windows' boards read this
   baselineClaudeFor(ws.id); // update-button baseline: the version these agents run
 
   // focusing the window answers the attention signal — clear the taskbar badge
@@ -476,6 +509,7 @@ function createWorkspaceWindow(ws, { shot = false } = {}) {
     sessions.stop(ws.id);
     status.stop(ws.id);
     treewatch.stop(ws.id);
+    board.stop(ws.id); // deletes <dataRoot>/board/<wsId>.json
     claudeBaselines.delete(ws.id);
     if (!workspaceWindowsFor(ws.id).length) {
       persistState(ws.id);
@@ -692,6 +726,7 @@ function initIpc() {
   ipcMain.handle('state:save', (e, id, state) => {
     rendererState.set(id, state);
     persistState(id);
+    board.touch(id); // tab names / new or closed tabs
     return true;
   });
 
@@ -869,6 +904,33 @@ function initIpc() {
   ipcMain.on('pty:kill', (e, termId) => ptyhost.kill(termId));
   ipcMain.on('pty:claudeStarted', (e, wsId, termId, opts) => sessions.trackClaudeStart(wsId, termId, opts || {}));
   ipcMain.on('pty:sessionPinned', (e, wsId, termId, sessionId) => sessions.pinSession(wsId, termId, sessionId));
+  // feed state for a (re)loaded renderer: meters show at once after a reload
+  ipcMain.handle('feed:snapshot', (e, wsId) => claudefeed.snapshot(wsId));
+  // agent board: other workspaces' summaries (read-only), a dir watch while a
+  // board is open, and focus-a-workspace. Focusing reuses the launcher path:
+  // spawning --workspace=<id> of a RUNNING workspace loses its single-instance
+  // lock and quits at once; the running process gets 'second-instance' → focus.
+  ipcMain.handle('board:others', (e, wsId) => board.readOthers(wsId));
+  // background agents (claude --bg) started under this workspace's repo; the
+  // board polls this every 15 s while open — never otherwise
+  ipcMain.handle('bg:list', (e) => {
+    const win = BrowserWindow.fromWebContents(e.sender);
+    const ws = win && workspaces.get(winInfo.get(win.id)?.wsId);
+    return ws ? bgagents.list(ws.repoPath) : { ok: false, agents: [] };
+  });
+  ipcMain.on('board:watch', (e, on) => {
+    const sender = e.sender;
+    if (!on) { board.unwatch(); return; }
+    board.watch(() => { if (!sender.isDestroyed()) sender.send('board:changed'); });
+    sender.once('destroyed', () => board.unwatch());
+  });
+  ipcMain.handle('board:focus', (e, wsId) => {
+    const win = BrowserWindow.fromWebContents(e.sender);
+    const self = win && winInfo.get(win.id)?.wsId;
+    if (!wsId || wsId === self || !workspaces.get(wsId)) return { ok: false };
+    launchWorkspaceProcess(wsId);
+    return { ok: true };
+  });
   ipcMain.handle('sessions:check', (e, wsId, sessionId) => sessions.sessionExists(wsId, sessionId));
   // away mode (machine-wide, presence.cjs): the renderer may only toggle the
   // manual modes; 'idle' is decided by lock/idle detection
@@ -908,6 +970,8 @@ function initIpc() {
   });
   ptyhost.onExit((termId) => {
     termStatus.delete(termId);
+    attnTerms.delete(termId);
+    claudefeed.forget(termId);
     for (const win of BrowserWindow.getAllWindows()) {
       if (!win.isDestroyed()) win.webContents.send('pty:exit', termId);
     }
@@ -918,13 +982,59 @@ function initIpc() {
       if (!win.isDestroyed()) win.webContents.send('session:found', termId, sessionId);
     }
   });
-  status.onData((wsId, termId, st) => {
+  // ONE path for base-status changes — status files and the feed's instant
+  // attention both land here, so lights, toasts, badge and the busy check move
+  // together (main/attention.cjs arbitrates; toasts once per episode)
+  const applyStatus = (wsId, termId, st, notify, via) => {
     termStatus.set(termId, st);
-    logger.info(`term status: ws=${wsId} term=${termId} ${st}`);
+    logger.info(`term status: ws=${wsId} term=${termId} ${st}${via ? ' (' + via + ')' : ''}`);
     for (const win of workspaceWindowsFor(wsId)) {
       if (!win.isDestroyed()) win.webContents.send('term:status', termId, st);
     }
-    notifyAttention(wsId, termId, st);
+    if (notify) notifyAttention(wsId, termId, st);
+    board.touch(wsId);
+  };
+  const attnOf = (termId) => {
+    let t = attnTerms.get(termId);
+    if (!t) { t = attention.newTerm(); attnTerms.set(termId, t); }
+    return t;
+  };
+  status.onData((wsId, termId, st) => {
+    const r = attention.fileStatus(attnOf(termId), st);
+    if (r.apply) applyStatus(wsId, termId, r.apply, r.notify);
+    else logger.info(`term status: ws=${wsId} term=${termId} ${st} ignored (feed: dialog still open)`);
+  });
+  // claude data feed: per-term snapshot to the owning window; the account-wide
+  // 5h/7d limits to every workspace window
+  const failureSeen = new Map(); // termId -> failure.at already toasted
+  claudefeed.onData((wsId, termId, feed) => {
+    for (const win of workspaceWindowsFor(wsId)) {
+      if (!win.isDestroyed()) win.webContents.send('term:feed', { termId, feed });
+    }
+    // instant "needs you": PermissionRequest / question tool → base waiting now,
+    // not ~6 s later when the permission_prompt Notification hook runs
+    const r = attention.feedState(attnOf(termId), feed);
+    if (r.apply) applyStatus(wsId, termId, r.apply, r.notify, 'feed');
+    // exact session tracking: the feed's session_id IS this tab's conversation
+    if (feed.sessionId && sessions.pinFromFeed(wsId, termId, feed.sessionId)) {
+      logger.info(`session via feed: term=${termId} session=${feed.sessionId}`);
+      for (const win of workspaceWindowsFor(wsId)) {
+        if (!win.isDestroyed()) win.webContents.send('session:found', termId, feed.sessionId);
+      }
+    }
+    // a failed turn (StopFailure) toasts + badges like a waiting agent — once
+    if (feed.failure && failureSeen.get(termId) !== feed.failure.at) {
+      failureSeen.set(termId, feed.failure.at);
+      logger.info(`term failed: ws=${wsId} term=${termId} ${feed.failure.reason}`);
+      notifyAttention(wsId, termId, 'failed');
+    }
+    board.touch(wsId);
+  });
+  claudefeed.onLimits((limits) => {
+    for (const [id] of winInfo) {
+      const win = BrowserWindow.fromId(id);
+      if (win && !win.isDestroyed()) win.webContents.send('account:limits', limits);
+    }
   });
   // presence changes from ANY process (the state file is watched) → every window
   presence.onChange((p) => {
@@ -956,6 +1066,11 @@ function initStateFlush() {
 
 // ---------- boot ----------
 app.whenReady().then(async () => {
+  // lost the single-instance lock (this workspace is already open): app.quit()
+  // above is async, and without this guard the duplicate still opened a window,
+  // spawned ptys/agents and, on its way out, deleted the running window's board
+  // file — for ~2 s, every time the launcher or the board "focused" a workspace
+  if (!gotLock) return;
   initProtocol();
   initIpc();
   initStateFlush();
@@ -1004,6 +1119,9 @@ app.whenReady().then(async () => {
   }
 
   if (workspaceId) {
+    // feed server up BEFORE any pty/agent exists (ensureHookSettings reads its
+    // port; a missing listener = red ECONNREFUSED lines in claude's TUI)
+    await claudefeed.start({ resolveTerm: ptyhost.wsOf });
     const ws = workspaces.get(workspaceId);
     if (!ws) {
       dialog.showErrorBox('VibeSpace', `Workspace "${workspaceId}" not found. Open the launcher to create it.`);
@@ -1096,6 +1214,7 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   for (const wsId of new Set([...winInfo.values()].map(v => v.wsId))) persistState(wsId);
+  board.stopAll();
   presence.stop();
   ptyhost.killAll();
 });

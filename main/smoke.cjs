@@ -460,6 +460,249 @@ async function runSmoke() {
     check('terminal resolves node by name (full user PATH reaches ptys)', r.ok, r.detail);
   }
 
+  // 22. claude data feed (claudefeed.cjs): reducer on real probe payloads (claude
+  //     2.1.284 statusLine + hook bodies, trimmed) + server round-trip
+  {
+    const feed = require('./claudefeed.cjs');
+    const slFirst = { session_id: 'sess-1', model: { id: 'claude-opus-5-5[1m]', display_name: 'Opus 5.5 (1M context)' },
+      cost: { total_cost_usd: 0, total_lines_added: 0, total_lines_removed: 0 },
+      context_window: { total_input_tokens: 0, total_output_tokens: 0, context_window_size: 1000000, current_usage: null, used_percentage: null, remaining_percentage: null },
+      rate_limits: { five_hour: { used_percentage: 11, resets_at: 1790693400 }, seven_day: { used_percentage: 7, resets_at: 1791205200 } } };
+    const slLater = { ...slFirst, session_name: 'Bash probe and task creation',
+      cost: { total_cost_usd: 0.2978514, total_duration_ms: 22634, total_api_duration_ms: 7722, total_lines_added: 3, total_lines_removed: 1 },
+      context_window: { total_input_tokens: 54422, total_output_tokens: 389, context_window_size: 1000000,
+        current_usage: { input_tokens: 2, output_tokens: 389, cache_creation_input_tokens: 35663, cache_read_input_tokens: 18757 }, used_percentage: 5, remaining_percentage: 95 },
+      prompt_cache: { warm: true, caching_observed: true, ttl: '1h', expires_at: 1790682660, hit_ratio: 0.34 } };
+    let s = feed.reduce(null, 'sl', null, slFirst);
+    const firstOk = s.context === null && s.model.name === 'Opus 5.5 (1M context)' && s.rateLimits.fiveHour.pct === 11 && s.rateLimits.fiveHour.resetsAt === 1790693400;
+    s = feed.reduce(s, 'sl', null, slLater);
+    const laterOk = s.context && s.context.pct === 5 && s.context.used === 54422 && s.context.size === 1000000
+      && s.cost === 0.2978514 && s.linesAdded === 3 && s.linesRemoved === 1 && s.sessionName === 'Bash probe and task creation'
+      && s.promptCache.expiresAt === 1790682660;
+    s = feed.reduce(s, 'hook', 'PreToolUse', { hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'echo probe', description: 'Print probe' }, tool_use_id: 'toolu_1' });
+    const doingOk = s.nowDoing && s.nowDoing.tool === 'Bash' && s.nowDoing.detail === 'echo probe';
+    s = feed.reduce(s, 'hook', 'PermissionRequest', { tool_name: 'Bash', tool_input: { command: 'echo probe' } });
+    const permOk = s.attention === 'permission';
+    s = feed.reduce(s, 'hook', 'Stop', { hook_event_name: 'Stop', stop_hook_active: false, last_assistant_message: 'done', background_tasks: [] }, 12345);
+    const stopOk = s.nowDoing === null && s.attention === null && s.lastMessage === 'done' && s.turnEndedAt === 12345;
+    s = feed.reduce(s, 'hook', 'TaskCreated', { task_id: '1', task_subject: 'alpha', task_description: 'Task alpha' });
+    s = feed.reduce(s, 'hook', 'TaskCompleted', { task_id: '1', task_subject: 'alpha' });
+    const taskOk = s.tasks.length === 1 && s.tasks[0].subject === 'alpha' && s.tasks[0].status === 'completed';
+    const same = feed.reduce(s, 'hook', 'InstructionsLoaded', { file_path: 'x' }) === s; // unmodeled → no push
+    check('claude feed reducer (statusLine + hooks)', firstOk && laterOk && doingOk && permOk && stopOk && taskOk && same,
+      JSON.stringify({ firstOk, laterOk, doingOk, permOk, stopOk, taskOk, same }));
+
+    // phase 2: TaskCreate/TaskUpdate tool calls, StopFailure, question attention,
+    // idle_prompt ignored, subagent counting, turnStartedAt
+    let p = feed.reduce(null, 'hook', 'UserPromptSubmit', { prompt: 'x' }, 1000);
+    const turnOk = p.turnStartedAt === 1000;
+    p = feed.reduce(p, 'hook', 'PostToolUse', { tool_name: 'TaskCreate', tool_input: { subject: 'alpha', description: 'Task alpha' }, tool_response: { task: { id: '1', subject: 'alpha' } } });
+    p = feed.reduce(p, 'hook', 'TaskCreated', { task_id: '1', task_subject: 'alpha', task_description: 'Task alpha' }); // no duplicate
+    p = feed.reduce(p, 'hook', 'PostToolUse', { tool_name: 'TaskCreate', tool_input: { subject: 'beta' }, tool_response: { task: { id: '2', subject: 'beta' } } });
+    p = feed.reduce(p, 'hook', 'PostToolUse', { tool_name: 'TaskUpdate', tool_input: { taskId: '1', status: 'in_progress', activeForm: 'Doing alpha' }, tool_response: { success: true } });
+    p = feed.reduce(p, 'hook', 'PostToolUse', { tool_name: 'TaskUpdate', tool_input: { taskId: '2', status: 'completed' } });
+    const tasksOk = p.tasks.length === 2 && p.tasks[0].status === 'in_progress' && p.tasks[0].activeForm === 'Doing alpha' && p.tasks[1].status === 'completed';
+    p = feed.reduce(p, 'hook', 'PreToolUse', { tool_name: 'AskUserQuestion', tool_input: { questions: [] } });
+    const askOk = p.attention === 'question' && feed.attentionText(p) === 'is asking you a question';
+    p = feed.reduce(p, 'hook', 'PostToolUse', { tool_name: 'AskUserQuestion', tool_input: {} });
+    const askClearOk = p.attention === null;
+    const idle = feed.reduce(p, 'hook', 'Notification', { message: 'Claude is waiting for your input', notification_type: 'idle_prompt' });
+    const idleOk = idle === p && idle.attention === null;
+    p = feed.reduce(p, 'hook', 'SubagentStart', { agent_id: 'a' });
+    p = feed.reduce(p, 'hook', 'SubagentStart', { agent_id: 'b' });
+    p = feed.reduce(p, 'hook', 'SubagentStop', { agent_id: 'a' });
+    const subOk = p.subagents === 1;
+    p = feed.reduce(p, 'hook', 'StopFailure', { error: 'rate_limit', error_details: 'Too many requests' }, 2000);
+    const failOk = p.failure && p.failure.reason === 'rate limit: Too many requests' && p.failure.at === 2000 && p.subagents === 0
+      && feed.attentionText(p) === 'turn failed: rate limit: Too many requests';
+    p = feed.reduce(p, 'hook', 'PreToolUse', { tool_name: 'Bash', tool_input: { command: 'npm test' } });
+    p = feed.reduce(p, 'hook', 'PermissionRequest', { tool_name: 'Bash', tool_input: { command: 'npm test' } });
+    const failStays = Boolean(p.failure); // only the next prompt clears it
+    p = feed.reduce(p, 'hook', 'UserPromptSubmit', { prompt: 'retry' }, 3000);
+    const failCleared = p.failure === null && p.attention === null && p.turnStartedAt === 3000;
+    p = feed.reduce(p, 'hook', 'PermissionRequest', { tool_name: 'Bash', tool_input: { command: 'npm test' } });
+    const permText = feed.attentionText(p) === 'needs permission: Bash — npm test';
+    const sub0 = feed.reduce(p, 'hook', 'SubagentStop', {}); // floor at 0
+    check('claude feed reducer phase 2 (tasks, failure, question, idle, subagents)',
+      turnOk && tasksOk && askOk && askClearOk && idleOk && subOk && failOk && failStays && failCleared && permText && sub0 === p,
+      JSON.stringify({ turnOk, tasksOk, askOk, askClearOk, idleOk, subOk, failOk, failStays, failCleared, permText, sub0: sub0 === p }));
+
+    // round-trip: POST /sl with x-vs-term → listener fires with the parsed context %
+    const { port } = await feed.start({ resolveTerm: (id) => (id === 'smoke-t1' ? 'smoke-ws' : null) });
+    const post = (p, term, body) => new Promise((resolve) => {
+      const req = require('node:http').request({ host: '127.0.0.1', port, path: p, method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(term ? { 'x-vs-term': term } : {}) } }, (res) => {
+        let b = ''; res.on('data', (c) => { b += c; }); res.on('end', () => resolve({ status: res.statusCode, body: b }));
+      });
+      req.on('error', (e) => resolve({ status: 0, body: e.message }));
+      req.end(typeof body === 'string' ? body : JSON.stringify(body));
+    });
+    let got = null;
+    let limitsGot = null;
+    feed.onData((wsId, termId, st) => { got = { wsId, termId, pct: st.context && st.context.pct }; });
+    feed.onLimits((l) => { limitsGot = l; });
+    const r1 = await post('/sl', 'smoke-t1', slLater);
+    const r2 = await post('/hook/Stop', 'nobody', { last_assistant_message: 'x' }); // unknown term: 200 + drop
+    const r3 = await post('/sl', 'smoke-t1', '{not json'); // bad JSON: 200 + ignore
+    const deadline = Date.now() + 2000;
+    while (!got && Date.now() < deadline) await new Promise(r => setTimeout(r, 50));
+    const snap = feed.snapshot('smoke-ws');
+    check('claude feed server round-trip (/sl → listener)', Boolean(port) && r1.status === 200 && r1.body === '{}' && r2.status === 200 && r3.status === 200
+      && got && got.wsId === 'smoke-ws' && got.termId === 'smoke-t1' && got.pct === 5
+      && limitsGot && limitsGot.sevenDay.pct === 7 && snap.terms['smoke-t1'] && !snap.terms.nobody,
+    `port=${port} got=${JSON.stringify(got)} limits=${Boolean(limitsGot)}`);
+    // settings injection: command hooks kept first, http hooks appended, statusLine
+    // without refreshInterval; the user's statusLine is handed its stdin
+    const cmdHook = { hooks: [{ type: 'command', command: 'echo done >> "$VIBESPACE_TERM_STATUS"', timeout: 10 }] };
+    const st = feed.addSettings({ hooks: { Stop: [cmdHook] } }, { port: 4242, userCommand: null });
+    const handed = feed.addSettings({ hooks: {} }, { port: 4242, userCommand: "node 'my sl.js'" });
+    const noPort = feed.addSettings({ hooks: {} }, { port: null });
+    check('claude feed settings injection (keeps command hooks, hand-off)', st.hooks.Stop[0] === cmdHook
+      && st.hooks.Stop[1].hooks[0].url === 'http://127.0.0.1:4242/hook/Stop' && st.hooks.Stop[1].hooks[0].headers['x-vs-term'] === '$VIBESPACE_TERM_ID'
+      && !st.hooks.SessionStart && st.statusLine.refreshInterval === undefined && /\/sl >\/dev\/null 2>&1; exit 0$/.test(st.statusLine.command)
+      && handed.statusLine.command.includes(`vs_user='node '\\''my sl.js'\\'''`) && !noPort.statusLine && !noPort.hooks.Stop,
+    st.statusLine.command.slice(0, 60));
+    // account limits shared across processes via <dataRoot>/limits.json: written on
+    // change; a newer file (another process) is adopted; > 6 h old is ignored
+    const lf = path.join(U.dataRoot(), 'limits.json');
+    const written = U.readJson(lf, null);
+    const other = { fiveHour: { pct: 55, resetsAt: 1790693400 }, sevenDay: { pct: 20, resetsAt: 1791205200 } };
+    U.writeJsonAtomic(lf, { at: Date.now() - 7 * 3600 * 1000, limits: { fiveHour: { pct: 99, resetsAt: 1 }, sevenDay: null } });
+    const ignoredOld = feed.snapshot('smoke-ws').limits.sevenDay.pct === 7;
+    U.writeJsonAtomic(lf, { at: Date.now() + 1000, limits: other });
+    const adopted = feed.snapshot('smoke-ws').limits.fiveHour.pct === 55;
+    check('claude feed limits.json share (write, adopt newer, ignore > 6 h)',
+      Boolean(written && written.limits && written.limits.fiveHour.pct === 11 && typeof written.at === 'number') && ignoredOld && adopted,
+      JSON.stringify({ written: Boolean(written), ignoredOld, adopted }));
+    feed.forget('smoke-t1');
+    feed.onData(() => {});
+    feed.onLimits(() => {});
+    feed.stop();
+  }
+
+  // 24. phase 5: prompt-cache countdown + compaction (reducer), instant attention
+  //     arbitration (attention.cjs), exact session pin from the feed, bg filter
+  {
+    const feed = require('./claudefeed.cjs');
+    // A — cache countdown math lives in the renderer module (pure export)
+    const fu = await import(require('node:url').pathToFileURL(path.join(U.ROOT, 'renderer', 'workspace', 'ui', 'feedui.js')).href);
+    const nowMs = 1790679068000;
+    const warm = fu.cacheInfo({ warm: true, expiresAt: 1790679068 + 192 }, nowMs);
+    const amber = fu.cacheInfo({ warm: true, expiresAt: 1790679068 + 45 }, nowMs);
+    const hour = fu.cacheInfo({ warm: true, expiresAt: 1790679068 + 3592 }, nowMs);
+    const cold = fu.cacheInfo({ warm: true, expiresAt: 1790679068 - 1 }, nowMs);
+    const none = fu.cacheInfo(null, nowMs);
+    const cacheOk = warm.text === 'cache warm · 3:12' && !warm.amber && amber.amber && amber.text === 'cache warm · 0:45'
+      && hour.text === 'cache warm · 59:52' && cold.state === 'cold' && cold.text === 'cache cold' && none === null;
+    let c = feed.reduce(null, 'sl', null, { context_window: { used_percentage: 88 }, prompt_cache: { warm: true, ttl: '1h', expires_at: 1790682660 } });
+    c = feed.reduce(c, 'hook', 'PreCompact', { trigger: 'auto' }, 7);
+    const compOn = c.compacting && c.compacting.trigger === 'auto' && c.compacting.at === 7 && c.promptCache.expiresAt === 1790682660;
+    const c2 = feed.reduce(c, 'hook', 'PostCompact', {});
+    const c3 = feed.reduce(c, 'sl', null, { context_window: { used_percentage: 12 } }); // context % back = done
+    const c4 = feed.reduce(c, 'hook', 'PreCompact', null); // missing body: no crash, no change
+    check('prompt-cache countdown + compaction state', cacheOk && compOn && c2.compacting === null && c3.compacting === null && c4 === c,
+      JSON.stringify({ cacheOk, warm: warm.text, hour: hour.text, compOn }));
+
+    // B — instant attention: feed flips to waiting, the stale PreToolUse `working`
+    // line is ignored, the late Notification `waiting` doesn't toast twice, the
+    // approved tool hands back `working`, a Stop is never clobbered
+    const at = require('./attention.cjs');
+    const t = at.newTerm();
+    const steps = [];
+    steps.push(at.fileStatus(t, 'working'));                                             // PreToolUse hook
+    steps.push(at.feedState(t, { attention: 'permission', turnEndedAt: null }));         // PermissionRequest
+    steps.push(at.fileStatus(t, 'working'));                                             // slow hook line lands late
+    steps.push(at.fileStatus(t, 'waiting'));                                             // permission_prompt ~6 s later
+    steps.push(at.feedState(t, { attention: null, turnEndedAt: null }));                 // PostToolUse: approved, runs
+    const bOk = steps[0].apply === 'working' && steps[1].apply === 'waiting' && steps[1].notify === true
+      && steps[2].apply === null && steps[3].apply === 'waiting' && steps[3].notify === false
+      && steps[4].apply === 'working' && steps[4].notify === false; // the approved tool runs
+    const t2 = at.newTerm();
+    at.fileStatus(t2, 'working');
+    const q1 = at.feedState(t2, { attention: 'question', turnEndedAt: 1 });
+    const q2 = at.feedState(t2, { attention: null, turnEndedAt: 1 });                     // answered → working
+    const t3 = at.newTerm();
+    at.fileStatus(t3, 'working');
+    at.feedState(t3, { attention: 'permission', turnEndedAt: 1 });
+    const s3 = at.feedState(t3, { attention: null, turnEndedAt: 2 });                     // turn ended: leave it to Stop's `done`
+    const d3 = at.fileStatus(t3, 'done');
+    const t4 = at.newTerm();
+    at.fileStatus(t4, 'done');
+    const f4 = at.feedState(t4, { attention: null, failure: { reason: 'x' }, turnEndedAt: 3 }); // failure is not an ask
+    check('instant attention override + one toast per episode', bOk && q1.apply === 'waiting' && q2.apply === 'working' && q2.notify === false
+      && s3.apply === null && d3.apply === 'done' && d3.notify === true && f4.apply === null,
+    JSON.stringify(steps.map(r => r.apply + (r.notify ? '!' : ''))));
+
+    // C — exact session pin from the feed (only once the transcript exists; the
+    // timing heuristic never overrides it afterwards)
+    const BS = String.fromCharCode(92);
+    const repo = 'D:' + BS + 'Repositories' + BS + 'vibespace-smoke-feedsess-' + U.randId(6);
+    const dir = path.join(U.claudeProjectsDir(), U.mungeClaudeDir(repo));
+    fs.mkdirSync(dir, { recursive: true });
+    sessions.start('smoke-fs', repo);
+    sessions.trackClaudeStart('smoke-fs', 't1');
+    const idA = 'aaaaaaaa-0000-4000-8000-000000000001';
+    const idB = 'bbbbbbbb-0000-4000-8000-000000000002';
+    const early = sessions.pinFromFeed('smoke-fs', 't1', idA);                            // no transcript yet
+    fs.writeFileSync(path.join(dir, idA + '.jsonl'), '{}');
+    const pinA = sessions.pinFromFeed('smoke-fs', 't1', idA) && sessions.getSession('smoke-fs', 't1') === idA;
+    fs.writeFileSync(path.join(dir, idB + '.jsonl'), '{}');                               // /clear → new session
+    const s = feed.reduce(feed.reduce(null, 'sl', null, { session_id: idA }), 'hook', 'UserPromptSubmit', { session_id: idB });
+    const pinB = s.sessionId === idB && sessions.pinFromFeed('smoke-fs', 't1', s.sessionId) && sessions.getSession('smoke-fs', 't1') === idB;
+    sessions.trackClaudeStart('smoke-fs', 't1');                                           // relaunch in the same tab
+    fs.writeFileSync(path.join(dir, 'cccccccc-0000-4000-8000-000000000003.jsonl'), '{}');
+    sessions._scan('smoke-fs');
+    const kept = sessions.getSession('smoke-fs', 't1') === idB && sessions.pinFromFeed('smoke-fs', 't1', idB) === false;
+    sessions.stop('smoke-fs');
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+    check('session pinned from feed session_id (/clear re-pins, heuristic never overrides)', early === false && pinA && pinB && kept,
+      JSON.stringify({ early, pinA, pinB, kept }));
+
+    // D — background agents: only kind=background under the repo, newest first
+    const bg = require('./bgagents.cjs');
+    const list = [
+      { id: '6ce06036', kind: 'background', cwd: repo + BS + 'sub', startedAt: 2, name: 'fix it', status: 'busy', state: 'working' },
+      { id: 'aa11bb22', kind: 'background', cwd: repo, startedAt: 3, name: 'newer', status: 'idle', state: 'done' },
+      { sessionId: 'x', kind: 'interactive', cwd: repo, startedAt: 4, name: 'tab' },
+      { id: 'dd33ee44', kind: 'background', cwd: repo + 'suffix', startedAt: 5 },        // sibling prefix: not ours
+      { id: 'bad id!', kind: 'background', cwd: repo, startedAt: 6 },
+    ];
+    const got = bg.filterBg(list, repo).map(a => a.id);
+    check('background agents filter (kind, cwd under repo, id check)', JSON.stringify(got) === '["aa11bb22","6ce06036"]', JSON.stringify(got));
+  }
+
+  // 23. agent board summary (main/board.cjs): shape, write, other-workspace read
+  //     with freshness filter, delete on close
+  {
+    const board = require('./board.cjs');
+    const feed = require('./claudefeed.cjs');
+    let fs1 = feed.reduce(null, 'hook', 'UserPromptSubmit', {}, 1);
+    fs1 = feed.reduce(fs1, 'hook', 'PostToolUse', { tool_name: 'TaskCreate', tool_input: { subject: 'a' }, tool_response: { task: { id: '1' } } });
+    fs1 = feed.reduce(fs1, 'hook', 'PreToolUse', { tool_name: 'Bash', tool_input: { command: 'npm test' } });
+    fs1 = feed.reduce(fs1, 'hook', 'PermissionRequest', { tool_name: 'Bash', tool_input: { command: 'npm test' } });
+    const terminals = [{ termId: 'a1', name: 'agent-1', isClaude: true }, { termId: 's1', name: 'term-1', isClaude: false }];
+    const make = () => board.buildSummary({ wsId: 'smoke-board', name: 'Smoke', terminals,
+      statusOf: (id) => (id === 'a1' ? 'waiting' : undefined), feedOf: (id) => (id === 'a1' ? fs1 : null), reasonOf: feed.attentionText, now: 5 });
+    const sum = make();
+    const a = sum.agents[0];
+    const shapeOk = sum.name === 'Smoke' && sum.updatedAt === 5 && sum.agents.length === 1 && a.name === 'agent-1' && a.status === 'waiting'
+      && a.reason === 'needs permission: Bash — npm test' && a.nowDoing === 'Bash npm test' && a.tasks.done === 0 && a.tasks.total === 1 && a.failed === false;
+    board.start('smoke-board', () => ({ ...make(), updatedAt: Date.now() }));
+    await new Promise(r => setTimeout(r, 300));
+    const file = board._file('smoke-board');
+    const written = U.readJson(file, null);
+    // another (fresh) workspace + a stale one; readOthers from a third id sees only the fresh
+    U.writeJsonAtomic(board._file('smoke-stale'), { ...sum, wsId: 'smoke-stale', name: 'Stale', updatedAt: Date.now() - 3 * 60 * 1000 });
+    const seen = board.readOthers('someone-else').map(w => w.wsId);
+    const selfHidden = !board.readOthers('smoke-board').some(w => w.wsId === 'smoke-board');
+    board.stop('smoke-board');
+    const deleted = !fs.existsSync(file);
+    try { fs.rmSync(board._file('smoke-stale'), { force: true }); } catch {}
+    check('agent board summary (shape, write, fresh-only read, delete on close)',
+      shapeOk && written && written.agents.length === 1 && seen.includes('smoke-board') && !seen.includes('smoke-stale') && selfHidden && deleted,
+      JSON.stringify({ shapeOk, written: Boolean(written), seen, selfHidden, deleted }));
+  }
+
   // 23. away mode (presence.cjs): pure transitions + marker path + pty env. Never
   //     start()/set() here — that would touch the shared presence state
   {

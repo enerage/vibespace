@@ -86,6 +86,73 @@ Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
   Going away warns about agents already waiting, because those won't re-notify
   the phone. Windows toasts are unchanged. Smoke 70/70.
 
+## [0.6.20] — 2026-09-29
+
+### Added
+- **Prompt-cache chip** on finished agents, in the activity strip, peek card and
+  board. `cache warm · 3:12` counts down live and turns amber in the last minute.
+  After that it shows `cache cold`: the next message re-reads the whole context,
+  which is slower and costs more. It hides while the agent works.
+- **Compaction states**: the strip and board say "compacting context…" while
+  claude compacts. An idle agent at 85 %+ context shows "auto-compact soon".
+- **Background agents on the board** (agents started with `claude --bg` in this
+  repo): name, state and age, plus **Attach**, which opens `claude attach <id>` in
+  a new tab. The list refreshes every 15 s while the board is open. Closing the
+  tab leaves the agent running.
+- **↺ Resume button** next to + Claude. It opens Claude's picker in a new tab so
+  you can continue an earlier conversation, and the pick is saved to that tab. It
+  does the same as right-clicking + Claude, which still works.
+
+### Changed
+- **Permission prompts turn the light red at once.** Before, it took about 6 s,
+  because only claude's "user is away" notification set it. The toast and
+  taskbar badge move with the light, and the late notification no longer toasts
+  a second time. When you approve, the light goes back to amber.
+- **Session tracking is exact.** Each tab's conversation id now comes straight
+  from claude's own data, tagged with the tab. `/clear` or `/resume` inside a tab,
+  and two agents started at the same moment, are tracked correctly, so ↻ Restart
+  and restore resume the right conversation. Agents started before 0.6.16 keep
+  the old timing-based guess.
+- **A conversation picked in the resume picker is saved right away**, as is one
+  switched to with `/resume <id>`. You don't have to send a message first, so
+  "pick, then restart before typing" no longer loses the pick. Verified live:
+  claude reports the picked id about 1 s after the pick.
+
+Takes effect after one ↻ Restart. Smoke 67/67.
+
+## [0.6.19] — 2026-09-29
+
+### Added
+- **Agent board** (▦ Board next to + Terminal, or **Ctrl+Shift+B**). It covers
+  the terminal area only, so the preview stays usable and the agents keep
+  running underneath.
+  - Every agent in this window appears as a card in one of four columns: **Needs
+    you** · **Working** · **Done** (newest first) · **Other**. Empty columns
+    shrink to a header with a count. In a narrow pane the columns stack.
+  - A card shows the light, name and model, then one line: what the agent is
+    doing, why it needs you, or the start of its last reply. Below that come
+    context, cost, lines +/−, tasks with the current one, time working or since
+    done, and subagents.
+  - Click a card to jump to its tab. Esc or ✕ closes the board.
+  - **Quick reply** on finished and failed agents: type, press Enter, and the
+    text goes to that agent as if you typed it. Permission and question waits
+    have no reply box, because typed text plus Enter could pick "Yes". You
+    approve those in the terminal.
+  - **Other workspaces**: other open VibeSpace windows are listed at the bottom
+    with their agents as small chips. Click a row to switch to that window.
+- The tab menu's **Agent info** panel now shows model, context (tokens), cost,
+  lines, tasks and session name when the tab has feed data.
+
+### Fixed
+- **Opening a workspace that was already open briefly started a second copy.**
+  The copy opened a window and spawned the saved agents' terminals for about 2 s
+  before quitting. The launcher's Open button hit this whenever the workspace
+  was already open. Now the copy just hands off focus and exits.
+- The tab bar no longer slides tabs under the + Claude / + Terminal buttons
+  when space runs out; the tabs scroll instead.
+
+Takes effect after one ↻ Restart. Smoke 63/63.
+
 ## [0.6.18] — 2026-09-29
 
 ### Changed
@@ -101,6 +168,66 @@ Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
   - **Close**, which asks the same confirm as ✕.
 - The tree's right-click menu now uses the same shared helper
   (`common.js showMenu`, with separators and disabled items).
+
+## [0.6.17] — 2026-09-29
+
+### Added
+- **Richer agent lights.** A red light with a lock means the agent needs
+  permission, and a red light with a "?" means it's asking you a question. A
+  red ✕ means the turn failed, for example on a rate limit or API error. It
+  shows even when the light would otherwise say done. Hover the light for the
+  reason, e.g. "needs permission: Bash — npm test".
+- **Toasts say why**: "agent-2 needs permission: Bash — npm test". A failed
+  turn now toasts and turns the taskbar badge red. Before, it left the light
+  amber.
+- **Activity strip** above the active terminal, one line:
+  - while working: `● agent-2 · Edit src/app.js · 1m12s`
+  - when finished: `done 3m ago · "first line of the reply"`; click the reply to
+    read it
+  - when it needs you: the reason, in red
+  - on the right: context bar, model, `3/7 tasks` (click for the checklist) and
+    the number of running subagents
+- **Peek card**: hover an agent tab for about ⅓ s to see its state, model,
+  context and cost, what it's doing now, its task list and the start of its
+  last reply. It never takes focus from the terminal, and Esc closes it.
+- **Task pill on tabs** (`3/7`) whenever the agent tracks tasks or todos. It
+  hides a minute after an all-done turn ends.
+
+### Changed
+- The plan-limit chip now shows in every window, including windows with no
+  running agent. Processes share the latest limits through
+  `~/.vibespace/limits.json`, and data older than 6 h is ignored. A window whose
+  reset time has passed shows — instead of a stale %.
+- The "Claude is waiting for your input" idle nudge no longer counts as the
+  agent needing you.
+
+Tabs without feed data (plain terminals, agents started before 0.6.16) look
+exactly as before. Takes effect after one ↻ Restart. Smoke 62/62.
+
+## [0.6.16] — 2026-09-29
+
+### Added
+- **Context meter on every agent tab.** A thin bar along the tab's bottom edge
+  shows how full the context window is: green under 60 %, amber under 85 %, red
+  above that. It appears after the agent's first reply. Hover the tab name for
+  the model, context % (used/total tokens), session cost and lines +/−.
+- **Plan-limit chip in the top bar**: `5h ▰▰▱ 42% · 1h12m   7d ▰▱▱ 18%`.
+  - It shows your Claude plan usage for the 5-hour and 7-day windows, with a
+    countdown to the 5-hour reset.
+  - Hover it for the exact reset times.
+  - It turns red when a window reaches 90 %.
+  - It stays hidden until claude reports limits (API-key accounts never do).
+- **Claude data feed** behind both (`main/claudefeed.cjs`):
+  - A local server receives claude's status line and HTTP hooks.
+  - Both are injected through the `--settings` file every agent already gets.
+  - It also collects "now doing", attention, last reply and tasks for the
+    next UI steps.
+  - The existing status lights don't depend on it.
+  - If you have your own statusLine, it keeps working: VibeSpace passes the same
+    data to it and shows its output.
+
+Takes effect after one ↻ Restart; running agents pick it up when relaunched.
+Smoke 60/60.
 
 ## [0.6.15] — 2026-09-29
 

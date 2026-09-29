@@ -13,7 +13,7 @@ const sessions = new Map(); // termId -> IPty
 const lastActivity = new Map(); // termId -> ms of last data in or out (reload guard)
 const lastOutput = new Map(); // termId -> ms of last OUTPUT only (input excluded: with
 // mouse tracking on, merely moving the mouse over claude's terminal sends input)
-const metas = new Map(); // termId -> { cwd, statusFile } — bookkeeping for list()
+const metas = new Map(); // termId -> { cwd, statusFile, wsId } — bookkeeping for list()
 const buffers = new Map(); // termId -> { chunks: [], len } — output ring for re-attach
 const BUFFER_CAP = 256 * 1024; // per-terminal bytes kept so a reload can restore scrollback
 
@@ -108,6 +108,9 @@ function create(termId, cwd, cols = 120, rows = 30, wsId = null) {
     } catch {}
     env.VIBESPACE_TERM_STATUS = statusFile;
   }
+  // claude's statusLine command and HTTP hooks send this back as the x-vs-term
+  // header, so the feed server (claudefeed.cjs) knows which tab a payload is for
+  env.VIBESPACE_TERM_ID = termId;
   // away mode: claude skips phone pushes while this file exists (presence.cjs owns
   // it machine-wide); read at claude launch, so only new agents pick it up
   env.CLAUDE_CLIENT_PRESENCE_FILE = presence.markerPath();
@@ -120,7 +123,7 @@ function create(termId, cwd, cols = 120, rows = 30, wsId = null) {
     useConpty: true,
   });
   sessions.set(termId, proc);
-  metas.set(termId, { cwd, statusFile });
+  metas.set(termId, { cwd, statusFile, wsId });
   buffers.set(termId, { chunks: [], len: 0 });
   logger.info(`pty spawn: ${termId} cwd=${cwd}`);
   proc.onData(chunk => {
@@ -181,6 +184,12 @@ function alive(termId) {
   return sessions.has(termId);
 }
 
+// owning workspace of a live pty (null if unknown/dead) — the feed server's
+// termId -> wsId lookup
+function wsOf(termId) {
+  return (sessions.has(termId) && metas.get(termId)?.wsId) || null;
+}
+
 // Layer 3: true when any pty produced output or received input recently — lets the
 // (opt-in) dev watcher defer its reload/relaunch while agents are mid-run or the
 // user is typing. Claude streams continuously while working, so a few seconds of
@@ -222,6 +231,7 @@ module.exports = {
   kill,
   killAll,
   alive,
+  wsOf,
   list,
   busyNow,
   outputAge,

@@ -1,6 +1,8 @@
 import { $, el, toast } from './common.js';
 import { termTheme, onThemeChange } from './themes.js';
 import { openTabMenu } from './tabmenu.js';
+import * as feedui from './feedui.js';
+import * as board from './board.js';
 
 // terminal tabs: each hosts a PowerShell pty; "claude" tabs run Claude Code and
 // get their session id tracked (main process) so they can be resumed after updates.
@@ -13,6 +15,7 @@ let remote = () => false; // phone control pref (⚙): launch claude with --remo
 let wsName = '';
 
 const tabs = new Map(); // termId -> tab record
+const feeds = new Map(); // termId -> latest claude feed snapshot (main/claudefeed.cjs)
 let activeId = null;
 let updating = false;
 let counter = 0;
@@ -74,6 +77,32 @@ export function init(opts) {
   });
   vs.onTermFocus((termId) => { if (tabs.has(termId)) activateTab(termId); });
 
+  // claude data feed → context meter, light detail, task pill (all repainted IN
+  // PLACE; a full renderTabBar per tick would churn the bar and kill a rename in
+  // progress) + activity strip / peek card (ui/feedui.js). The snapshot covers a
+  // reload: everything shows before the next tick arrives.
+  feedui.init({ getTab: (id) => tabs.get(id), getFeed: (id) => feeds.get(id), activeId: () => activeId });
+  board.init({ wsId }); // ▦ agent board (Ctrl+Shift+B) — reads tabs + feeds via the exports below
+  vs.onTermFeed((termId, feed) => {
+    if (!termId) return;
+    feeds.set(termId, feed);
+    const tab = tabs.get(termId);
+    if (tab) paintMeter(tab);
+    feedui.onFeed(termId);
+    notifyAgents();
+  });
+  vs.feedSnapshot(wsId).then((snap) => {
+    for (const [termId, feed] of Object.entries((snap && snap.terms) || {})) {
+      if (feeds.has(termId)) continue; // a live tick already beat the snapshot
+      feeds.set(termId, feed);
+      const tab = tabs.get(termId);
+      if (tab) paintMeter(tab);
+    }
+    feedui.refresh();
+  }).catch(() => {});
+  // the pill hides a minute after an all-done turn ends — no feed tick says so
+  setInterval(() => { for (const tab of tabs.values()) paintMeter(tab); }, 30000);
+
   vs.onUpdaterStage((stage) => {
     if (stage === 'stopping-agents') $('#update-status').textContent = 'Closing agent terminals…';
     if (stage === 'updating') $('#update-status').textContent = 'Running claude update…';
@@ -96,10 +125,12 @@ export function init(opts) {
   $('#btn-new-claude').onclick = () => createTab({ name: nextName('agent'), cwd: repoPath, claude: true });
   // right-click + Claude: start from an EXISTING conversation — claude's own
   // resume picker opens in the new tab and the picked session gets pinned
+  const resumePicker = () => createTab({ name: nextName('agent'), cwd: repoPath, pickSession: true });
   $('#btn-new-claude').oncontextmenu = (ev) => {
     ev.preventDefault();
-    createTab({ name: nextName('agent'), cwd: repoPath, pickSession: true });
+    resumePicker();
   };
+  $('#btn-resume').onclick = resumePicker; // the same, as a visible button
   $('#btn-new-term').onclick = () => createTab({ name: nextName('term'), cwd: repoPath });
   $('#btn-update').onclick = updateRestartAll;
 
@@ -373,7 +404,7 @@ function registerFileLinks(term, tab) {
   } catch {} // xterm without link-provider support — links simply don't light up
 }
 
-export function createTab({ name = 'agent', cwd = repoPath, claude = false, resumeId = null, activate = true, termId = null, attachBuffer = null, savedIsClaude = null, savedSessionId = null, pickSession = false } = {}) {
+export function createTab({ name = 'agent', cwd = repoPath, claude = false, resumeId = null, activate = true, termId = null, attachBuffer = null, savedIsClaude = null, savedSessionId = null, pickSession = false, run = null } = {}) {
   const id = termId || newTermId();
   const host = el('div', 'term-host');
   host.style.display = 'none';
@@ -430,6 +461,9 @@ export function createTab({ name = 'agent', cwd = repoPath, claude = false, resu
       vs.claudeStarted(wsId, id, pickSession ? { picker: true } : undefined);
       if (resumeId) vs.sessionPinned(wsId, id, resumeId);
     }, 900);
+  } else if (attachBuffer === null && run) {
+    // a one-off command typed into a plain tab (board → background agent attach)
+    setTimeout(() => { if (tabs.has(id)) vs.ptyWrite(id, run + '\r'); }, 900);
   }
   persist();
   return tab;
@@ -528,6 +562,7 @@ function removeTab(termId, kill = true) {
   tab.term.dispose();
   tab.host.remove();
   tabs.delete(termId);
+  feeds.delete(termId);
   if (activeId === termId) {
     const next = [...tabs.keys()][0];
     if (next) activateTab(next);
@@ -555,8 +590,18 @@ function renderTabBar() {
     label.title = (tab.sessionId ? `${tab.name} — ${tab.sessionId}` : tab.name) + '  (double-click to rename · right-click for options)';
     const close = el('span', 'close', '✕');
     close.title = 'close terminal';
+    const meter = el('span', 'ctx-meter hidden'); // context-window fill, bottom edge
+    const pill = el('span', 'task-pill hidden'); // `3/7` tasks done (claude feed)
+    tab.meterEl = meter;
+    tab.labelEl = label;
+    tab.labelTitle = label.title;
+    tab.statusEl = status;
+    tab.statusClass = status.className;
+    tab.statusTitle = status.title;
+    tab.pillEl = pill;
 
-    t.append(status, label, close);
+    t.append(status, label, pill, close, meter);
+    paintMeter(tab);
     t.onclick = () => activateTab(tab.id);
     // right-click = options menu (rename, agent info, copy id/name/resume, close)
     t.oncontextmenu = (ev) => {
@@ -576,6 +621,58 @@ function renderTabBar() {
     wireTabDrag(bar, t);
 
     bar.appendChild(t);
+  }
+  feedui.refresh(); // the strip follows the active tab + its base status
+  notifyAgents(); // board: status changes, renames, tabs added/removed
+}
+
+// ---- context meter (claude data feed) ----------------------------------------
+// Thin bar on the tab's bottom edge, width = context used %. Green < 60 %,
+// amber < 85 %, red ≥ 85 %. No bar until the first model response (claude
+// reports context % as null until then — "no data", never 0 %).
+const fmtTokens = (n) => (n >= 1e6 ? (n / 1e6).toFixed(n % 1e6 ? 1 : 0) + 'M' : n >= 1e3 ? Math.round(n / 1e3) + 'k' : String(n));
+
+function feedSummary(f) {
+  if (!f) return '';
+  const parts = [];
+  if (f.model && f.model.name) parts.push(f.model.name);
+  const c = f.context;
+  if (c && typeof c.pct === 'number') parts.push(`context ${Math.round(c.pct)}%` + (c.size ? ` (${fmtTokens(c.used || 0)}/${fmtTokens(c.size)})` : ''));
+  if (typeof f.cost === 'number') parts.push('$' + f.cost.toFixed(2));
+  if (f.linesAdded || f.linesRemoved) parts.push(`+${f.linesAdded || 0}/−${f.linesRemoved || 0}`);
+  return parts.join(' · ');
+}
+
+// Also paints the feed's detail on the light (lock / ? / failed ✕ + reason
+// tooltip) and the `3/7` task pill. Base classes come from renderTabBar; with no
+// feed everything below is a no-op and the tab looks exactly as before.
+function paintMeter(tab) {
+  const m = tab.meterEl;
+  if (!m) return;
+  const f = feeds.get(tab.id);
+  const c = f && f.context;
+  if (c && typeof c.pct === 'number') {
+    const pct = Math.max(0, Math.min(100, c.pct));
+    m.className = 'ctx-meter ' + (pct >= 85 ? 'hot' : pct >= 60 ? 'warn' : 'ok');
+    // measured against the whole tab (it is the positioned box), so the bar
+    // spans the task pill too
+    m.style.width = `calc((100% - 14px) * ${pct / 100})`;
+  } else {
+    m.className = 'ctx-meter hidden';
+  }
+  const line = feedSummary(f);
+  m.title = line;
+  if (tab.labelEl) tab.labelEl.title = tab.labelTitle + (line ? '\n' + line : '');
+  if (tab.statusEl) {
+    const d = feedui.lightDetail(f, tab.status);
+    tab.statusEl.className = tab.statusClass + (d.cls ? ' ' + d.cls : '');
+    tab.statusEl.title = d.title || tab.statusTitle;
+  }
+  if (tab.pillEl) {
+    const p = feedui.pillText(f, tab.status);
+    tab.pillEl.textContent = p;
+    tab.pillEl.classList.toggle('hidden', !p);
+    tab.pillEl.title = p ? `${p} tasks done` : '';
   }
 }
 
@@ -671,6 +768,52 @@ export function isActiveKnown() {
 
 export function activeTermId() {
   return activeId;
+}
+
+// ---- read access for the agent board (ui/board.js) and the tab menu ----------
+// The board only READS tab + feed state; the status files / feed stay the truth.
+const agentListeners = [];
+let agentsQueued = false;
+export function onAgentsChanged(fn) { agentListeners.push(fn); }
+function notifyAgents() {
+  if (agentsQueued || !agentListeners.length) return;
+  agentsQueued = true;
+  queueMicrotask(() => { agentsQueued = false; for (const fn of agentListeners) { try { fn(); } catch {} } });
+}
+
+export function feedFor(termId) {
+  return feeds.get(termId) || null;
+}
+
+export function agents() {
+  return [...tabs.values()].map(t => ({
+    id: t.id, name: t.name, status: t.status || null, isClaude: t.isClaude, dead: t.dead, feed: feeds.get(t.id) || null,
+  }));
+}
+
+export function activate(id) {
+  if (tabs.has(id)) activateTab(id);
+}
+
+// board → background agent: a new tab running `claude attach <id>`. A PLAIN
+// tab: attach ignores --settings ("extra arguments ignored", verified 2.1.284),
+// so no status hooks/feed; the session keeps its own. Ids come from main's
+// JSON parse and are re-checked here before being typed into a shell.
+export function attachBackground(bgId, name) {
+  if (!/^[0-9a-f]{6,64}$/i.test(String(bgId))) return null;
+  const label = 'bg-' + String(name || bgId).replace(/[^\w .-]/g, '').trim().slice(0, 18);
+  return createTab({ name: nextName(label.replace(/\s+/g, '-')), cwd: repoPath, run: `claude attach ${bgId}` });
+}
+
+// board quick reply: the same path as typing — term.paste (bracketed when the
+// app asked for it, so claude takes it as one input), then Enter on its own
+// write so it submits instead of landing inside the paste
+export function sendToAgent(id, text) {
+  const tab = tabs.get(id);
+  if (!tab || tab.dead || !text) return false;
+  tab.term.paste(text);
+  setTimeout(() => { if (tabs.has(id)) vs.ptyWrite(id, '\r'); }, 120);
+  return true;
 }
 
 async function updateRestartAll() {

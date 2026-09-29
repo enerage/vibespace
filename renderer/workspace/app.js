@@ -6,6 +6,7 @@ import * as finder from './ui/finder.js';
 import * as diffpane from './ui/diff.js';
 import * as prefs from './ui/prefs.js';
 import { applyTheme } from './ui/themes.js';
+import * as limits from './ui/limits.js';
 
 const wsId = new URLSearchParams(location.search).get('id');
 let ws = null;
@@ -339,6 +340,7 @@ async function main() {
   finder.init(ws.repoPath, (path, name) => viewer.open(path, name));
 
   const shot = new URLSearchParams(location.search).get('shot');
+  limits.init(wsId); // 5h/7d plan-limit chip (claude data feed)
   terms.init({
     wsId,
     repoPath: ws.repoPath,

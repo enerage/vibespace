@@ -74,8 +74,25 @@ Key facts encoded in `main/sessions.cjs`:
 - An unresolved terminal owns the earliest session file born after its claude launched
   and before the *next* terminal's claude launch; tabs resumed with a known id are
   pinned and never rediscovered.
-- Known holes (see TODO.md): manual `/resume` switches inside a tab, near-simultaneous
-  launches.
+- **Primary source since 0.6.20: the claude data feed.** Every statusLine/hook body
+  carries `session_id` and arrives tagged with our term id, so main calls
+  `sessions.pinFromFeed()` on each feed emit. That follows `/clear` (verified: the
+  new transcript exists at once and it re-pinned in ~1.7 s), `/resume` and the
+  picker. It pins only once the `.jsonl` exists, so a restore never resumes a
+  conversation that was never saved. Feed-pinned terms are flagged `feed` and the
+  timing heuristic never touches them.
+- Verified live (2.1.284, no message sent): picking a conversation in the
+  `claude --resume` picker, or typing `/resume <id>` in a running session, sends
+  a statusLine tick with the new `session_id` within ~1–1.5 s. `pinFromFeed` pins
+  it at once, so "pick, then restart before typing" keeps the pick for feed
+  agents. `pickResumed` (mtime revival, which only fires after the old .jsonl
+  gets a new write) is now just the pre-feed fallback. If a future claude
+  stopped ticking there, a SessionStart COMMAND hook that curls the id to the
+  feed server would close the gap (SessionStart never fires as an HTTP hook).
+  The ↺ Resume button (0.6.20) = right-click + Claude = `pickSession`.
+- The heuristic above is now only the fallback for agents without a feed
+  (started before 0.6.16). Its known holes (manual `/resume`, near-simultaneous
+  launches) remain for those only; see TODO.md.
 
 ## Developing VibeSpace
 
@@ -103,7 +120,10 @@ Key facts encoded in `main/sessions.cjs`:
   bounce — resume is verified working. Root-level files (CHANGELOG.md, TODO.md,
   RESEARCH-HOTRELOAD.md) are not watched.
 - Logs: `~/.vibespace/logs/<instance>.log` (dev-watch lines, pty spawns, session
-  captures, renderer errors, term-status transitions). `VIBESPACE_DEBUG=1` for
+  captures, renderer errors, term-status transitions). Renderer `console.warn/error`
+  reach the log via `console-message`. Electron 35+ passes that event's `level` as a
+  string ('warning'/'error'), so a numeric `>= 2` check alone silently drops every line.
+  That happened from about 2026-09-26 until 2026-09-29. `VIBESPACE_DEBUG=1` for
   session-scan traces. Ctrl+Shift+D in a window copies a diagnostics bundle.
 - **Agent status hooks** (0.5.0): claude tabs launch with
   `--settings <instance>/claude-hook-settings.json` injecting
@@ -111,6 +131,67 @@ Key facts encoded in `main/sessions.cjs`:
   working/waiting/done to `$VIBESPACE_TERM_STATUS` (set per pty by ptyhost).
   `main/status.cjs` watches and pushes `term:status` → tab lights, toasts, taskbar
   badge. Change the word set and all three of those together.
+- **Claude data feed** (0.6.16): `main/claudefeed.cjs` runs a `127.0.0.1:<random port>`
+  server; the same settings file adds a statusLine (`curl` POST to `/sl`) and
+  `type: 'http'` hooks (`/hook/<Event>`), tab id in the `x-vs-term` header
+  (`$VIBESPACE_TERM_ID`, set per pty by ptyhost). It must listen BEFORE any pty
+  spawns: a dead port makes claude print red "hook error / ECONNREFUSED" lines in
+  the TUI every turn. So `index.cjs` awaits `claudefeed.start()` first, and no port
+  means no feed entries. SessionStart never fires as an HTTP hook, so don't rely on
+  it. Hand-off rule: if `~/.claude/settings.json` has a statusLine command, ours
+  pipes the same stdin into it and prints ITS output. Otherwise we print nothing,
+  which leaves one blank row above claude's mode line. The command hooks stay
+  as they are, so lights/toasts/badge survive a feed failure.
+  **Layers (0.6.17):** the status files are the BASE state (working/waiting/done).
+  The feed is the DETAIL layer on top of it: the lock/?/✕ light, the reason
+  tooltip, the `3/7` pill, the activity strip and the peek card
+  (`renderer/workspace/ui/feedui.js`). A tab with no feed must look exactly as it
+  did before 0.6.16. The lights/toasts/badge rule now covers feed reasons too:
+  `claudefeed.attentionText()` builds the text for the light tooltip, the strip
+  and the toast body. A failed turn (StopFailure) fires no Stop hook, so main
+  toasts and badges it from the feed. Account limits are shared across processes
+  via `<dataRoot>/limits.json` (adopted when newer and < 6 h old). Screenshot
+  testing: delete the throwaway home's log first, or a script grepping it for the
+  feed port picks up a stale port from an earlier run.
+  **0.6.20:**
+  - **Instant attention.** PermissionRequest or the AskUserQuestion PreToolUse
+    flips the base status to `waiting` through `main/attention.cjs`: an in-memory
+    override applied via the same `applyStatus` path as the file listener. It
+    never writes the hook-owned files.
+  - While that dialog is open, a late PreToolUse `working` line is ignored. The
+    tool running hands back `working` unless the turn ended (Stop's `done` wins).
+  - Toasts fire once per waiting episode: they only fire when the status actually
+    changes.
+  - `prompt_cache.expires_at` is an ABSOLUTE epoch-seconds deadline (the last API
+    request + ttl, 1 h here), so the cache countdown is client-side math.
+  - PreCompact/PostCompact payloads are still unverified live and are read
+    defensively.
+  - Background agents: `claude agents --json --cwd <repo>` (about 0.8 s),
+    filtered to `kind: 'background'`. `claude attach` ignores `--settings`, so an
+    attach tab is a plain tab.
+  - Screenshot mode's hard 10 s exit is too short on a loaded machine. The
+    phase-5 script (`scratchpad/shot5.cjs`) drives a NORMAL window instead, with
+    auto-resume off and `APPDATA` pointed at the throwaway home so the real Start
+    Menu is never touched.
+- **Agent board** (0.6.19, `renderer/workspace/ui/board.js`, ▦ or Ctrl+Shift+B):
+  - It is an overlay inside `#term-hosts`, so xterms are never disposed or refit
+    when it opens or closes.
+  - Columns: Needs you / Working / Done / Other. Cards are updated in place so a
+    half-typed quick reply survives feed ticks.
+  - It is READ-ONLY: it reads `terms.agents()` / `feedFor()`, and the status files
+    and the feed stay the truth.
+  - Quick reply exists only on Done and failed cards. In a permission or question
+    dialog, "text + Enter" would pick the highlighted option.
+  - Other workspaces: `main/board.cjs` writes `<dataRoot>/board/<wsId>.json` on
+    change (at most one write per 2 s, a 60 s heartbeat, deleted on close).
+    Readers hide files older than 2 min.
+  - "Focus that workspace" spawns `--workspace=<id>`, which loses the
+    single-instance lock. `whenReady` must `return` when `!gotLock`: without that
+    guard the duplicate opened a window, spawned ptys and deleted the running
+    window's board file (fixed 0.6.19; the launcher's Open button had the same
+    bug). `--smoke` skips the lock entirely: it shares the launcher's default
+    userData, and a running launcher would otherwise make smoke bail out
+    silently.
 - **Phone control + away mode** (0.6.21, RESEARCH-REMOTE.md):
   - It is Claude Code's own Remote Control. `terms.js` `claudeCommand()` is the ONE
     builder for a new interactive claude and adds `--remote-control "<ws> · <tab>"`
@@ -125,7 +206,7 @@ Key facts encoded in `main/sessions.cjs`:
   - After Win+L the idle time reads only a few seconds. A locked screen must count
     as infinite idle, or the "back at PC" rule flips straight back.
 - Keys: Ctrl+P file finder · Ctrl+F terminal search (active tab) · Ctrl+Shift+U
-  jump-to-attention · Ctrl+Shift+D diagnostics.
+  jump-to-attention · Ctrl+Shift+B agent board · Ctrl+Shift+D diagnostics.
 - **Git** (0.6.14, sidebar since 0.6.15): `main/githistory.cjs` (log/commit/fileAt/branch,
   read-only) + `renderer/workspace/ui/history.js`. The lists live in the LEFT
   pane (`#side-tabs` Files|Git → `#git-side`); `diff.js` drives both modes and

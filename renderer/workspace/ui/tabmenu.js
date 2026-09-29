@@ -1,4 +1,5 @@
 import { el, toast, showMenu } from './common.js';
+import { feedFor } from './terms.js';
 
 // Right-click menu for terminal tabs (was: right-click = rename) + the
 // "Agent info" panel. Kept out of terms.js: terms.js only hands us the tab
@@ -53,6 +54,20 @@ export function showAgentInfo(tab) {
     ['Folder', tab.cwd],
     ['Terminal ID', tab.id],
   ];
+  // live detail from the claude data feed (main/claudefeed.cjs), when this tab has one
+  const f = feedFor(tab.id);
+  if (f) {
+    const c = f.context;
+    const tok = (n) => (n >= 1e6 ? (n / 1e6).toFixed(1).replace(/\.0$/, '') + 'M' : n >= 1e3 ? Math.round(n / 1e3) + 'k' : String(n));
+    const items = (f.tasks && f.tasks.length) ? f.tasks : (f.todos || []);
+    rows.splice(3, 0,
+      ['Model', f.model && f.model.name],
+      ['Context', c && typeof c.pct === 'number' ? `${Math.round(c.pct)}%` + (c.size ? ` (${tok(c.used || 0)} / ${tok(c.size)} tokens)` : '') : null],
+      ['Cost', typeof f.cost === 'number' ? '$' + f.cost.toFixed(2) : null],
+      ['Lines', f.linesAdded || f.linesRemoved ? `+${f.linesAdded || 0} / −${f.linesRemoved || 0}` : null],
+      ['Tasks', items.length ? `${items.filter(t => t.status === 'completed').length}/${items.length} done` : null],
+      ['Session name', f.sessionName]);
+  }
 
   const back = el('div', 'info-modal');
   const box = el('div', 'info-box');
