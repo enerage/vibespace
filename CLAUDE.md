@@ -113,9 +113,12 @@ Key facts encoded in `main/sessions.cjs`:
   badge. Change the word set and all three of those together.
 - Keys: Ctrl+P file finder · Ctrl+F terminal search (active tab) · Ctrl+Shift+U
   jump-to-attention · Ctrl+Shift+D diagnostics.
-- **Git pane** (0.6.14): `main/githistory.cjs` (log/commit/fileAt/branch,
-  read-only) + `renderer/workspace/ui/history.js`. `diff.js` hosts both modes
-  and owns the one DiffEditor. Gotchas:
+- **Git** (0.6.14, sidebar since 0.6.15): `main/githistory.cjs` (log/commit/fileAt/branch,
+  read-only) + `renderer/workspace/ui/history.js`. The lists live in the LEFT
+  pane (`#side-tabs` Files|Git → `#git-side`); `diff.js` drives both modes and
+  owns the one DiffEditor in the preview's pinned Diff tab (`#diff-host`).
+  Tree listeners hang on `#tree`, not `#tree-pane` (the pane also holds the Git
+  view). Gotchas:
   - Every read-only git spawn needs `GIT_OPTIONAL_LOCKS=0`, or our polling
     makes agents' commits fail on index.lock.
   - `U.jailed(root, p)` is strictly-INSIDE: it rejects `root` itself. An IPC

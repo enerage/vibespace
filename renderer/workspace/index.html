@@ -27,7 +27,16 @@
 
     <div id="body">
       <aside id="tree-pane">
+        <div id="side-tabs">
+          <button data-side="files" class="active" title="Repository files">Files</button>
+          <button data-side="git" title="Git — uncommitted changes and commit history (click a file to diff it in the preview)"><span class="git-ico"></span>Git<span id="side-git-count" class="hidden"></span></button>
+        </div>
         <div id="tree"></div>
+        <div id="git-side" class="hidden">
+          <div id="git-modes"><button data-mode="changes" class="active" title="Uncommitted work (HEAD vs working tree)">Changes</button><button data-mode="history" title="Commit history — click a commit to see what it changed">History</button></div>
+          <div id="diff-files"></div>
+          <div id="hist-list" class="hidden"></div>
+        </div>
       </aside>
       <div id="split-v" title="drag to resize"></div>
 
@@ -41,16 +50,11 @@
               <button id="btn-edit" class="btn small">Edit</button>
               <button id="btn-save" class="btn small" disabled>Save</button>
               <button id="btn-reveal" class="btn small ghost" title="Reveal in Explorer">⌕</button>
-              <button id="btn-diff" class="btn small ghost" title="Review uncommitted changes (Git pane → Changes)">Diff</button>
+              <button id="btn-diff" class="btn small ghost" title="Review uncommitted changes (Git sidebar → Changes)">Diff</button>
             </div>
           </div>
           <div id="file-tabbar"><div id="file-tabs"></div></div>
           <div id="diff-host" class="hidden">
-            <div id="git-side">
-              <div id="git-modes"><button data-mode="changes" class="active" title="Uncommitted work (HEAD vs working tree)">Changes</button><button data-mode="history" title="Commit history — click a commit to see what it changed">History</button></div>
-              <div id="diff-files"></div>
-              <div id="hist-list" class="hidden"></div>
-            </div>
             <div id="git-main"><div id="diff-editor"></div><div id="diff-empty"><p>No uncommitted changes.</p></div></div>
           </div>
           <div id="monaco-host"></div>

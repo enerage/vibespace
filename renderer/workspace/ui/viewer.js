@@ -347,7 +347,7 @@ export function onMonaco(cb) {
 export function setPinnedTab(label, onToggle) {
   pinnedToggle = onToggle || null;
   pinnedEl = el('div', 'ftab pinned');
-  pinnedEl.title = 'Toggle the Git pane — uncommitted changes and commit history';
+  pinnedEl.title = 'Diff view — the file you last clicked in the Git sidebar (left pane → Git)';
   pinnedEl.appendChild(el('span', 'label', label));
   pinnedEl.onclick = () => togglePinned();
   renderTabs();

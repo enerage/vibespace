@@ -69,6 +69,21 @@ Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 - Symptom it fixes: agent terminals with a 5-entry PATH (`C:WindowsSystem32…`),
   node/npm/pnpm/python/git not found by name. Needs one VibeSpace restart.
 
+## [0.6.15] — 2026-09-29
+
+### Changed
+- **Git moved to the left sidebar, like VS Code's Source Control.** The left
+  pane now has **Files | Git** tabs. The Git tab shows a yellow count of
+  uncommitted files.
+  - The **Changes / History** lists live in that Git tab.
+  - Clicking a file opens its diff in the preview's pinned **Diff** tab.
+    Switching the sidebar to Git never covers the file you're reading.
+  - The Changes list refreshes by itself while visible, as agents edit files.
+  - The sidebar view is remembered per workspace.
+  - The branch chip always opens full-repo History (clearing a file filter).
+    The Diff button and tree → Git history open the sidebar too, and pressing
+    the same entry point again goes back to Files.
+
 ## [0.6.14] — 2026-09-29
 
 ### Added

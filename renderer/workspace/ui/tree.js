@@ -31,7 +31,10 @@ export function init(root, onOpen, savedExpanded, ops = {}) {
   window.addEventListener('focus', () => queueRebuild()); // catches watcher gaps
 
   // drag-and-drop: files dropped on the tree background land in the repo root
-  const pane = $('#tree-pane');
+  // #tree (not #tree-pane): the pane also hosts the Files|Git switcher and the
+  // Git sidebar, which must not get tree menus or drops. #tree fills the rest
+  // of the pane, so its empty background still takes both.
+  const pane = $('#tree');
   pane.addEventListener('dragover', (ev) => {
     if (!ev.dataTransfer.types.includes('Files')) return;
     ev.preventDefault();
@@ -113,7 +116,7 @@ function queueRebuild() {
   rebuildQueued = true;
   setTimeout(() => {
     rebuildQueued = false;
-    const pane = $('#tree-pane');
+    const pane = $('#tree'); // the scroller since the Files|Git switcher landed
     const scroll = pane ? pane.scrollTop : 0;
     buildDom();
     if (pane) pane.scrollTop = scroll;

@@ -22,6 +22,7 @@ function persistNow() {
     termPosition: state.termPosition || 'bottom',
     treeWidth: $('#tree-pane').getBoundingClientRect().width,
     expandedFolders: tree.expandedPaths(),
+    sideView,
     termHeight: Math.round(termsRect.height),
     termWidth: Math.round(termsRect.width),
     viewer: viewer.snapshot(),
@@ -187,13 +188,26 @@ function makeSplitter(handle, onStart, onDrag) {
 
 
 
-// ---------- git: pane entry points + topbar branch chip ----------
-// Opens the pinned Git tab in a given mode; clicking the same entry point again
-// while that mode is already showing closes the pane (toggle feel).
+// ---------- git: left-pane Files|Git switcher, entry points, branch chip ----------
+// The Git view (lists) lives in the left pane like VS Code's Source Control;
+// clicking a file there diffs it in the preview's pinned Diff tab.
+let sideView = 'files';
+function setSideView(v, { save = true } = {}) {
+  if (v !== 'files' && v !== 'git') return;
+  sideView = v;
+  for (const b of document.querySelectorAll('#side-tabs button')) b.classList.toggle('active', b.dataset.side === v);
+  $('#tree').classList.toggle('hidden', v === 'git');
+  $('#git-side').classList.toggle('hidden', v !== 'git');
+  if (v === 'git') diffpane.showSidebar(); else diffpane.hideSidebar();
+  if (save) persist();
+}
+
+// Diff button / branch chip / tree "Git history": show the Git view in a mode.
+// Hitting the same entry point again while that mode shows goes back to Files.
 function openGitPane(mode, filter) {
-  if (filter === undefined && viewer.changesTabOn() && diffpane.currentMode() === mode) { viewer.toggleChangesTab(); return; }
+  if (filter === undefined && sideView === 'git' && diffpane.currentMode() === mode) { setSideView('files'); return; }
   diffpane.prepare(mode, filter);
-  viewer.showChangesTab(); // no-op when already showing
+  if (sideView !== 'git') setSideView('git'); // showSidebar applies what prepare recorded
 }
 
 // branch ↑ahead ↓behind chip — polled (cheap: one `git status --porcelain=v2
@@ -202,7 +216,8 @@ function openGitPane(mode, filter) {
 // agent commits show up live.
 function wireGitChip() {
   const chip = $('#git-chip');
-  chip.onclick = () => openGitPane('history');
+  // always the WHOLE repo's history: a file filter left from the tree menu is cleared
+  chip.onclick = () => openGitPane('history', diffpane.historyFiltered() ? null : undefined);
   let busy = false;
   // hidden = minimized OR fully covered (Electron occlusion) — skip polling
   // then, but the first paint and every "visible again" always run
@@ -224,6 +239,12 @@ function wireGitChip() {
       tip.push('Click for commit history');
       chip.title = tip.join('\n');
       diffpane.headMoved(b.oid);
+      // uncommitted-file count on the left pane's Git tab (status is cached main-side)
+      const st = await vs.gitStatus(ws.repoPath).catch(() => null);
+      const n = st ? st.size : 0;
+      const badge = $('#side-git-count');
+      badge.textContent = n > 99 ? '99+' : String(n);
+      badge.classList.toggle('hidden', !n);
     } finally {
       busy = false;
     }
@@ -266,9 +287,11 @@ async function main() {
   viewer.init(persist);
   viewer.restore(state.viewer?.openFiles || [], state.viewer?.activePath);
   // git diff review pane: pinned "Changes" tab + Diff toolbar button
-  diffpane.init(ws.repoPath, (p, n) => viewer.open(p, n));
-  viewer.setPinnedTab('Git', (on) => (on ? diffpane.show() : diffpane.hide()));
+  diffpane.init(ws.repoPath, { open: (p, n) => viewer.open(p, n), showEditor: () => viewer.showChangesTab() });
+  viewer.setPinnedTab('Diff', (on) => (on ? diffpane.show() : diffpane.hide()));
   $('#btn-diff').onclick = () => openGitPane('changes');
+  for (const b of document.querySelectorAll('#side-tabs button')) b.onclick = () => setSideView(b.dataset.side);
+  setSideView(state.sideView === 'git' ? 'git' : 'files', { save: false });
   wireGitChip();
   // second tree:changed subscriber alongside tree.js — preload wraps each cb in its
   // own ipcRenderer.on listener, so both fire

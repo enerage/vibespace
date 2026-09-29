@@ -65,6 +65,8 @@ export function headMoved(oid) {
   if (had && loadedOnce) reload({ keepDetail: true });
 }
 
+export function hasFilter() { return Boolean(pathFilter); }
+
 // f: null = whole repo, {rel, dir} = file/folder history. Applied on the next
 // activate() — the caller decides when the pane shows.
 export function setFilter(f) {
@@ -216,7 +218,7 @@ async function openCommit(sha) {
   const first = pathFilter && !pathFilter.dir
     ? c.files.find((f) => f.rel === pathFilter.rel || f.from === pathFilter.rel) || c.files[0]
     : c.files[0];
-  if (first) selectFile(first);
+  if (first) selectFile(first, true); // the user clicked a commit → show its first file
   else showEmpty('This commit changes no files (empty or merge-only).');
 }
 
@@ -275,7 +277,7 @@ function renderDetail(host) {
       mini.onclick = (e) => { e.stopPropagation(); openFile(absOf(f.rel), f.rel.split('/').pop()); };
       row.appendChild(mini);
     }
-    row.onclick = () => selectFile(f);
+    row.onclick = () => selectFile(f, true);
     host.appendChild(row);
   }
 }
@@ -284,7 +286,7 @@ let repoRoot = '';
 export function setRepo(root) { repoRoot = root; }
 function absOf(rel) { return repoRoot + '\\' + rel.replace(/\//g, '\\'); }
 
-async function selectFile(f) {
+async function selectFile(f, open = false) {
   if (!f || !detail) return;
   currentFile = f.rel;
   for (const row of $('#hist-items').querySelectorAll('.diff-file')) row.classList.toggle('active', row.dataset.rel === f.rel);
@@ -292,10 +294,10 @@ async function selectFile(f) {
   const seq = ++detailSeq;
   const d = await vs.gitCommitFileDiff(sha, f).catch(() => null);
   if (seq !== detailSeq || !detail || detail.sha !== sha) return;
-  if (!d) { showEmpty('Could not read this file at that commit.'); return; }
-  if (d.binary) { showEmpty('Binary file — no text diff.'); return; }
-  if (d.tooLarge) { showEmpty('File too large to diff (over 1 MB).'); return; }
-  showPair(`${sha}/${f.rel}`, d.original, d.modified, f.rel);
+  if (!d) { showEmpty('Could not read this file at that commit.', open); return; }
+  if (d.binary) { showEmpty('Binary file — no text diff.', open); return; }
+  if (d.tooLarge) { showEmpty('File too large to diff (over 1 MB).', open); return; }
+  showPair(`${sha}/${f.rel}`, d.original, d.modified, f.rel, open);
 }
 
 // "3m ago" / "5h ago" / "2d ago" / date — commit lists are scanned by recency

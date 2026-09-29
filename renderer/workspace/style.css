@@ -65,7 +65,8 @@ body { margin: 0; background: var(--bg); color: var(--text); font: 13.5px/1.45 "
 
 /* ---------- layout ---------- */
 #body { flex: 1; display: flex; min-height: 0; }
-#tree-pane { width: 260px; flex: none; overflow: auto; border-right: 1px solid var(--border); padding: 8px 6px; }
+#tree-pane { width: 260px; flex: none; overflow: hidden; border-right: 1px solid var(--border); display: flex; flex-direction: column; }
+#tree { flex: 1; min-height: 0; overflow: auto; padding: 8px 6px; }
 #split-v { width: 5px; flex: none; cursor: col-resize; touch-action: none; position: relative; }
 #split-v::after, #split-h::after { content: ''; position: absolute; inset: -4px; }
 #split-v:hover, #split-h:hover { background: color-mix(in srgb, var(--accent) 25%, transparent); }
@@ -143,18 +144,26 @@ body { margin: 0; background: var(--bg); color: var(--text); font: 13.5px/1.45 "
 .ftab.pinned { margin-left: auto; background: transparent; border-style: dashed; color: var(--dim); }
 .ftab.pinned.active { color: var(--text); border-style: solid; }
 
-/* ---------- git diff review pane (pinned "Changes" tab) ---------- */
+/* ---------- git: sidebar lists (left) + Diff tab (preview) ---------- */
 #diff-host { flex: 1; min-height: 0; display: flex; position: relative; }
 #diff-host.hidden { display: none; }
-#git-side {
-  width: 240px; flex: none; min-height: 0;
-  display: flex; flex-direction: column;
-  border-right: 1px solid var(--border); background: var(--panel);
-  user-select: none;
+/* left pane = Files | Git switcher; each view scrolls on its own */
+#side-tabs { display: flex; gap: 2px; padding: 6px 6px 4px; flex: none; border-bottom: 1px solid var(--border); }
+#side-tabs button {
+  flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+  background: transparent; color: var(--dim);
+  border: 1px solid transparent; border-radius: 6px;
+  padding: 3px 0; font-size: 12px; cursor: pointer;
 }
-#git-side.wide { width: 320px; }
-/* narrow pane: the list gets at most ~45% so the diff stays readable */
-@container (max-width: 700px) { #git-side, #git-side.wide { width: 45%; } }
+#side-tabs button:hover { color: var(--text); background: var(--hover); }
+#side-tabs button.active { color: var(--text); background: var(--panel-2); border-color: var(--border); }
+#side-git-count {
+  min-width: 16px; padding: 0 4px; border-radius: 8px; font-size: 10.5px; line-height: 15px;
+  background: color-mix(in srgb, var(--yellow) 22%, transparent); color: var(--yellow);
+}
+#side-git-count.hidden { display: none; }
+#git-side { flex: 1; min-height: 0; display: flex; flex-direction: column; user-select: none; }
+#git-side.hidden, #tree.hidden { display: none; }
 #git-modes { display: flex; gap: 2px; padding: 6px 6px 4px; flex: none; }
 #git-modes button {
   flex: 1; background: transparent; color: var(--dim);
