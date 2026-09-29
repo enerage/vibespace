@@ -23,6 +23,7 @@ export function init(opts) {
   // rows that moved out of the header
   $('#btn-logs').onclick = () => vs.openLogs();
   $('#auto-resume').addEventListener('change', opts.persist);
+  $('#phone-remote').addEventListener('change', opts.persist);
 
   // theme swatch grid — click = instant live preview, persisted by the caller
   const grid = $('#theme-grid');

@@ -23,6 +23,7 @@ const fsops = require('./fsops.cjs');
 const srcstate = require('./srcstate.cjs');
 const treewatch = require('./treewatch.cjs');
 const updater = require('./updater.cjs');
+const presence = require('./presence.cjs');
 
 // ---------- CLI args ----------
 function parseArgv() {
@@ -869,6 +870,10 @@ function initIpc() {
   ipcMain.on('pty:claudeStarted', (e, wsId, termId, opts) => sessions.trackClaudeStart(wsId, termId, opts || {}));
   ipcMain.on('pty:sessionPinned', (e, wsId, termId, sessionId) => sessions.pinSession(wsId, termId, sessionId));
   ipcMain.handle('sessions:check', (e, wsId, sessionId) => sessions.sessionExists(wsId, sessionId));
+  // away mode (machine-wide, presence.cjs): the renderer may only toggle the
+  // manual modes; 'idle' is decided by lock/idle detection
+  ipcMain.handle('presence:get', () => presence.get());
+  ipcMain.handle('presence:set', (e, mode) => (mode === 'away' || mode === 'present' ? presence.set(mode, 'manual') : presence.get()));
 
   // misc
   ipcMain.handle('util:claudeVersion', () => updater.claudeVersion());
@@ -920,6 +925,12 @@ function initIpc() {
       if (!win.isDestroyed()) win.webContents.send('term:status', termId, st);
     }
     notifyAttention(wsId, termId, st);
+  });
+  // presence changes from ANY process (the state file is watched) → every window
+  presence.onChange((p) => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) win.webContents.send('presence:changed', p);
+    }
   });
   treewatch.onData((wsId) => {
     logger.info(`tree changed: ws=${wsId}`);
@@ -1059,6 +1070,9 @@ app.whenReady().then(async () => {
       }, 10000);
       return;
     }
+    // away mode: workspace processes only (not the launcher, smoke or screenshot
+    // runs) — each one tracks lock/idle and keeps the shared marker in sync
+    try { presence.start(); } catch (e) { logger.warn('presence start failed: ' + e.message); }
     createWorkspaceWindow(ws);
   } else {
     createLauncherWindow();
@@ -1082,5 +1096,6 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   for (const wsId of new Set([...winInfo.values()].map(v => v.wsId))) persistState(wsId);
+  presence.stop();
   ptyhost.killAll();
 });

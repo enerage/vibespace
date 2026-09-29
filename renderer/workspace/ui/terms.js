@@ -9,6 +9,8 @@ let wsId;
 let repoPath;
 let persist = () => {};
 let openFile = null; // (path, name, line) — file:line links hand off to the viewer
+let remote = () => false; // phone control pref (⚙): launch claude with --remote-control
+let wsName = '';
 
 const tabs = new Map(); // termId -> tab record
 let activeId = null;
@@ -30,6 +32,8 @@ export function init(opts) {
   repoPath = opts.repoPath;
   persist = opts.persist || persist;
   openFile = opts.openFile || openFile;
+  remote = opts.remote || remote;
+  wsName = opts.wsName || '';
 
   // a theme switch repaints every live terminal in place (xterm v5 options setter)
   onThemeChange((t) => {
@@ -421,12 +425,7 @@ export function createTab({ name = 'agent', cwd = repoPath, claude = false, resu
   if (attachBuffer === null && (claude || resumeId || pickSession)) {
     setTimeout(() => {
       if (!tabs.has(id)) return;
-      // --settings injects the status hooks (working/waiting/done signal); it merges
-      // with the user's own settings, never replaces them
-      const withSettings = (base) => (tab.hookSettings ? `${base} --settings "${tab.hookSettings}"` : base);
-      const cmd = pickSession
-        ? withSettings('claude --resume') // saved id is dead — interactive picker
-        : withSettings(resumeId ? `claude --resume ${resumeId}` : 'claude');
+      const cmd = claudeCommand(tab, pickSession ? '' : resumeId); // '' = picker: saved id is dead
       vs.ptyWrite(id, cmd + '\r');
       vs.claudeStarted(wsId, id, pickSession ? { picker: true } : undefined);
       if (resumeId) vs.sessionPinned(wsId, id, resumeId);
@@ -434,6 +433,33 @@ export function createTab({ name = 'agent', cwd = repoPath, claude = false, resu
   }
   persist();
   return tab;
+}
+
+// The ONE builder for a new interactive claude:
+//   claude [--resume [<id>]] [--remote-control "<label>"] [--settings "<path>"]
+// resumeId: null = fresh, '' = the interactive picker, else that session.
+// --remote-control lists the session in the Claude phone app; --settings
+// injects the status hooks and merges with the user's own settings.
+function claudeCommand(tab, resumeId = null) {
+  let cmd = resumeId == null ? 'claude' : `claude --resume${resumeId ? ' ' + resumeId : ''}`;
+  if (remote()) {
+    const label = rcLabel(tab.name);
+    if (label) cmd += ` --remote-control "${label}"`;
+  }
+  if (tab.hookSettings) cmd += ` --settings "${tab.hookSettings}"`;
+  return cmd;
+}
+
+// "<workspace> · <tab>", safe inside a PowerShell double-quoted string: no
+// quotes, $, backticks or other specials survive
+function rcLabel(tabName) {
+  return `${wsName} · ${tabName}`
+    .replace(/\s+/g, ' ')
+    .replace(/[^\p{L}\p{N} ._\-·()]/gu, '')
+    .replace(/ {2,}/g, ' ')
+    .trim()
+    .slice(0, 60)
+    .trim();
 }
 
 function activateTab(id) {

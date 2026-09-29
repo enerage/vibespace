@@ -79,7 +79,7 @@ Key facts encoded in `main/sessions.cjs`:
 
 ## Developing VibeSpace
 
-- `npm run smoke` — 57 self-tests (as of 0.6.14) incl. pty echo and live session discovery. Run it after
+- `npm run smoke` — 70 self-tests (as of 0.6.21) incl. pty echo and live session discovery. Run it after
   touching main-process code, **from a normal shell**: inside a Claude pty the stripped
   PATH and nested ConPTY break the pty test (`powershell.exe` "File not found" /
   AttachConsole) — prepend System32 to PATH and give it its own console, or just use a
@@ -111,6 +111,19 @@ Key facts encoded in `main/sessions.cjs`:
   working/waiting/done to `$VIBESPACE_TERM_STATUS` (set per pty by ptyhost).
   `main/status.cjs` watches and pushes `term:status` → tab lights, toasts, taskbar
   badge. Change the word set and all three of those together.
+- **Phone control + away mode** (0.6.21, RESEARCH-REMOTE.md):
+  - It is Claude Code's own Remote Control. `terms.js` `claudeCommand()` is the ONE
+    builder for a new interactive claude and adds `--remote-control "<ws> · <tab>"`
+    unless the workspace opted out.
+  - Use the long flag. `--rc` is documented but missing from `claude --help`.
+  - Never use server mode (`claude remote-control`): it refuses `--settings`, which
+    would drop our hooks.
+  - `main/presence.cjs` owns `<dataRoot>/presence/at-pc`, passed to every pty as
+    `CLAUDE_CLIENT_PRESENCE_FILE`. File exists = at the PC = phone pushes muted.
+  - Presence state is machine-wide in `presence.json`, and every workspace process
+    runs the same idempotent ticker.
+  - After Win+L the idle time reads only a few seconds. A locked screen must count
+    as infinite idle, or the "back at PC" rule flips straight back.
 - Keys: Ctrl+P file finder · Ctrl+F terminal search (active tab) · Ctrl+Shift+U
   jump-to-attention · Ctrl+Shift+D diagnostics.
 - **Git** (0.6.14, sidebar since 0.6.15): `main/githistory.cjs` (log/commit/fileAt/branch,

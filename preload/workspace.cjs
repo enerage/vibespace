@@ -33,6 +33,9 @@ contextBridge.exposeInMainWorld('vs', {
   claudeStarted: (wsId, termId, opts) => ipcRenderer.send('pty:claudeStarted', wsId, termId, opts),
   sessionPinned: (wsId, termId, sessionId) => ipcRenderer.send('pty:sessionPinned', wsId, termId, sessionId),
   sessionCheck: (wsId, sessionId) => ipcRenderer.invoke('sessions:check', wsId, sessionId),
+  presenceGet: () => ipcRenderer.invoke('presence:get'),
+  presenceSet: (mode) => ipcRenderer.invoke('presence:set', mode),
+  onPresence: (cb) => ipcRenderer.on('presence:changed', (e, p) => cb(p)),
 
   restartAll: (wsId) => ipcRenderer.invoke('updater:restartAll', wsId),
   appRestart: () => ipcRenderer.invoke('app:restart'),

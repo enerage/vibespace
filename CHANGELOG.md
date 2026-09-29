@@ -69,6 +69,23 @@ Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 - Symptom it fixes: agent terminals with a 5-entry PATH (`C:WindowsSystem32…`),
   node/npm/pnpm/python/git not found by name. Needs one VibeSpace restart.
 
+## [0.6.21] — 2026-09-29
+
+### Added
+- **Phone control:** agent tabs launch with `claude --remote-control "<workspace> · <tab>"`,
+  so every agent shows up in the Claude phone app (Code tab). From the phone you
+  can read the transcript, answer questions, approve prompts and send follow-ups
+  to the same local session. Per-workspace opt-out in ⚙ ("Phone control"). While
+  connected, transcripts sync to Anthropic. Applies to agents started after the
+  change, so restart a workspace to pick it up.
+- **📱 At PC / Away** header button. Claude only pushes to the phone while you're
+  away. Away switches on when the screen locks or after 10 min idle, and back on
+  unlock or when you return. The manual toggle waits until you've really been
+  gone ≥ 2 min before your return flips it back. The state is machine-wide
+  (`main/presence.cjs` drives claude's `CLAUDE_CLIENT_PRESENCE_FILE` marker).
+  Going away warns about agents already waiting, because those won't re-notify
+  the phone. Windows toasts are unchanged. Smoke 70/70.
+
 ## [0.6.18] — 2026-09-29
 
 ### Changed

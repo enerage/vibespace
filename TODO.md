@@ -59,6 +59,13 @@ itself while an agent runs in the same window.
 - [ ] Track claude started *manually* inside a plain `+ Terminal` tab.
 
 ## Multi-agent / multi-repo
+- [x] **Phone / away mode via Remote Control** (0.6.21, RESEARCH-REMOTE.md) —
+      per-tab `--remote-control` names, presence marker + 📱 toggle + lock/idle auto-away.
+- [ ] **Live-verify phone control** (S) — after a workspace restart, check that
+      `--remote-control` + `--settings` launches cleanly, that ~20 sessions all
+      register, that phone answers unblock the PC (known issues #52084/#59855/#64797),
+      that our lights/feed stay right when answered from the phone, and that lock →
+      a push arrives. If it fails badly: DIY Telegram hub (RESEARCH-REMOTE.md plan step 3).
 - [ ] **Worktree tabs** (L) — spawn an agent into `repo/.claude/worktrees/<name>`
       (Claude Desktop-style isolation) with a branch picker.
 - [ ] **Cross-workspace overview** (M) — small always-on-top window or launcher view:

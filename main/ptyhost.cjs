@@ -31,6 +31,7 @@ let dataListener = () => {};
 let exitListener = () => {};
 const logger = require('./logger.cjs');
 const U = require('./util.cjs');
+const presence = require('./presence.cjs');
 
 function available() {
   return Boolean(pty);
@@ -107,6 +108,9 @@ function create(termId, cwd, cols = 120, rows = 30, wsId = null) {
     } catch {}
     env.VIBESPACE_TERM_STATUS = statusFile;
   }
+  // away mode: claude skips phone pushes while this file exists (presence.cjs owns
+  // it machine-wide); read at claude launch, so only new agents pick it up
+  env.CLAUDE_CLIENT_PRESENCE_FILE = presence.markerPath();
   const proc = pty.spawn('powershell.exe', ['-NoLogo'], {
     name: 'xterm-256color',
     cols,

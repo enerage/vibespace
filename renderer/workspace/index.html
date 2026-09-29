@@ -22,6 +22,7 @@
       <button id="btn-update" class="btn primary" title="Run claude update once, then relaunch every agent on the new version, resuming each conversation">
         ⟳ Update &amp; Restart All
       </button>
+      <button id="btn-away" class="btn small ghost" title="Away: agents that need you push to the Claude phone app. Auto-switches when the screen locks or after 10 min idle; back when you return.">📱 At PC</button>
       <button id="btn-prefs" class="btn small ghost" title="Preferences — layout, auto-resume, logs, theme">⚙</button>
     </header>
 
@@ -96,6 +97,13 @@
           <div class="prefs-hint">When this window opens, relaunch each agent with its saved conversation (claude --resume)</div>
         </div>
         <label class="toggle"><input type="checkbox" id="auto-resume" checked /></label>
+      </div>
+      <div class="prefs-row">
+        <div>
+          <div class="prefs-label">Phone control (Remote Control)</div>
+          <div class="prefs-hint">New agents start with claude --remote-control so they appear in the Claude phone app. While connected, transcripts sync to Anthropic. Applies to agents started after the change.</div>
+        </div>
+        <label class="toggle"><input type="checkbox" id="phone-remote" checked /></label>
       </div>
       <div class="prefs-row">
         <div>

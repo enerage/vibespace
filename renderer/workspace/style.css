@@ -62,6 +62,7 @@ body { margin: 0; background: var(--bg); color: var(--text); font: 13.5px/1.45 "
 .btn.small { padding: 4px 10px; font-size: 12px; border-radius: 6px; }
 .btn.ghost { background: transparent; }
 .btn:disabled { opacity: 0.45; cursor: default; }
+#btn-away.away { border-color: var(--accent); color: var(--accent-text); background: color-mix(in srgb, var(--accent) 16%, transparent); }
 
 /* ---------- layout ---------- */
 #body { flex: 1; display: flex; min-height: 0; }

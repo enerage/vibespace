@@ -460,6 +460,46 @@ async function runSmoke() {
     check('terminal resolves node by name (full user PATH reaches ptys)', r.ok, r.detail);
   }
 
+  // 23. away mode (presence.cjs): pure transitions + marker path + pty env. Never
+  //     start()/set() here — that would touch the shared presence state
+  {
+    const presence = require('./presence.cjs');
+    const d = presence.decide;
+    const eq = (r, mode, armed) => r.mode === mode && r.armed === armed;
+    const rules = {
+      presentToIdle: eq(d('present', 600, false), 'idle', false) && eq(d('present', 599, false), 'present', false),
+      awayStaysUnarmed: eq(d('away', 0, false), 'away', false),
+      awayArms: eq(d('away', 120, false), 'away', true),
+      armedStaysAway: eq(d('away', 60, true), 'away', true),
+      armedReturns: eq(d('away', 29, true), 'present', false),
+      idleReturns: eq(d('idle', 29, false), 'present', false) && eq(d('idle', 30, false), 'idle', false),
+    };
+    check('presence.decide transitions', Object.values(rules).every(Boolean), JSON.stringify(rules));
+    const marker = presence.markerPath();
+    check('presence marker lives under dataRoot', marker === path.join(U.dataRoot(), 'presence', 'at-pc'), marker);
+    const r = await new Promise((resolve) => {
+      let buf = '';
+      const termId = 'smokepres';
+      const tag = `__PRES_${Date.now()}__`;
+      const timer = setTimeout(() => { ptyhost.onData(() => {}); ptyhost.kill(termId); resolve({ ok: false, detail: 'timeout: ' + buf.slice(-200) }); }, 20000);
+      ptyhost.onData((id, chunk) => {
+        if (id !== termId) return;
+        buf += chunk;
+        const flat = buf.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '').replace(/\r?\n/g, '');
+        // the echoed command has a quote right after "P="; the OUTPUT does not
+        const m = flat.match(new RegExp(tag + 'P=([^"|]*)\\|' + tag + 'END'));
+        if (!m) return;
+        clearTimeout(timer);
+        ptyhost.onData(() => {});
+        ptyhost.kill(termId);
+        resolve({ ok: m[1].trim().toLowerCase() === marker.toLowerCase(), detail: m[1].trim() || 'NOT SET' });
+      });
+      try { ptyhost.create(termId, U.BIN_ROOT, 200, 30); } catch (err) { clearTimeout(timer); resolve({ ok: false, detail: 'spawn: ' + err.message }); return; }
+      setTimeout(() => ptyhost.write(termId, `Write-Output ("${tag}P=" + $env:CLAUDE_CLIENT_PRESENCE_FILE + "|${tag}END")\r`), 900);
+    });
+    check('pty env carries CLAUDE_CLIENT_PRESENCE_FILE', r.ok, r.detail);
+  }
+
   // 8. pty echo (powershell)
   const echo = await ptyEchoTest();
   check('pty spawn + echo (powershell)', echo.ok, echo.detail);

@@ -18,6 +18,7 @@ function persistNow() {
     terminals: terms.snapshot(),
     activeTerm: terms.activeTermId(),
     autoResume: $('#auto-resume').checked,
+    phoneRemote: $('#phone-remote').checked,
     theme: state.theme || 'vibespace',
     termPosition: state.termPosition || 'bottom',
     treeWidth: $('#tree-pane').getBoundingClientRect().width,
@@ -256,6 +257,31 @@ function wireGitChip() {
   vs.onTreeChanged(debounce(update, 800));
 }
 
+// 📱 away toggle. Presence is machine-wide (main/presence.cjs): while away/idle
+// the at-PC marker is gone and claude pushes agents that need you to the phone.
+function wirePresence() {
+  const btn = $('#btn-away');
+  const paint = (p) => {
+    if (!p) return;
+    const away = p.mode !== 'present';
+    btn.classList.toggle('away', away);
+    btn.textContent = away ? '📱 Away' : '📱 At PC';
+  };
+  btn.onclick = async () => {
+    const goAway = !btn.classList.contains('away');
+    const p = await vs.presenceSet(goAway ? 'away' : 'present').catch(() => null);
+    paint(p);
+    if (!p || !goAway) return;
+    // claude pushes on the transition INTO waiting — agents already waiting stay silent
+    const n = terms.agents().filter(a => a.isClaude && !a.dead && a.status === 'waiting').length;
+    toast(n
+      ? `Away — ${n} agent${n > 1 ? 's' : ''} already waiting won't re-notify your phone; they're in the Claude app's list.`
+      : 'Away — phone pushes on', 'ok');
+  };
+  vs.onPresence(paint);
+  vs.presenceGet().then(paint).catch(() => {});
+}
+
 async function main() {
   ws = await vs.getWorkspace(wsId);
   if (!ws) {
@@ -274,6 +300,7 @@ async function main() {
   // themed (theme-boot.js already replayed the vars pre-paint)
   applyTheme(state.theme || 'vibespace', wsId);
   if (typeof state.autoResume === 'boolean') $('#auto-resume').checked = state.autoResume;
+  if (typeof state.phoneRemote === 'boolean') $('#phone-remote').checked = state.phoneRemote;
   if (state.treeWidth) $('#tree-pane').style.width = state.treeWidth + 'px';
   applyTermPosition();
   wireLayoutToggle();
@@ -318,9 +345,12 @@ async function main() {
     openFile: (p, n, l) => viewer.openAt(p, n, l), // file:line links → preview
     savedTerminals: state.terminals,
     autoResume: $('#auto-resume').checked,
+    remote: () => $('#phone-remote').checked, // read at each launch: applies to new agents
+    wsName: ws.name,
     persist,
     quiet: Boolean(shot),
   });
+  wirePresence();
   if (shot) viewer.open(ws.repoPath + '\\README.md', 'README.md'); // docs mode: show code in the preview
 
   wireSplitters();
