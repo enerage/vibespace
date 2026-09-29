@@ -26,6 +26,12 @@ itself while an agent runs in the same window.
       RESEARCH-USER-PAIN.md shortlist #5.
 - [x] Per-agent git diff review in the preview pane (done 0.6.0) — pinned ⟳
       Changes tab, Monaco DiffEditor, HEAD-vs-worktree incl. untracked.
+- [x] **Git history** (done 0.6.14): History mode, branch chip, file history.
+- [ ] Git: **compare range** ("everything since commit X" as one diff) (S/M).
+- [ ] Git: flag commits that swept in another agent's half-done files (`git add -A`
+      by a second agent in the same working copy) (M, needs a heuristic).
+- [ ] Git: commit graph lanes (port VS Code SCM graph, see DECISIONS) (M).
+- [ ] Git: background `fetch` so ↓behind is fresh (needs `GIT_TERMINAL_PROMPT=0`) (S).
 - [x] Tree file operations (done 0.6.0) — context menu: new file/folder,
       rename (F2), delete to Recycle Bin; fs IPC jailed to the workspace.
 - [x] **Session picker on restore** (done 0.5.0) — dead saved session → claude's

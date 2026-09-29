@@ -69,6 +69,43 @@ Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 - Symptom it fixes: agent terminals with a 5-entry PATH (`C:WindowsSystem32…`),
   node/npm/pnpm/python/git not found by name. Needs one VibeSpace restart.
 
+## [0.6.14] — 2026-09-29
+
+### Added
+- **Git history.** The pinned preview tab is now **Git**, with two modes:
+  - **Changes** is the old uncommitted diff.
+  - **History** is new:
+    - A searchable commit list with branch/tag pills.
+    - A yellow ↑ on commits not pushed yet.
+    - An `agent` badge on commits with a `Co-Authored-By: Claude` trailer.
+    - A blue dot on commits that are new since you last looked.
+    - Click a commit to see its message and changed files (+/− counts,
+      renames shown as `old → new`). Click a file for its before/after in the
+      diff editor.
+    - Merge commits diff against their first parent.
+- **Branch chip in the top bar**: `main ↑2 ↓1`.
+  - Shows unpushed/behind counts and a red warning when the repo is stuck
+    mid-merge or mid-rebase.
+  - Click it for History.
+  - It updates every 10 s, on focus and on file changes. When an agent
+    commits, the History list refreshes on its own.
+- **Tree → right-click → Git history** on any file or folder. File history
+  follows renames.
+
+### Fixed
+- **The Changes tab always said "Not a git repository".** Its security check
+  (`U.jailed`) only accepts paths strictly *inside* the repo, so it rejected
+  the repo root itself.
+- **Our background git calls could make an agent's commit fail** with
+  `index.lock exists`, because `git status` briefly locks the index. All
+  read-only git calls now run with `GIT_OPTIONAL_LOCKS=0` (and never prompt
+  for credentials).
+- The "no changes" placeholder no longer covers the file list and swallows its
+  clicks.
+
+Read-only by design: nothing in the Git pane writes to the repo. Takes effect
+after one ↻ Restart. Smoke 57/57.
+
 ## [0.6.12] — 2026-09-29
 
 ### Changed

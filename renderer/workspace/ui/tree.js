@@ -2,7 +2,7 @@ import { $, el, toast, askText } from './common.js';
 
 let rootPath = '';
 let onOpenFile = () => {};
-let hooks = { onRename: null, onDeleted: null }; // optional, from init ops
+let hooks = { onRename: null, onDeleted: null, onHistory: null }; // optional, from init ops
 let gitFiles = null; // Map: repo-relative path (forward slashes) -> M|A|U|D
 let gitDirs = new Map(); // derived: dir path -> strongest status found under it
 const expanded = new Set(); // absolute dir paths currently expanded (persisted)
@@ -17,6 +17,7 @@ export function init(root, onOpen, savedExpanded, ops = {}) {
   hooks = {
     onRename: typeof ops.onRename === 'function' ? ops.onRename : null,
     onDeleted: typeof ops.onDeleted === 'function' ? ops.onDeleted : null,
+    onHistory: typeof ops.onHistory === 'function' ? ops.onHistory : null,
   };
   expanded.clear();
   // first run (no saved list): root expanded; later runs: exactly what was open
@@ -62,6 +63,7 @@ export function init(root, onOpen, savedExpanded, ops = {}) {
         { label: 'New folder here', run: () => newFolderIn(absOf(rel)) },
       ];
       if (rel) { // the repo root itself is never renamed or deleted
+        if (hooks.onHistory) items.push({ label: 'Git history', run: () => hooks.onHistory(rel, true) });
         items.push({ label: 'Rename', run: () => startRename(rel) });
         items.push({ label: 'Delete', danger: true, run: () => startDelete(rel, true) });
       }
@@ -69,6 +71,7 @@ export function init(root, onOpen, savedExpanded, ops = {}) {
     } else {
       showCtxMenu(ev.clientX, ev.clientY, [
         { label: 'New file', run: () => newFileIn(absOf(parentRelOf(rel))) },
+        ...(hooks.onHistory ? [{ label: 'Git history', run: () => hooks.onHistory(rel, false) }] : []),
         { label: 'Rename', run: () => startRename(rel) },
         { label: 'Delete', danger: true, run: () => startDelete(rel, false) },
       ]);

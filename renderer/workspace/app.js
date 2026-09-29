@@ -187,6 +187,54 @@ function makeSplitter(handle, onStart, onDrag) {
 
 
 
+// ---------- git: pane entry points + topbar branch chip ----------
+// Opens the pinned Git tab in a given mode; clicking the same entry point again
+// while that mode is already showing closes the pane (toggle feel).
+function openGitPane(mode, filter) {
+  if (filter === undefined && viewer.changesTabOn() && diffpane.currentMode() === mode) { viewer.toggleChangesTab(); return; }
+  diffpane.prepare(mode, filter);
+  viewer.showChangesTab(); // no-op when already showing
+}
+
+// branch ↑ahead ↓behind chip — polled (cheap: one `git status --porcelain=v2
+// --branch` without the untracked scan) on an interval, on window focus and
+// after tree changes. A HEAD move also refreshes an open History list, so
+// agent commits show up live.
+function wireGitChip() {
+  const chip = $('#git-chip');
+  chip.onclick = () => openGitPane('history');
+  let busy = false;
+  // hidden = minimized OR fully covered (Electron occlusion) — skip polling
+  // then, but the first paint and every "visible again" always run
+  const update = async (force) => {
+    if (busy || (document.hidden && force !== true)) return;
+    busy = true;
+    try {
+      const b = await vs.gitBranch().catch(() => null);
+      if (!b) { chip.classList.add('hidden'); return; }
+      chip.classList.remove('hidden');
+      const name = b.head || (b.oid ? 'detached @ ' + b.oid.slice(0, 7) : 'no commits');
+      chip.innerHTML = '<span class="git-ico"></span>';
+      chip.append(name);
+      const tip = [b.upstream ? `${name} → ${b.upstream}` : `${name} (no upstream)`];
+      if (b.ahead) { chip.append(Object.assign(document.createElement('span'), { className: 'ab up', textContent: '↑' + b.ahead })); tip.push(`${b.ahead} commit${b.ahead > 1 ? 's' : ''} not pushed`); }
+      if (b.behind) { chip.append(Object.assign(document.createElement('span'), { className: 'ab down', textContent: '↓' + b.behind })); tip.push(`${b.behind} behind the remote (as of the last fetch)`); }
+      chip.classList.toggle('warn', Boolean(b.operation));
+      if (b.operation) { chip.append(Object.assign(document.createElement('span'), { className: 'ab op', textContent: b.operation })); tip.push(`Repository is stuck ${b.operation} — finish or abort it in a terminal`); }
+      tip.push('Click for commit history');
+      chip.title = tip.join('\n');
+      diffpane.headMoved(b.oid);
+    } finally {
+      busy = false;
+    }
+  };
+  update(true);
+  setInterval(update, 10000);
+  window.addEventListener('focus', () => update(true));
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) update(true); });
+  vs.onTreeChanged(debounce(update, 800));
+}
+
 async function main() {
   ws = await vs.getWorkspace(wsId);
   if (!ws) {
@@ -219,8 +267,9 @@ async function main() {
   viewer.restore(state.viewer?.openFiles || [], state.viewer?.activePath);
   // git diff review pane: pinned "Changes" tab + Diff toolbar button
   diffpane.init(ws.repoPath, (p, n) => viewer.open(p, n));
-  viewer.setPinnedTab('⟳ Changes', (on) => (on ? diffpane.show() : diffpane.hide()));
-  $('#btn-diff').onclick = () => viewer.toggleChangesTab();
+  viewer.setPinnedTab('Git', (on) => (on ? diffpane.show() : diffpane.hide()));
+  $('#btn-diff').onclick = () => openGitPane('changes');
+  wireGitChip();
   // second tree:changed subscriber alongside tree.js — preload wraps each cb in its
   // own ipcRenderer.on listener, so both fire
   vs.onTreeChanged(() => viewer.onFilesChanged());
@@ -228,6 +277,7 @@ async function main() {
     // tabs are keyed by fsList/fsRead paths (backslashes); the tree joins with '/'
     onRename: (from, to) => viewer.renameTab(from.replace(/\//g, '\\'), to.replace(/\//g, '\\')),
     // close every open tab at or under the deleted path (separator/case-insensitive)
+    onHistory: (rel, dir) => openGitPane('history', { rel, dir }),
     onDeleted: (abs) => {
       const gone = abs.replace(/[\\/]+$/, '').replace(/\\/g, '/').toLowerCase() + '/';
       for (const f of viewer.snapshot().openFiles) {

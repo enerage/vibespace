@@ -347,11 +347,17 @@ export function onMonaco(cb) {
 export function setPinnedTab(label, onToggle) {
   pinnedToggle = onToggle || null;
   pinnedEl = el('div', 'ftab pinned');
-  pinnedEl.title = 'Toggle the Changes pane (git diff of uncommitted work)';
+  pinnedEl.title = 'Toggle the Git pane — uncommitted changes and commit history';
   pinnedEl.appendChild(el('span', 'label', label));
   pinnedEl.onclick = () => togglePinned();
   renderTabs();
 }
+
+export function showChangesTab() {
+  if (pinnedEl) togglePinned(true);
+}
+
+export function changesTabOn() { return pinnedOn; }
 
 export function toggleChangesTab() {
   if (!pinnedEl) return; // setPinnedTab never called — nothing to toggle

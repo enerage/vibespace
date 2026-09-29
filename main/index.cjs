@@ -18,6 +18,7 @@ const sessions = require('./sessions.cjs');
 const status = require('./status.cjs');
 const gitstatus = require('./gitstatus.cjs');
 const gitdiff = require('./gitdiff.cjs');
+const githistory = require('./githistory.cjs');
 const fsops = require('./fsops.cjs');
 const srcstate = require('./srcstate.cjs');
 const treewatch = require('./treewatch.cjs');
@@ -704,11 +705,42 @@ function initIpc() {
   };
   ipcMain.handle('git:status', (e, repoPath) => (repoPath ? gitstatus.status(repoPath) : null));
   // Changes tab: HEAD-vs-worktree content pairs (null = no git / not a repo);
-  // the requested repoPath must be the sender's own workspace (jailed)
+  // the requested repoPath must BE the sender's own workspace root. (U.jailed
+  // is strictly-inside, so it rejected the root itself and the tab always said
+  // "Not a git repository" — found 2026-09-29.)
   ipcMain.handle('git:diff', async (e, repoPath, opts) => {
     const root = repoFor(e);
-    if (!root || !U.jailed(root, repoPath)) return null;
+    if (!root || typeof repoPath !== 'string' || path.resolve(repoPath).toLowerCase() !== path.resolve(root).toLowerCase()) return null;
     return gitdiff.diff(root, opts);
+  });
+  // History tab + branch chip — always the sender's own repo (no renderer path)
+  const SHA = /^[0-9a-f]{4,64}$/i;
+  ipcMain.handle('git:log', (e, opts) => {
+    const root = repoFor(e);
+    if (!root) return null;
+    const o = opts || {};
+    return githistory.log(root, {
+      skip: o.skip, limit: o.limit, all: Boolean(o.all),
+      query: typeof o.query === 'string' ? o.query.slice(0, 200) : '',
+      path: typeof o.path === 'string' ? o.path.replace(/\\/g, '/') : '',
+      follow: Boolean(o.follow),
+    });
+  });
+  ipcMain.handle('git:commit', (e, sha) => {
+    const root = repoFor(e);
+    return root && SHA.test(String(sha)) ? githistory.commit(root, sha) : null;
+  });
+  ipcMain.handle('git:commitFileDiff', (e, sha, file) => {
+    const root = repoFor(e);
+    if (!root || !SHA.test(String(sha)) || !file || typeof file.rel !== 'string') return null;
+    return githistory.commitFileDiff(root, sha, {
+      status: String(file.status || 'M'), rel: file.rel,
+      from: typeof file.from === 'string' ? file.from : undefined,
+    });
+  });
+  ipcMain.handle('git:branch', (e) => {
+    const root = repoFor(e);
+    return root ? githistory.branch(root) : null;
   });
   ipcMain.handle('fs:list', (e, dir) => {
     if (!fs.existsSync(dir)) return { entries: [] };

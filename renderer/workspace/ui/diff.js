@@ -1,10 +1,13 @@
 import { $, el, toast } from './common.js';
 import { onMonaco, LANGS } from './viewer.js';
 import { monacoTheme, onThemeChange } from './themes.js';
+import * as history from './history.js';
 
-// Git diff review pane (the pinned "Changes" tab). Read-only side-by-side diff
-// of uncommitted work. Diff models live under git:///HEAD/<rel> and
-// file:///diff-wt/<rel> URIs so they can never collide with — and are never
+// Git pane (the pinned "Git" tab), two modes sharing one DiffEditor:
+//   Changes — read-only side-by-side diff of uncommitted work
+//   History — commit list → commit detail → per-file before/after (history.js)
+// Diff models live under git:///HEAD/<rel>, file:///diff-wt/<rel> and
+// git:///c/<sha>/… URIs so they can never collide with — and are never
 // confused for — viewer-owned file:///<abs> tab models.
 
 let repoPath = null;
@@ -18,10 +21,17 @@ let models = [];          // [{rel, original, modified}] — ours to dispose eac
 let currentRel = null;
 let refreshing = false;
 const rowEls = new Map(); // rel -> row element
+let mode = 'changes';     // 'changes' | 'history'
+let histPair = null;      // {original, modified} models for the history file on screen
 
 export function init(repo, open) {
   repoPath = repo;
   openFile = open || (() => {});
+  history.setRepo(repo);
+  // history reloads in the background (HEAD moved) — it may only paint the
+  // editor area while History is the mode on screen
+  history.init({ pair: showHistoryPair, empty: (msg) => { if (mode === 'history') showMessage(msg); }, open: openFile });
+  for (const b of document.querySelectorAll('#git-modes button')) b.onclick = () => setMode(b.dataset.mode);
   onMonaco((m) => {
     monacoRef = m;
     onThemeChange((t) => { try { diffEditor?.updateOptions({ theme: t.monaco }); } catch {} });
@@ -30,11 +40,65 @@ export function init(repo, open) {
   });
 }
 
-export function show() {
+export function show(want) {
   $('#diff-host').classList.remove('hidden');
   wantEditor = true;
   if (monacoRef && !diffEditor) createEditor();
-  refresh();
+  setMode(want || mode, true);
+}
+
+export function currentMode() { return mode; }
+
+export function setMode(m, force = false) {
+  if (m !== 'changes' && m !== 'history') return;
+  if (m === mode && !force) return;
+  mode = m;
+  for (const b of document.querySelectorAll('#git-modes button')) b.classList.toggle('active', b.dataset.mode === m);
+  $('#diff-files').classList.toggle('hidden', m !== 'changes');
+  $('#hist-list').classList.toggle('hidden', m !== 'history');
+  $('#git-side').classList.toggle('wide', m === 'history');
+  if (m === 'changes') { disposeHistPair(); refresh(); } else history.activate();
+}
+
+// Entry points (Diff button, branch chip, tree "Git history") call this, then
+// show the pinned tab. filter: undefined = keep, null = whole repo, {rel, dir}.
+// While the pane is hidden only the target is recorded — show() applies it, so
+// nothing loads twice.
+export function prepare(m, filter) {
+  if (filter !== undefined) history.setFilter(filter);
+  if ($('#diff-host').classList.contains('hidden')) { if (m) mode = m; return; }
+  if (m && m !== mode) setMode(m);
+  else if (mode === 'history') history.activate();
+}
+
+export function headMoved(oid) { history.headMoved(oid); }
+
+function showMessage(msg) {
+  $('#diff-empty p').textContent = msg;
+  $('#diff-empty').classList.remove('hidden');
+  $('#diff-editor').classList.add('hidden');
+}
+
+function showHistoryPair(key, original, modified, rel) {
+  if (mode !== 'history' || !monacoRef) return;
+  disposeHistPair();
+  const lang = langFor(rel);
+  const k = encodeURIComponent(key);
+  histPair = {
+    original: monacoRef.editor.createModel(original ?? '', lang, monacoRef.Uri.parse('git:///c/before/' + k)),
+    modified: monacoRef.editor.createModel(modified ?? '', lang, monacoRef.Uri.parse('git:///c/after/' + k)),
+  };
+  $('#diff-empty').classList.add('hidden');
+  $('#diff-editor').classList.remove('hidden');
+  if (diffEditor) diffEditor.setModel(histPair);
+}
+
+function disposeHistPair() {
+  if (!histPair) return;
+  if (diffEditor) { try { diffEditor.setModel(null); } catch {} }
+  try { histPair.original.dispose(); } catch {}
+  try { histPair.modified.dispose(); } catch {}
+  histPair = null;
 }
 
 export function hide() {
@@ -42,7 +106,7 @@ export function hide() {
 }
 
 export async function refresh() {
-  if (!repoPath || refreshing) return;
+  if (!repoPath || refreshing || mode !== 'changes') return;
   refreshing = true;
   try {
     const d = await vs.gitDiff(repoPath, { refresh: true });
@@ -82,7 +146,8 @@ function createEditor() {
     wordWrap: 'on',
     renderOverviewRuler: false,
   });
-  applySelection();
+  if (mode === 'history' && histPair) diffEditor.setModel(histPair);
+  else applySelection();
 }
 
 function buildModels() {
@@ -108,7 +173,7 @@ function disposeModels() {
 }
 
 function applySelection() {
-  if (!diffEditor || !currentRel) return;
+  if (!diffEditor || !currentRel || mode !== 'changes') return;
   const pair = models.find((m) => m.rel === currentRel);
   if (pair) diffEditor.setModel({ original: pair.original, modified: pair.modified });
 }
@@ -124,9 +189,7 @@ function select(rel) {
 function renderEmpty(msg) {
   currentRel = null;
   renderList();
-  $('#diff-empty p').textContent = msg || 'No uncommitted changes.';
-  $('#diff-empty').classList.remove('hidden');
-  $('#diff-editor').classList.add('hidden');
+  showMessage(msg || 'No uncommitted changes.');
 }
 
 function renderList() {

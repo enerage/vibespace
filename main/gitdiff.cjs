@@ -28,7 +28,7 @@ function run(repoPath, args) {
     let out = '';
     let proc;
     try {
-      proc = spawn('git', args, { cwd: repoPath, env: process.env, windowsHide: true });
+      proc = spawn('git', args, { cwd: repoPath, env: { ...process.env, GIT_OPTIONAL_LOCKS: '0', GIT_TERMINAL_PROMPT: '0' }, windowsHide: true });
     } catch {
       return resolve(null);
     }

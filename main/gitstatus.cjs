@@ -31,7 +31,7 @@ function status(repoPath, ttlMs = 3000) {
     let out = '';
     let proc;
     try {
-      proc = spawn('git', ['status', '--porcelain', '-z'], { cwd: repoPath, env: process.env, windowsHide: true });
+      proc = spawn('git', ['status', '--porcelain', '-z'], { cwd: repoPath, env: { ...process.env, GIT_OPTIONAL_LOCKS: '0', GIT_TERMINAL_PROMPT: '0' }, windowsHide: true });
     } catch {
       return resolve(null);
     }

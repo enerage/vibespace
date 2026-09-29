@@ -18,6 +18,10 @@ contextBridge.exposeInMainWorld('vs', {
   fsRename: (from, to) => ipcRenderer.invoke('fs:rename', { from, to }),
   fsDelete: (p) => ipcRenderer.invoke('fs:delete', { path: p }),
   gitDiff: (repoPath, opts) => ipcRenderer.invoke('git:diff', repoPath, opts),
+  gitLog: (opts) => ipcRenderer.invoke('git:log', opts),
+  gitCommit: (sha) => ipcRenderer.invoke('git:commit', sha),
+  gitCommitFileDiff: (sha, file) => ipcRenderer.invoke('git:commitFileDiff', sha, file),
+  gitBranch: () => ipcRenderer.invoke('git:branch'),
   dropPath: (file) => { try { return webUtils.getPathForFile(file); } catch { return null; } },
   reveal: (file) => ipcRenderer.invoke('fs:reveal', file),
 

@@ -113,6 +113,21 @@ Key facts encoded in `main/sessions.cjs`:
   badge. Change the word set and all three of those together.
 - Keys: Ctrl+P file finder · Ctrl+F terminal search (active tab) · Ctrl+Shift+U
   jump-to-attention · Ctrl+Shift+D diagnostics.
+- **Git pane** (0.6.14): `main/githistory.cjs` (log/commit/fileAt/branch,
+  read-only) + `renderer/workspace/ui/history.js`. `diff.js` hosts both modes
+  and owns the one DiffEditor. Gotchas:
+  - Every read-only git spawn needs `GIT_OPTIONAL_LOCKS=0`, or our polling
+    makes agents' commits fail on index.lock.
+  - `U.jailed(root, p)` is strictly-INSIDE: it rejects `root` itself. An IPC
+    that takes the repo root must compare for equality instead. This kept the
+    Changes tab dead from 0.6.0 until 0.6.14.
+  - Absolute-positioned placeholders must live inside the box they cover
+    (`#git-main`). A host-wide overlay silently ate the list's clicks, and
+    CDP `el.click()` tests never notice. Verify with real
+    `Input.dispatchMouseEvent`.
+  - `document.hidden` is true for OCCLUDED windows too, not just minimized
+    ones. Pollers that skip when hidden must still run once on start and on
+    `visibilitychange`.
 - **`/sync-docs` skill** (`.claude/skills/sync-docs`): the "update all docs" ritual —
   CHANGELOG/DECISIONS/CLAUDE/TODO/README + agent memory, docs only. Copy the skill
   folder into any repo that should join the ritual. (A 📨 broadcast button existed

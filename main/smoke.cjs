@@ -336,6 +336,31 @@ async function runSmoke() {
       check('gitdiff deleted file empty modified', by2['del.txt'] && by2['del.txt'].status === 'D' && by2['del.txt'].modified === '', JSON.stringify(by2['del.txt'] || null));
       check('gitdiff untracked counts as added', by2['untracked.txt'] && by2['untracked.txt'].status === 'U' && by2['untracked.txt'].original === '' && by2['untracked.txt'].modified === 'fresh', JSON.stringify(by2['untracked.txt'] || null));
       check('gitdiff non-repo resolves null', (await gitdiff.diff(empty)) === null);
+
+      // 17b. githistory (History tab): log, agent trailer, rename-aware commit
+      // files, before/after pair, branch chip data, non-repo → null
+      const gh = require('./githistory.cjs');
+      await exec(['add', '-A']);
+      await exec(['commit', '-m', 'second']);
+      await exec(['mv', 'a.txt', 'b.txt']);
+      await exec(['commit', '-m', 'rename a\n\nCo-Authored-By: Claude <noreply@anthropic.com>']);
+      const lg = await gh.log(root, { limit: 2 });
+      check('githistory log pages + agent trailer', lg && lg.commits.length === 2 && lg.more === true
+        && lg.commits[0].subject === 'rename a' && lg.commits[0].agent === true && lg.commits[1].agent === false,
+      JSON.stringify(lg && lg.commits.map(c => [c.subject, c.agent])));
+      const cm = lg && await gh.commit(root, lg.commits[0].sha);
+      const ren = cm && cm.files.find(f => f.status === 'R');
+      check('githistory commit detects rename', ren && ren.from === 'a.txt' && ren.rel === 'b.txt', JSON.stringify(cm && cm.files));
+      const second = lg && await gh.commit(root, lg.commits[1].sha);
+      const mod = second && second.files.find(f => f.rel === 'a.txt');
+      const pair = mod && await gh.commitFileDiff(root, second.sha, mod);
+      check('githistory before/after pair', pair && pair.original === 'one\ntwo\n' && pair.modified === 'one\nTWO\n', JSON.stringify(pair));
+      const fh = await gh.log(root, { path: 'b.txt', follow: true });
+      check('githistory file history follows renames', fh && fh.commits.length === 3, String(fh && fh.commits.length));
+      const br = await gh.branch(root);
+      check('githistory branch info', br && br.head && br.oid === lg.commits[0].sha && br.upstream === null && br.operation === null, JSON.stringify(br));
+      check('githistory non-repo resolves null', (await gh.log(empty)) === null && (await gh.branch(empty)) === null);
+      check('githistory rejects bad sha', (await gh.commit(root, '--output=x')) === null);
       try { fs.rmSync(root, { recursive: true, force: true }); fs.rmSync(empty, { recursive: true, force: true }); } catch {}
     }
   }
