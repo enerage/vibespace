@@ -290,6 +290,29 @@ function wireClipboard(term) {
   });
 }
 
+// ---- drag-and-drop: Windows-Terminal-style path paste ----
+// Dropping files from Explorer pastes their full paths (quoted when they contain
+// spaces). Going through term.paste() keeps bracketed paste, so Claude Code sees
+// a pasted image path and attaches the image itself.
+const quotePath = (p) => (/\s/.test(p) ? `"${p}"` : p);
+
+function wireDrop(term, host) {
+  host.addEventListener('dragover', (ev) => {
+    const types = ev.dataTransfer.types;
+    if (!types.includes('Files') && !types.includes('text/plain')) return;
+    ev.preventDefault();
+    ev.dataTransfer.dropEffect = 'copy';
+  });
+  host.addEventListener('drop', (ev) => {
+    ev.preventDefault();
+    const paths = [...ev.dataTransfer.files].map(f => vs.dropPath(f)).filter(Boolean);
+    const text = paths.length ? paths.map(quotePath).join(' ') : ev.dataTransfer.getData('text/plain');
+    if (!text) return;
+    term.paste(text);
+    term.focus();
+  });
+}
+
 // ---- file:line links ---------------------------------------------------------
 // Clicking D:\repo\src\app.js:42 (or src/app.js:42) in claude's output opens the
 // file in the preview at that line. Uses xterm's core registerLinkProvider —
@@ -390,6 +413,7 @@ export function createTab({ name = 'agent', cwd = repoPath, claude = false, resu
 
   term.onData(d => vs.ptyWrite(id, d));
   wireClipboard(term);
+  wireDrop(term, host);
   term.onResize(({ cols, rows }) => vs.ptyResize(id, cols, rows));
   host.addEventListener('mousedown', () => activateTab(id), true);
 

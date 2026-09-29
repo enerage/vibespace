@@ -13,6 +13,11 @@ itself while an agent runs in the same window.
       shortcuts + context menu at the installed binary, migrate existing workspace
       shortcuts. Deliberately left for Valentin (touches his real machine state).
 
+## Bugs
+- [x] **Drop a file/photo onto a terminal did nothing** (0.6.13) — now pastes the
+      quoted path(s) like Windows Terminal; Claude attaches dropped images.
+      Needs Valentin's manual check (a real Explorer drag can't be scripted).
+
 ## Quality of life
 - [x] **Ptys survive renderer reload** (done 0.4.0; Layer 2 in RESEARCH-HOTRELOAD.md) —
       ring buffer + `pty:list` attach; logo swap and `render-process-gone` fixed with it.

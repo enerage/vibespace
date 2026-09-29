@@ -106,6 +106,15 @@ Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 Read-only by design: nothing in the Git pane writes to the repo. Takes effect
 after one ↻ Restart. Smoke 57/57.
 
+## [0.6.13] — 2026-09-29
+
+### Fixed
+- **Dropping files onto a terminal pastes their paths** (Windows Terminal style:
+  full path, quoted if it has spaces, several files space-separated). Drop an
+  image from Explorer onto a Claude tab and Claude attaches it. Dropped text
+  pastes as-is. Before this the terminal had no drop handler and nothing happened.
+  Takes effect after one ↻ Restart.
+
 ## [0.6.12] — 2026-09-29
 
 ### Changed
