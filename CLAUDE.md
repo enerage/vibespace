@@ -18,6 +18,13 @@ Knowledge is tracked **as we go**, never batched for later:
   It's a rule, not a UI feature — there is deliberately no button for it.
 - A task is not done until the docs above are current. "I'll document it later"
   is how knowledge dies.
+- **Commit + push a fix as soon as it's verified working** (live check or smoke),
+  with its docs, in one commit. Never leave verified work sitting uncommitted.
+  Several agents share this working tree, and a restart, crash or lost
+  conversation strands it: the `claude` wrapper sat uncommitted for hours while
+  it was the only thing tracking resumed conversations (Valentin, 2026-09-30).
+  Stage only your own hunks, never `git add -A`. If you find verified work that
+  is orphaned, commit it and say so in the message.
 
 ## Ground rules
 
