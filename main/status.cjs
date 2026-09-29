@@ -53,4 +53,19 @@ function stop(wsId) {
   active.delete(wsId);
 }
 
-module.exports = { start, stop, onData, _readStatus: readStatus };
+// Status word for a claude hook event received over HTTP (claude data feed),
+// mirroring the Git Bash hooks: prompt/tool → working, turn end → done, a
+// Notification → waiting unless it's the idle "waiting for your input" nudge
+// (finished agents stay green). null = event carries no status.
+function wordForHook(event, body) {
+  if (event === 'UserPromptSubmit' || event === 'PreToolUse') return 'working';
+  if (event === 'Stop') return 'done';
+  if (event === 'Notification') {
+    let text = '';
+    try { text = JSON.stringify(body || {}); } catch {}
+    return /waiting for your input/i.test(text) ? null : 'waiting';
+  }
+  return null;
+}
+
+module.exports = { start, stop, onData, wordForHook, _readStatus: readStatus };

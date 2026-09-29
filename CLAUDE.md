@@ -129,6 +129,11 @@ Key facts encoded in `main/sessions.cjs`:
   `--settings <instance>/claude-hook-settings.json` injecting
   Notification/Stop/UserPromptSubmit/PreToolUse hooks that append
   working/waiting/done to `$VIBESPACE_TERM_STATUS` (set per pty by ptyhost).
+  Since 0.6.22 those Git Bash hooks are only the fallback: when the claude data
+  feed is listening, main appends the words itself from the feed's HTTP hooks
+  (`status.wordForHook`). Command hooks BLOCK claude, and a cold bash start
+  under load took >10 s ("UserPromptSubmit hook timed out"). Never put a
+  spawn on the prompt path again.
   `main/status.cjs` watches and pushes `term:status` → tab lights, toasts, taskbar
   badge. Change the word set and all three of those together.
 - **Claude data feed** (0.6.16): `main/claudefeed.cjs` runs a `127.0.0.1:<random port>`

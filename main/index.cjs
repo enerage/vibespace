@@ -143,7 +143,12 @@ function ensureHookSettings(wsId) {
   // cold Git Bash start under load once took ~30s (Claude's default cap) —
   // delaying the user's message. Worst case now: one status update skipped.
   const hook = (s) => ({ hooks: [{ type: 'command', command: `echo ${s} >> "$VIBESPACE_TERM_STATUS"`, timeout: 10 }] });
-  const settings = {
+  // With the claude data feed listening, main writes the status words itself
+  // from the feed's HTTP hooks (status.wordForHook, wired next to claudefeed.onData) — no Git Bash spawn per
+  // prompt/tool. Those command hooks BLOCK claude: under load a cold bash start
+  // took >10 s and held Valentin's prompt ("hook timed out after 10s",
+  // 2026-09-29). The Git Bash hooks remain only as the no-feed fallback.
+  const settings = claudefeed.port() ? { hooks: {} } : {
     hooks: {
       UserPromptSubmit: [hook('working')],
       PreToolUse: [hook('working')],
@@ -155,6 +160,7 @@ function ensureHookSettings(wsId) {
         hooks: [{
           type: 'command',
           command: `grep -qi 'waiting for your input' || echo waiting >> "$VIBESPACE_TERM_STATUS"`,
+          timeout: 10,
         }],
       }],
       Stop: [hook('done')],
@@ -1007,6 +1013,15 @@ function initIpc() {
   // claude data feed: per-term snapshot to the owning window; the account-wide
   // 5h/7d limits to every workspace window
   const failureSeen = new Map(); // termId -> failure.at already toasted
+  // status words from the feed's HTTP hooks — same words, same file, same
+  // downstream (status.cjs → attention.fileStatus) as the Git Bash hooks they
+  // replace; the idle "waiting for your input" nudge stays green like before
+  claudefeed.onHook((wsId, termId, event, body) => {
+    const st = status.wordForHook(event, body);
+    const file = st && ptyhost.statusFileOf(termId);
+    if (!file) return;
+    try { fs.appendFileSync(file, st + '\n'); } catch (e) { logger.warn('status write failed: ' + e.message); }
+  });
   claudefeed.onData((wsId, termId, feed) => {
     for (const win of workspaceWindowsFor(wsId)) {
       if (!win.isDestroyed()) win.webContents.send('term:feed', { termId, feed });

@@ -69,6 +69,26 @@ Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 - Symptom it fixes: agent terminals with a 5-entry PATH (`C:WindowsSystem32…`),
   node/npm/pnpm/python/git not found by name. Needs one VibeSpace restart.
 
+## [0.6.22] — 2026-09-29
+
+### Fixed
+- **"UserPromptSubmit hook … timed out after 10s" is gone. Your prompt is no
+  longer held up to 10 s.**
+  - The status hooks used to start a Git Bash process on every prompt and
+    every tool call just to write `working`/`done` to a file. Claude waits for
+    those hooks, and when the machine was busy a cold bash start took more
+    than 10 s.
+  - VibeSpace now writes the same words itself when the claude data feed's
+    HTTP hooks arrive: nothing is spawned, and it answers in under 1 ms.
+  - Lights, toasts, the taskbar badge and the busy check read the same status
+    files, so they behave exactly as before.
+  - The Git Bash hooks are only used if the feed server couldn't start.
+- Verified live: submitting a prompt → working, end of turn → done, and a
+  question from Claude → red "waiting" within 2 s, staying red while it waits.
+  That last one is the "orange dot while stuck on a question" report; the fix
+  came with 0.6.19's attention arbitration.
+  Takes effect after one ↻ Restart. Smoke 71/71.
+
 ## [0.6.21] — 2026-09-29
 
 ### Added

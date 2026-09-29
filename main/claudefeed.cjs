@@ -24,6 +24,7 @@ let port = null;
 let resolveTerm = () => null; // termId -> wsId (ptyhost owns the mapping)
 let listener = () => {};
 let limitsListener = () => {};
+let hookListener = () => {}; // raw hook events (index.cjs derives status words from them)
 
 const terms = new Map(); // termId -> { wsId, state, timer, lastEmit }
 let limits = null; // account-wide 5h/7d rate limits (latest copy from any term)
@@ -276,6 +277,9 @@ function ingest(termId, kind, event, body) {
   let t = terms.get(termId);
   if (!t) { t = { wsId, state: emptyState(), timer: null, lastEmit: 0 }; terms.set(termId, t); }
   t.wsId = wsId;
+  if (kind === 'hook') {
+    try { hookListener(wsId, termId, event, body); } catch (e) { logger.warn('hook listener: ' + e.message); }
+  }
   const next = reduce(t.state, kind, event, body);
   if (kind === 'sl') {
     const rl = readLimits(body && body.rate_limits);
@@ -436,4 +440,5 @@ module.exports = {
   limits: () => limits,
   onData: (fn) => { listener = fn; },
   onLimits: (fn) => { limitsListener = fn; },
+  onHook: (fn) => { hookListener = fn; },
 };

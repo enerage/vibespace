@@ -180,6 +180,11 @@ async function runSmoke() {
   // 10. status file watcher (supervision signal from injected claude hooks)
   {
     const statusMod = require('./status.cjs');
+    // HTTP-hook → status word (replaces the blocking Git Bash echo hooks)
+    const w = statusMod.wordForHook;
+    check('status word from HTTP hooks', w('UserPromptSubmit', {}) === 'working' && w('PreToolUse', { tool_name: 'Bash' }) === 'working'
+      && w('Stop', {}) === 'done' && w('Notification', { message: 'Claude needs your permission to use Bash' }) === 'waiting'
+      && w('Notification', { message: 'Claude is waiting for your input' }) === null && w('PostToolUse', {}) === null);
     const dir = path.join(U.dataRoot(), 'status-smoke');
     let got = null;
     statusMod.onData((wsId, termId, st) => { got = { wsId, termId, st }; });

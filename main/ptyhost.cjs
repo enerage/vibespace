@@ -235,6 +235,9 @@ module.exports = {
   list,
   busyNow,
   outputAge,
+  // the file the claude status hooks append to (main writes it too when the
+  // feed's HTTP hooks stand in for the Git Bash ones)
+  statusFileOf: (termId) => (metas.get(termId) || {}).statusFile || null,
   _withSinglePath: withSinglePath,
   onData: (fn) => { dataListener = fn; },
   onExit: (fn) => { exitListener = fn; },
