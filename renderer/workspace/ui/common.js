@@ -63,3 +63,57 @@ export function fileIcon(name) {
   const label = ext ? ext.slice(0, 3) : '·';
   return `<span class="ficon ext-${ext}">${label}</span>`;
 }
+
+// ---------- context menu (tree rows, terminal tabs) ----------
+// items: [{ label, run, danger?, disabled?, hint? } | { sep: true }]. Lives on
+// document.body so tree rebuilds / tab-bar redraws can't take it down; closes
+// on any outside click, Esc, window blur, resize or scroll.
+let ctxMenu = null;
+
+export function menuOpen() { return Boolean(ctxMenu); }
+
+export function showMenu(x, y, items) {
+  closeMenu();
+  const menu = el('div', 'ctx-menu');
+  for (const it of items) {
+    if (it.sep) { menu.appendChild(el('div', 'ctx-sep')); continue; }
+    const item = el('div', 'ctx-item' + (it.danger ? ' danger' : '') + (it.disabled ? ' disabled' : ''), it.label);
+    if (it.hint) item.title = it.hint;
+    item.onclick = (ev) => {
+      ev.stopPropagation();
+      if (it.disabled) return;
+      closeMenu();
+      it.run();
+    };
+    menu.appendChild(item);
+  }
+  document.body.appendChild(menu);
+  ctxMenu = menu;
+  const r = menu.getBoundingClientRect(); // keep it on screen
+  menu.style.left = Math.max(8, Math.min(x, window.innerWidth - r.width - 8)) + 'px';
+  menu.style.top = Math.max(8, Math.min(y, window.innerHeight - r.height - 8)) + 'px';
+  window.addEventListener('mousedown', menuCloser, true);
+  window.addEventListener('keydown', menuCloser, true);
+  window.addEventListener('blur', menuCloser);
+  window.addEventListener('resize', menuCloser);
+  window.addEventListener('scroll', menuCloser, true);
+}
+
+function menuCloser(ev) {
+  if (!ctxMenu) return;
+  if (ev.type === 'keydown' && ev.key !== 'Escape') return;
+  if (ev.type === 'mousedown' && ctxMenu.contains(ev.target)) return; // let item clicks run
+  closeMenu();
+}
+
+export function closeMenu() {
+  if (!ctxMenu) return;
+  const m = ctxMenu;
+  ctxMenu = null;
+  m.remove();
+  window.removeEventListener('mousedown', menuCloser, true);
+  window.removeEventListener('keydown', menuCloser, true);
+  window.removeEventListener('blur', menuCloser);
+  window.removeEventListener('resize', menuCloser);
+  window.removeEventListener('scroll', menuCloser, true);
+}

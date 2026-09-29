@@ -1,5 +1,6 @@
 import { $, el, toast } from './common.js';
 import { termTheme, onThemeChange } from './themes.js';
+import { openTabMenu } from './tabmenu.js';
 
 // terminal tabs: each hosts a PowerShell pty; "claude" tabs run Claude Code and
 // get their session id tracked (main process) so they can be resumed after updates.
@@ -525,13 +526,17 @@ function renderTabBar() {
       : st === 'done' ? 'task completed — agent is idle'
       : (tab.sessionId ? `session ${tab.sessionId.slice(0, 8)}…` : 'no claude session yet');
     const label = el('span', 'label', tab.name);
-    label.title = (tab.sessionId ? `${tab.name} — ${tab.sessionId}` : tab.name) + '  (double-click or right-click to rename)';
+    label.title = (tab.sessionId ? `${tab.name} — ${tab.sessionId}` : tab.name) + '  (double-click to rename · right-click for options)';
     const close = el('span', 'close', '✕');
     close.title = 'close terminal';
 
     t.append(status, label, close);
     t.onclick = () => activateTab(tab.id);
-    t.oncontextmenu = (ev) => { ev.preventDefault(); startRename(t, label, tab); };
+    // right-click = options menu (rename, agent info, copy id/name/resume, close)
+    t.oncontextmenu = (ev) => {
+      ev.preventDefault();
+      openTabMenu(ev, tab, { rename: () => startRename(t, label, tab), close: () => close.onclick(new MouseEvent('click')) });
+    };
     close.onclick = (ev) => {
       ev.stopPropagation();
       const hasAgent = tab.sessionId || !tab.dead;

@@ -69,6 +69,22 @@ Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 - Symptom it fixes: agent terminals with a 5-entry PATH (`C:WindowsSystem32…`),
   node/npm/pnpm/python/git not found by name. Needs one VibeSpace restart.
 
+## [0.6.18] — 2026-09-29
+
+### Changed
+- **Right-clicking an agent tab opens an options menu.** It used to start a
+  rename. The menu has:
+  - **Rename…**; double-clicking the name still renames directly.
+  - **Agent info…**: a panel with name, kind, status, session ID,
+    `claude --resume <id>`, the transcript path
+    (`%USERPROFILE%\.claude\projects\…\<id>.jsonl`), folder and terminal
+    ID. Each has its own Copy button, plus **Copy all** for a paste-ready block.
+  - **Copy name**, **Copy session ID** and **Copy resume command**. The last
+    two are greyed out until the conversation exists (after the first message).
+  - **Close**, which asks the same confirm as ✕.
+- The tree's right-click menu now uses the same shared helper
+  (`common.js showMenu`, with separators and disabled items).
+
 ## [0.6.15] — 2026-09-29
 
 ### Changed

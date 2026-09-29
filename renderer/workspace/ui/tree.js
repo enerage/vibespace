@@ -1,4 +1,4 @@
-import { $, el, toast, askText } from './common.js';
+import { $, el, toast, askText, showMenu as showCtxMenu, menuOpen } from './common.js';
 
 let rootPath = '';
 let onOpenFile = () => {};
@@ -85,7 +85,7 @@ export function init(root, onOpen, savedExpanded, ops = {}) {
   // (inputs, Monaco, xterm all own their key handling)
   document.addEventListener('keydown', (ev) => {
     if (ev.key !== 'F2' || ev.ctrlKey || ev.altKey || ev.shiftKey || ev.metaKey) return;
-    if (ctxMenu || activeRel == null) return;
+    if (menuOpen() || activeRel == null) return;
     const a = document.activeElement;
     if (a && a !== document.body) return;
     const row = document.querySelector('#tree .tree-row.active');
@@ -265,48 +265,6 @@ function parentRelOf(rel) { const i = rel.lastIndexOf('/'); return i < 0 ? '' : 
 function expandDir(dirAbs) {
   expanded.add(dirAbs);
   expanded.add(dirAbs.replace(/\//g, '\\'));
-}
-
-let ctxMenu = null;
-
-function showCtxMenu(x, y, items) {
-  closeCtxMenu();
-  const menu = el('div', 'ctx-menu');
-  for (const it of items) {
-    const item = el('div', 'ctx-item' + (it.danger ? ' danger' : ''), it.label);
-    item.onclick = (ev) => { ev.stopPropagation(); closeCtxMenu(); it.run(); };
-    menu.appendChild(item);
-  }
-  document.body.appendChild(menu);
-  ctxMenu = menu;
-  const r = menu.getBoundingClientRect(); // keep it on screen
-  menu.style.left = Math.max(8, Math.min(x, window.innerWidth - r.width - 8)) + 'px';
-  menu.style.top = Math.max(8, Math.min(y, window.innerHeight - r.height - 8)) + 'px';
-  // close on any outside click / Esc / window blur / resize / scroll
-  window.addEventListener('mousedown', ctxCloser, true);
-  window.addEventListener('keydown', ctxCloser, true);
-  window.addEventListener('blur', ctxCloser);
-  window.addEventListener('resize', ctxCloser);
-  window.addEventListener('scroll', ctxCloser, true);
-}
-
-function ctxCloser(ev) {
-  if (!ctxMenu) return;
-  if (ev.type === 'keydown' && ev.key !== 'Escape') return;
-  if (ev.type === 'mousedown' && ctxMenu.contains(ev.target)) return; // let item clicks run
-  closeCtxMenu();
-}
-
-function closeCtxMenu() {
-  if (!ctxMenu) return;
-  const m = ctxMenu;
-  ctxMenu = null;
-  m.remove();
-  window.removeEventListener('mousedown', ctxCloser, true);
-  window.removeEventListener('keydown', ctxCloser, true);
-  window.removeEventListener('blur', ctxCloser);
-  window.removeEventListener('resize', ctxCloser);
-  window.removeEventListener('scroll', ctxCloser, true);
 }
 
 async function newFileIn(dirAbs) {

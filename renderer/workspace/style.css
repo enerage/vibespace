@@ -531,6 +531,33 @@ html[data-mode="light"] .ficon { filter: brightness(0.55) saturate(1.4); }
 .ctx-item:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); }
 .ctx-item.danger { color: var(--danger); }
 .ctx-item.danger:hover { background: color-mix(in srgb, var(--danger) 14%, transparent); }
+.ctx-item.disabled { color: var(--dim); opacity: 0.55; cursor: default; }
+.ctx-item.disabled:hover { background: transparent; }
+.ctx-sep { height: 1px; margin: 4px 6px; background: var(--border); }
+
+/* ---------- terminal tab "Agent info" panel (tabmenu.js) ---------- */
+.info-modal {
+  position: fixed; inset: 0; z-index: 120;
+  background: var(--backdrop);
+  display: flex; align-items: center; justify-content: center;
+  backdrop-filter: blur(2px);
+}
+.info-box {
+  width: min(640px, 92vw);
+  background: var(--panel);
+  border: 1px solid var(--border); border-radius: 12px;
+  padding: 16px 18px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.55);
+}
+.info-box h3 { margin: 0 0 12px; font-size: 14px; }
+.info-grid { display: grid; grid-template-columns: max-content 1fr auto; gap: 6px 12px; align-items: center; }
+.info-k { color: var(--dim); font-size: 12px; }
+.info-v {
+  min-width: 0; font: 12px Consolas, "Cascadia Mono", monospace;
+  overflow-wrap: anywhere; user-select: text;
+}
+.info-v.none { color: var(--dim); }
+.info-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
 
 /* ---------- toasts ---------- */
 #toasts { position: fixed; right: 16px; bottom: 16px; display: flex; flex-direction: column; gap: 8px; z-index: 200; }
