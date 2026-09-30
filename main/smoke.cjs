@@ -179,6 +179,14 @@ async function runSmoke() {
 
   // 10. status file watcher (supervision signal from injected claude hooks)
   {
+    // notification prefs: defaults toast only when you're needed; junk ignored
+    {
+      const np = require('./notifyprefs.cjs');
+      const d = np._normalize(null);
+      const mixed = np._normalize({ done: true, waiting: 'yes', failed: false, extra: 1 });
+      check('notify prefs defaults + normalize', d.waiting === true && d.failed === true && d.done === false
+        && mixed.done === true && mixed.waiting === true && mixed.failed === false && !('extra' in mixed), JSON.stringify({ d, mixed }));
+    }
     const statusMod = require('./status.cjs');
     // tab ↔ conversation audit trail (tablog): open snapshot, session change,
     // close, and the one-time "looks like an agent but untracked" warning

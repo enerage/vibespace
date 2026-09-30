@@ -256,6 +256,11 @@ Key facts encoded in `main/sessions.cjs`:
   Keydown still fires, but keypress/beforeinput don't until the window is
   re-focused, so Space dies in xterm while letters keep working. Use
   `confirmBox()` from `common.js` (found via keydiag, 2026-09-29).
+- **Notification prefs** (0.6.25): `main/notifyprefs.cjs`, machine-wide
+  `<dataRoot>/notify.json`, re-read on mtime change because every workspace is
+  its own process. `notifyAttention` asks `shouldToast(st)` for the TOAST only.
+  The taskbar badge and tab lights never depend on it. A new attention kind
+  needs a default there plus a switch row in the prefs modal.
 - **Tab/session audit trail:** grep the instance log for `tabs:`. It logs the
   open snapshot, per-change lines and "untracked … would NOT resume" warnings
   (`main/tablog.cjs`, fed from `persistState`). Check it first when a restart

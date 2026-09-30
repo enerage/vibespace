@@ -69,6 +69,21 @@ Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 - Symptom it fixes: agent terminals with a 5-entry PATH (`C:WindowsSystem32…`),
   node/npm/pnpm/python/git not found by name. Needs one VibeSpace restart.
 
+## [0.6.25] — 2026-09-30
+
+### Added
+- **Choose which notifications you get** (⚙ Preferences → Notifications).
+  Three switches for the Windows pop-ups:
+  - **An agent needs your answer** (permission prompt or question): on.
+  - **Something went wrong** (a failed turn): on.
+  - **An agent finished its turn**: **off by default**. With many agents it
+    fired constantly.
+
+  The choice is machine-wide: one setting for every workspace, applied at once
+  in all open windows (`<dataRoot>/notify.json`). Tab lights and the taskbar
+  badge are unchanged and still show every state. A skipped pop-up is logged as
+  `toast skipped`. Takes effect after one ↻ Restart per window. Smoke 74/74.
+
 ## [0.6.24] — 2026-09-29
 
 ### Fixed

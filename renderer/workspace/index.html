@@ -124,6 +124,30 @@
         <button id="btn-logs" class="btn small ghost">🐞 Open logs folder</button>
       </div>
 
+      <div class="prefs-label" style="margin-top: 14px;">Notifications</div>
+      <div class="prefs-hint">Windows pop-ups — one choice for all workspaces. Tab lights and the taskbar badge always show every state.</div>
+      <div class="prefs-row">
+        <div>
+          <div class="prefs-label">An agent needs your answer</div>
+          <div class="prefs-hint">A permission prompt or a question is waiting for you</div>
+        </div>
+        <label class="toggle"><input type="checkbox" id="notify-waiting" /></label>
+      </div>
+      <div class="prefs-row">
+        <div>
+          <div class="prefs-label">Something went wrong</div>
+          <div class="prefs-hint">A turn failed (API error, rate limit, crash)</div>
+        </div>
+        <label class="toggle"><input type="checkbox" id="notify-failed" /></label>
+      </div>
+      <div class="prefs-row">
+        <div>
+          <div class="prefs-label">An agent finished its turn</div>
+          <div class="prefs-hint">Off by default — with many agents this fires constantly</div>
+        </div>
+        <label class="toggle"><input type="checkbox" id="notify-done" /></label>
+      </div>
+
       <div class="prefs-label" style="margin-top: 14px;">Theme</div>
       <div class="prefs-hint">Per workspace — applied instantly, saved with the window</div>
       <div id="theme-grid"></div>

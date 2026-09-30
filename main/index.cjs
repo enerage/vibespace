@@ -16,6 +16,7 @@ const contextmenu = require('./contextmenu.cjs');
 const ptyhost = require('./ptyhost.cjs');
 const sessions = require('./sessions.cjs');
 const tablog = require('./tablog.cjs');
+const notifyprefs = require('./notifyprefs.cjs');
 const status = require('./status.cjs');
 const gitstatus = require('./gitstatus.cjs');
 const gitdiff = require('./gitdiff.cjs');
@@ -240,15 +241,21 @@ function notifyAttention(wsId, termId, st) {
   const body = st === 'failed' ? `${agent} ${reason || 'turn failed'}`
     : st === 'waiting' ? `${agent} ${reason || 'needs your input'}`
     : `${agent} finished its turn`;
-  try {
-    const n = new Notification({ title, body, icon: ws && ws.iconPath && fs.existsSync(ws.iconPath) ? ws.iconPath : undefined });
-    n.on('click', () => {
-      for (const w of workspaceWindowsFor(wsId)) {
-        if (!w.isDestroyed()) { w.show(); w.focus(); w.webContents.send('term:focus', termId); }
-      }
-    });
-    n.show();
-  } catch {}
+  // the toast is a user choice per event kind (⚙ Preferences → Notifications,
+  // machine-wide); the taskbar badge below always shows
+  if (notifyprefs.shouldToast(st)) {
+    try {
+      const n = new Notification({ title, body, icon: ws && ws.iconPath && fs.existsSync(ws.iconPath) ? ws.iconPath : undefined });
+      n.on('click', () => {
+        for (const w of workspaceWindowsFor(wsId)) {
+          if (!w.isDestroyed()) { w.show(); w.focus(); w.webContents.send('term:focus', termId); }
+        }
+      });
+      n.show();
+    } catch {}
+  } else {
+    logger.info(`toast skipped (notifications: ${st} off): ws=${wsId} term=${termId}`);
+  }
   const icon = overlayIcons[st === 'failed' ? 'waiting' : st]; // a failed turn needs you too: red badge
   if (icon && fs.existsSync(icon)) {
     for (const w of wins) { if (!w.isDestroyed()) { try { w.setOverlayIcon(icon, st); } catch {} } }
@@ -963,6 +970,13 @@ function initIpc() {
   // misc
   ipcMain.handle('util:claudeVersion', () => updater.claudeVersion());
   ipcMain.handle('util:openLogs', () => { shell.openPath(logger.logsDir()); return true; });
+  // which attention events toast — machine-wide (main/notifyprefs.cjs)
+  ipcMain.handle('notify:get', () => notifyprefs.get());
+  ipcMain.handle('notify:set', (e, patch) => {
+    const next = notifyprefs.set(patch);
+    logger.info(`notifications set: ${JSON.stringify(next)}`);
+    return next;
+  });
   ipcMain.handle('util:writeClipboard', (e, text) => { clipboard.writeText(String(text ?? '')); return true; });
   ipcMain.handle('util:readClipboard', () => clipboard.readText());
   ipcMain.handle('util:diagnostics', (e, wsId) => logger.diagnostics(wsId ? workspaces.get(wsId) : null));

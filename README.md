@@ -39,7 +39,7 @@ VibeSpace is that place — built for people who live in agents all day.
 | | |
 |---|---|
 | 🔵 **Agent status lights** | amber = working, red pulse = waiting for you, green = finished — driven by Claude Code hooks (`--settings` injection, merges with your own) |
-| 🔔 **Attention toasts** | unfocused agent needs you / finished → Windows notification; click focuses window *and* the exact tab |
+| 🔔 **Attention toasts** | agent needs your answer or a turn failed → Windows notification (you pick which kinds in Preferences; "finished" is off by default); click focuses window *and* the exact tab |
 | ⌨️ **Ctrl+Shift+U** | jump to the next tab that needs you |
 | ▦ **Agent board** (Ctrl+Shift+B) | every agent as a card: Needs you / Working / Done, with context, cost, tasks and a quick-reply box; other open workspaces listed below |
 | 🌲 **Git-colored tree** | modified / added / untracked / deleted files and folders, refreshed live |

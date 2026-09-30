@@ -1,4 +1,4 @@
-import { $, el } from './common.js';
+import { $, el, toast } from './common.js';
 import { THEMES, applyTheme, currentTheme } from './themes.js';
 
 // Preferences modal (⚙ in the top bar). Absorbs the header controls that
@@ -11,10 +11,25 @@ export function init(opts) {
 
   const close = () => modal.classList.add('hidden');
   modal.tabIndex = -1; // so Esc works right after opening via the header button
+  // notification switches: machine-wide (main/notifyprefs.cjs), so they are
+  // re-read every time the modal opens — another workspace may have changed them
+  const NOTIFY = ['waiting', 'failed', 'done'];
+  const loadNotify = async () => {
+    const p = await vs.notifyGet().catch(() => null);
+    if (!p) return;
+    for (const k of NOTIFY) $('#notify-' + k).checked = Boolean(p[k]);
+  };
+  for (const k of NOTIFY) {
+    $('#notify-' + k).addEventListener('change', (e) => {
+      vs.notifySet({ [k]: e.target.checked }).catch(() => toast('Could not save the notification setting', 'err'));
+    });
+  }
+
   $('#btn-prefs').onclick = () => {
     modal.classList.remove('hidden');
     modal.focus();
     markActiveTheme();
+    loadNotify();
     $('#btn-layout').title = opts.layoutLabel(); // title lives on the modal's copy now
   };
   modal.addEventListener('mousedown', (e) => { if (e.target === modal) close(); });
