@@ -120,11 +120,9 @@ Build in this order. Verify the statusLine and HTTP hooks live in a pty before r
 ## Multi-agent / multi-repo
 - [x] **Phone / away mode via Remote Control** (0.6.21, RESEARCH-REMOTE.md) —
       per-tab `--remote-control` names, presence marker + 📱 toggle + lock/idle auto-away.
-- [ ] **Live-verify phone control** (S) — after a workspace restart, check that
-      `--remote-control` + `--settings` launches cleanly, that ~20 sessions all
-      register, that phone answers unblock the PC (known issues #52084/#59855/#64797),
-      that our lights/feed stay right when answered from the phone, and that lock →
-      a push arrives. If it fails badly: DIY Telegram hub (RESEARCH-REMOTE.md plan step 3).
+- [x] **Live-verify phone control** (2026-10-01): question → push → answered on
+      the phone → PC continued. Still open: permission prompt from the phone; ~20
+      sessions at once; whether close-together pushes get dropped (seen once).
 - [ ] **Worktree tabs** (L) — spawn an agent into `repo/.claude/worktrees/<name>`
       (Claude Desktop-style isolation) with a branch picker.
 - [ ] **Cross-workspace overview** (M) — small always-on-top window or launcher view:

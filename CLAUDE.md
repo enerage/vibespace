@@ -240,6 +240,13 @@ Key facts encoded in `main/sessions.cjs`:
     a pasted `/rename <ws · name>` (`terms.js` `syncClaudeName`), only when
     status is `done` and no keystroke has arrived since. Mouse and focus reports
     don't count as keystrokes.
+  - Verified live 2026-10-01: question → phone push → answered on the phone →
+    PC agent continued. Claude ALSO skips the push while that agent's VibeSpace
+    window is the active window (xterm focus reports; another VibeSpace window
+    counts as away). Presence and focus are checked once, at the moment the
+    agent starts waiting. A second push ~30 s after another agent's push was
+    dropped (once, not yet reproduced). A test must make the agent ask AFTER you
+    leave (a delay), not before.
 - Keys: Ctrl+P file finder · Ctrl+F terminal search (active tab) · Ctrl+Shift+U
   jump-to-attention · Ctrl+Shift+B agent board · Ctrl+Shift+D diagnostics.
 - **Git** (0.6.14, sidebar since 0.6.15): `main/githistory.cjs` (log/commit/fileAt/branch,
