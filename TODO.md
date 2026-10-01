@@ -114,6 +114,8 @@ Build in this order. Verify the statusLine and HTTP hooks live in a pty before r
 - [ ] Optional: our own ↺ Resume picker (lists this repo's transcripts whatever
       the drive-letter case, resumes by id). Claude's picker hides lowercase-`d:\`
       conversations (anthropics/claude-code#90588); drop this if they fix it.
+      2026-10-01: the existing 41 were repaired (CLAUDE.md, picker bullet). Only
+      build this if new VS Code-started sessions keep hitting it.
 
 ## Multi-agent / multi-repo
 - [x] **Phone / away mode via Remote Control** (0.6.21, RESEARCH-REMOTE.md) —

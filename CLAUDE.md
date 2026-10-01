@@ -114,6 +114,11 @@ Key facts encoded in `main/sessions.cjs`:
   (VS Code, cmd) is hidden from the list and refuses to open ("from a
   different directory"). `claude --resume <id>` works, so restore (by id) is
   unaffected. Only ↺ Resume and right-click + Claude go through the picker.
+  Repair (the issue's own workaround, done for 41 conversations on 2026-10-01):
+  rewrite only the `"cwd":"x:\\` drive letter to uppercase in the `.jsonl`.
+  Skip sessions listed in `~/.claude/sessions/*.json` (live) and files written
+  in the last 2 min, back up first, and re-parse every line afterwards. New
+  sessions started from the VS Code extension will keep producing `d:\`.
 
 ## Developing VibeSpace
 
