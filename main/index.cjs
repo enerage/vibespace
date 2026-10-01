@@ -10,6 +10,9 @@ const { spawn } = require('node:child_process');
 const U = require('./util.cjs');
 process.env.PATH = U.rebuildPath();
 const logger = require('./logger.cjs');
+// a JSON file (state/workspaces/…) that a crash or reboot left unreadable must
+// never be swallowed silently — that cost a conversation + layout on 2026-10-01
+U.onCorruptJson((msg) => logger.warn(`json: ${msg}`));
 const workspaces = require('./workspaces.cjs');
 const shortcuts = require('./shortcuts.cjs');
 const contextmenu = require('./contextmenu.cjs');
@@ -275,6 +278,8 @@ function loadState(wsId) {
   return U.readJson(stateFile(wsId), {});
 }
 
+const lastStateJson = new Map(); // wsId -> last JSON written (skip identical writes)
+
 function persistState(wsId) {
   const state = rendererState.get(wsId);
   if (!state) return;
@@ -285,11 +290,17 @@ function persistState(wsId) {
       claudeSessionId: sessions.getSession(wsId, t.termId) || t.claudeSessionId || null,
     }));
   }
-  try {
-    U.ensureDir(path.dirname(stateFile(wsId)));
-    U.writeJsonAtomic(stateFile(wsId), enriched);
-  } catch (e) {
-    console.error('[vibespace] state save failed:', e.message);
+  // the renderer pushes every ~5 s; only touch the disk when something changed —
+  // fewer writes = fewer chances for a reboot to catch one mid-flight
+  const json = JSON.stringify(enriched);
+  if (lastStateJson.get(wsId) !== json) {
+    try {
+      U.ensureDir(path.dirname(stateFile(wsId)));
+      U.writeJsonAtomic(stateFile(wsId), enriched);
+      lastStateJson.set(wsId, json);
+    } catch (e) {
+      logger.warn(`state save failed: ws=${wsId} ${e.message}`);
+    }
   }
   // audit trail: which tab holds which conversation, and tabs that look like
   // agents but would NOT resume on restart (main/tablog.cjs)

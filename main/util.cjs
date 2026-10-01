@@ -63,16 +63,62 @@ function randId(len = 4) {
   return out;
 }
 
+// Crash-safe JSON files (state.json, workspaces.json, …). A PC reboot on
+// 2026-10-01 left recruitica's state.json unreadable: the tmp file was renamed
+// before its bytes reached the disk, so the window came back with defaults (no
+// conversation, terminal at the bottom). Now: fsync the tmp BEFORE the rename,
+// and keep the previous good copy as <file>.bak, which readJson falls back to.
+function parsesOk(file) {
+  try { JSON.parse(fs.readFileSync(file, 'utf8')); return true; } catch { return false; }
+}
+
 function writeJsonAtomic(file, obj) {
   const tmp = file + '.tmp';
-  fs.writeFileSync(tmp, JSON.stringify(obj, null, 2));
+  const fd = fs.openSync(tmp, 'w');
+  try {
+    fs.writeSync(fd, JSON.stringify(obj, null, 2));
+    fs.fsyncSync(fd); // bytes on disk before the rename makes them "the" file
+  } finally {
+    fs.closeSync(fd);
+  }
+  // only a GOOD current file becomes the backup — never overwrite a valid
+  // .bak with a corrupt leftover
+  if (fs.existsSync(file) && parsesOk(file)) {
+    try { fs.copyFileSync(file, file + '.bak'); } catch { /* backup is best-effort */ }
+  }
   fs.renameSync(tmp, file);
 }
 
+// main sets this to its logger; util stays dependency-free
+let corruptionReporter = () => {};
+function onCorruptJson(fn) { corruptionReporter = typeof fn === 'function' ? fn : () => {}; }
+
 function readJson(file, fallback = null) {
+  let raw;
   try {
-    return JSON.parse(fs.readFileSync(file, 'utf8'));
+    raw = fs.readFileSync(file, 'utf8');
   } catch {
+    // missing is normal (first run); an unreadable file still tries the backup
+    return fs.existsSync(file + '.bak') && !fs.existsSync(file) ? readBackup(file, fallback, 'missing') : fallback;
+  }
+  try {
+    return JSON.parse(raw);
+  } catch (e) {
+    // keep the broken file for diagnosis, then fall back to the last good copy
+    const kept = `${file}.corrupt-${Date.now()}`;
+    try { fs.renameSync(file, kept); } catch { /* leave it in place */ }
+    const head = JSON.stringify(raw.slice(0, 40));
+    return readBackup(file, fallback, `unreadable (${raw.length} bytes, starts ${head}: ${e.message}) — kept as ${path.basename(kept)}`);
+  }
+}
+
+function readBackup(file, fallback, why) {
+  try {
+    const v = JSON.parse(fs.readFileSync(file + '.bak', 'utf8'));
+    corruptionReporter(`${path.basename(file)} ${why} — restored from .bak`, file);
+    return v;
+  } catch {
+    corruptionReporter(`${path.basename(file)} ${why} — no usable .bak, using defaults`, file);
     return fallback;
   }
 }
@@ -179,4 +225,5 @@ module.exports = {
   randId,
   writeJsonAtomic,
   readJson,
+  onCorruptJson,
 };

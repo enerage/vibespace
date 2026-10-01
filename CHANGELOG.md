@@ -2,6 +2,26 @@
 
 Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 
+## [0.6.30] — 2026-10-01
+
+### Fixed
+- **A PC restart could wipe a workspace's saved state.** After a reboot,
+  recruitica-nextjs came back with one fresh agent (its conversation
+  `0d10d298…` not resumed) and the terminal at the bottom instead of the right.
+  - Cause: `state.json` is rewritten every ~5 s. The new file was renamed into
+    place before its bytes reached the disk, so the reboot left it unreadable.
+    The read failed silently, the window fell back to defaults, and those
+    defaults were saved over the file.
+  - Fix, for every JSON file VibeSpace writes (workspace state, the workspace
+    list, window geometry, notification and account settings…):
+    - The new file is flushed to disk before it replaces the old one.
+    - The previous good copy is kept as `<file>.bak`. An unreadable file is
+      restored from it automatically, and the damaged file is kept as
+      `<file>.corrupt-<time>`.
+    - The log gets a `json:` warning when this happens.
+  - `state.json` is now only written when something actually changed.
+  - Smoke 83/83 (simulated reboot damage restores from `.bak`).
+
 ## [0.6.29] — 2026-10-01
 
 ### Added

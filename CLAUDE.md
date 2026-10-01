@@ -324,6 +324,12 @@ Key facts encoded in `main/sessions.cjs`:
   installed node-pty prebuilds are copied instead. Always packaged-smoke before
   shipping. Note: packaged reads come from app.asar (fine), but child processes
   need real dirs — use `U.BIN_ROOT`, never `U.ROOT`, as a cwd.
+- **JSON files are crash-safe** (0.6.30, `util.cjs` `writeJsonAtomic`/`readJson`):
+  fsync the tmp file before the rename, keep the last GOOD copy as `.bak`, and
+  restore an unreadable file from it (the damaged one is kept as
+  `.corrupt-<ts>`, reported via `U.onCorruptJson` → `json:` log line). Never
+  write JSON with plain `writeFileSync`, and never let a parse failure fall
+  back to defaults silently. A reboot did exactly that to state.json.
 - State: `~/.vibespace/instances/<id>/state.json` — renderer pushes debounced snapshots;
   main enriches terminal entries with tracked session ids every flush and on close.
   Renderer state and main-side enrichment are deliberately merged main-side — keep that.

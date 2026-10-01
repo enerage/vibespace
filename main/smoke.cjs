@@ -179,6 +179,26 @@ async function runSmoke() {
 
   // 10. status file watcher (supervision signal from injected claude hooks)
   {
+    // crash-safe JSON: a reboot-damaged file (NUL bytes) restores the last good
+    // copy from .bak, is kept for diagnosis, and is reported — never silent
+    {
+      const os = require('node:os');
+      const d = fs.mkdtempSync(path.join(os.tmpdir(), 'vibespace-json-'));
+      const f = path.join(d, 'state.json');
+      const seen = [];
+      U.onCorruptJson((m) => seen.push(m));
+      U.writeJsonAtomic(f, { v: 1 });
+      U.writeJsonAtomic(f, { v: 2 });
+      fs.writeFileSync(f, Buffer.alloc(256)); // what a hard reboot can leave behind
+      const back = U.readJson(f, {});
+      const kept = fs.readdirSync(d).some((n) => n.startsWith('state.json.corrupt-'));
+      U.writeJsonAtomic(f, { v: 3 });
+      const after = U.readJson(f, {});
+      U.onCorruptJson(null);
+      check('json survives reboot damage (.bak restore, kept, reported)', back.v === 1 && kept && seen.length === 1 && after.v === 3,
+        JSON.stringify({ back, kept, seen: seen.length, after }));
+      try { fs.rmSync(d, { recursive: true, force: true }); } catch {}
+    }
     // notification prefs: defaults toast only when you're needed; junk ignored
     {
       const np = require('./notifyprefs.cjs');
