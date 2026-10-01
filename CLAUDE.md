@@ -330,6 +330,10 @@ Key facts encoded in `main/sessions.cjs`:
   `.corrupt-<ts>`, reported via `U.onCorruptJson` → `json:` log line). Never
   write JSON with plain `writeFileSync`, and never let a parse failure fall
   back to defaults silently. A reboot did exactly that to state.json.
+  On Windows `session-end` and on `before-quit`, main saves one last time and
+  then sets `stateFrozen`, so pty exits during shutdown can't save as "tabs
+  closed". Test it via the main inspector (`--inspect=9230`,
+  `app.emit('session-end')`).
 - State: `~/.vibespace/instances/<id>/state.json` — renderer pushes debounced snapshots;
   main enriches terminal entries with tracked session ids every flush and on close.
   Renderer state and main-side enrichment are deliberately merged main-side — keep that.

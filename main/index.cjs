@@ -279,8 +279,10 @@ function loadState(wsId) {
 }
 
 const lastStateJson = new Map(); // wsId -> last JSON written (skip identical writes)
+let stateFrozen = false; // set on session-end / before-quit: the final save already happened
 
 function persistState(wsId) {
+  if (stateFrozen) return;
   const state = rendererState.get(wsId);
   if (!state) return;
   const enriched = { ...state };
@@ -1393,8 +1395,21 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
 
+// Windows shutdown / restart / logoff. Save everything ONE last time (fsynced),
+// then freeze the state files: Windows may kill the terminal processes before
+// us, and the renderer would read those exits as "tabs closed" and save an
+// empty tab list over the good state. A reboot then restores the state exactly
+// as it was (2026-10-01: a reboot cost recruitica its conversation + layout).
+app.on('session-end', () => {
+  logger.info('windows session ending (shutdown/restart/logoff) — final state save, then frozen');
+  for (const w of BrowserWindow.getAllWindows()) { try { saveWindowState(w); } catch {} }
+  for (const wsId of new Set([...winInfo.values()].map(v => v.wsId))) persistState(wsId);
+  stateFrozen = true;
+});
+
 app.on('before-quit', () => {
   for (const wsId of new Set([...winInfo.values()].map(v => v.wsId))) persistState(wsId);
+  stateFrozen = true; // killAll below makes every pty "exit" — never save that churn
   board.stopAll();
   presence.stop();
   accounts.unwatch();

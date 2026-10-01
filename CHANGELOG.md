@@ -2,6 +2,19 @@
 
 Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 
+## [0.6.31] — 2026-10-01
+
+### Fixed
+- **A Windows shutdown/restart no longer touches the saved workspace.** When
+  Windows announces the session is ending, VibeSpace saves every window's state
+  and geometry one last time and then **freezes** the state files. Windows can
+  kill the terminal processes before VibeSpace itself, and those exits used to
+  look like "tabs closed", which could save an empty tab list over the good
+  state. The same freeze applies to a normal quit.
+- Verified live via the main-process inspector: after the session-end event, a
+  terminal was killed and its tab vanished from the UI, but the saved state
+  still listed all three tabs.
+
 ## [0.6.30] — 2026-10-01
 
 ### Fixed
