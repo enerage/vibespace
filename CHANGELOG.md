@@ -2,6 +2,16 @@
 
 Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 
+## [0.6.28] — 2026-10-01
+
+### Added
+- **Restart this workspace, any time** (⚙ Preferences → "Restart this workspace").
+  The ↻ button in the top bar still only appears when there's new VibeSpace
+  code. The Preferences row is always there, for a stuck UI, after a settings
+  change, or whenever you want. It's the same flow as ↻: any busy agents are
+  named in the confirm box, then the window relaunches maximized and focused,
+  and every conversation resumes. Verified live in a throwaway workspace.
+
 ## [0.6.27] — 2026-10-01
 
 ### Changed
