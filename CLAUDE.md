@@ -122,7 +122,7 @@ Key facts encoded in `main/sessions.cjs`:
 
 ## Developing VibeSpace
 
-- `npm run smoke` — 82 self-tests (as of 0.6.29) incl. pty echo and live session discovery. Run it after
+- `npm run smoke` — 83 self-tests (as of 0.6.32) incl. pty echo and live session discovery. Run it after
   touching main-process code, **from a normal shell**: inside a Claude pty the stripped
   PATH and nested ConPTY break the pty test (`powershell.exe` "File not found" /
   AttachConsole) — prepend System32 to PATH and give it its own console, or just use a
@@ -306,7 +306,14 @@ Key facts encoded in `main/sessions.cjs`:
 - **Tab/session audit trail:** grep the instance log for `tabs:`. It logs the
   open snapshot, per-change lines and "untracked … would NOT resume" warnings
   (`main/tablog.cjs`, fed from `persistState`). Check it first when a restart
-  "lost" a conversation.
+  "lost" a conversation. It is also the REPAIR source. If a state.json is
+  damaged and has no `.bak` (all-NUL after the 2026-10-01 reboot: recruitica,
+  flexiq, flexfunnels, justlinked), take the last `tabs:` open/+ lines for that
+  workspace (read the log with `grep -a`, since the log tail can hold NULs
+  too). Then, WHILE ITS WINDOW IS CLOSED (an open window overwrites the file),
+  write `{terminals:[{termId,name,cwd,isClaude,claudeSessionId}],autoResume:true}`
+  with `U.writeJsonAtomic`, keeping the broken file as `.corrupt-<ts>`. The
+  layout isn't logged, so it falls back to the default.
 - **`/sync-docs` skill** (`.claude/skills/sync-docs`): the "update all docs" ritual —
   CHANGELOG/DECISIONS/CLAUDE/TODO/README + agent memory, docs only. Copy the skill
   folder into any repo that should join the ritual. (A 📨 broadcast button existed

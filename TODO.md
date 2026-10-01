@@ -93,6 +93,11 @@ Build in this order. Verify the statusLine and HTTP hooks live in a pty before r
 - [x] **Editor tabs** (done 0.6.0) — dirty dots, per-tab edit state, persisted
       across reloads, agent-edited files refresh in place.
 - [ ] Full-text grep panel (S/M).
+- [ ] tablog: include the layout (`termPosition`, sizes) in the `open:` line, so a
+      state rebuilt from the log keeps the terminal on the right (S). The
+      2026-10-01 reboot rebuilds lost it.
+- [ ] Launcher still uses 2 native `confirm()` boxes (remove workspace, remove
+      Explorer menu). Port them to an in-page confirm like `confirmBox` (S).
 
 ## Session tracking robustness
 - [x] Resume-an-existing-conversation flow (0.6.2): right-click `+ Claude` opens
