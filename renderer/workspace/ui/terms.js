@@ -78,6 +78,16 @@ export function init(opts) {
   });
   vs.onTermFocus((termId) => { if (tabs.has(termId)) activateTab(termId); });
 
+  // tabs wrap onto extra rows when they don't fit: the bar's height changes and
+  // the terminal below shrinks or grows, so refit once (throttled) per change
+  let barHeight = 0;
+  new ResizeObserver(([entry]) => {
+    const h = Math.round(entry.contentRect.height);
+    if (h === barHeight) return;
+    barHeight = h;
+    scheduleRefit();
+  }).observe($('#tabbar'));
+
   // claude data feed → context meter, light detail, task pill (all repainted IN
   // PLACE; a full renderTabBar per tick would churn the bar and kill a rename in
   // progress) + activity strip / peek card (ui/feedui.js). The snapshot covers a
@@ -694,21 +704,26 @@ function wireTabDrag(bar, t) {
     if (e.button !== 0) return;
     if (e.target.closest('.close') || e.target.closest('.rename')) return;
     const startX = e.clientX;
+    const startY = e.clientY;
     let dragging = false;
     const move = (ev) => {
       if (!dragging) {
-        if (Math.abs(ev.clientX - startX) < 4) return;
+        if (Math.max(Math.abs(ev.clientX - startX), Math.abs(ev.clientY - startY)) < 4) return;
         dragging = true;
         t.classList.add('dragging');
         document.body.classList.add('dragging'); // user-select: none while dragging
       }
-      // drop before the first tab whose midpoint the pointer passed
+      // the bar wraps into rows: drop before the first tab that sits in a row
+      // below the pointer, or in the pointer's row past its midpoint
       for (const sib of bar.children) {
         if (sib === t) continue;
         const r = sib.getBoundingClientRect();
-        if (ev.clientX < r.left + r.width / 2) { bar.insertBefore(t, sib); return; }
+        if (ev.clientY < r.top || (ev.clientY <= r.bottom && ev.clientX < r.left + r.width / 2)) {
+          bar.insertBefore(t, sib);
+          return;
+        }
       }
-      bar.appendChild(t); // pointer is right of everything
+      bar.appendChild(t); // pointer is past everything
     };
     const up = () => {
       window.removeEventListener('pointermove', move, true);

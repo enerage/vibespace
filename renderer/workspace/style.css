@@ -750,10 +750,23 @@ body.dragging #split-v, body.dragging #split-h { background: color-mix(in srgb, 
 .bchip { display: inline-flex; align-items: center; gap: 5px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--border); max-width: 280px; }
 .bchip-name { white-space: nowrap; }
 .bchip-why { color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-/* the ▦ button widened the tab bar: tabs now scroll instead of sliding under
-   the + Claude / + Terminal / ▦ buttons */
-#tabs { overflow-x: auto; scrollbar-width: none; }
-.tabbar-actions { flex: none; }
+/* many agents: tabs wrap onto extra rows instead of hiding off-screen.
+   wrap-reverse: while tabs + buttons fit they share one line; once they don't,
+   the tabs drop to their own full-width line(s) BELOW and the buttons stay on top,
+   right-aligned, so tabs never get squeezed into a column beside the buttons.
+   Capped at 3 rows, then the tab area scrolls so the terminal keeps its room.
+   terms.js refits xterm when the bar height changes. */
+#tabbar {
+  height: auto; min-height: 38px; padding: 4px 8px; overflow: visible;
+  flex-wrap: wrap-reverse; align-items: center; row-gap: 4px;
+}
+#tabs {
+  flex: 1 1 auto; min-width: 0; flex-wrap: wrap; align-content: flex-start;
+  max-height: calc(3 * 31px + 2 * 4px); overflow-y: auto; overflow-x: hidden;
+  scrollbar-width: thin;
+}
+#tabs .tab { flex: 0 1 auto; min-width: 84px; }
+.tabbar-actions { flex: none; margin-left: auto; }
 .bc-name { flex: 0 1 auto; min-width: 2.5em; }
 .bc-model { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 /* narrow terminal pane (docked right): stack the columns, cards get full width */

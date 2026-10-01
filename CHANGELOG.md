@@ -2,6 +2,18 @@
 
 Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 
+## [0.6.27] — 2026-10-01
+
+### Changed
+- **Many agents: tabs wrap onto extra rows** instead of hiding off-screen behind a
+  sideways scroll. While tabs and buttons fit they share one line. Once they
+  don't, the tabs get their own full-width rows under the + Claude / ↺ Resume /
+  + Terminal / ▦ Board buttons (docked right, the buttons used to squeeze the tabs
+  into one column). Capped at 3 rows; past that the tab area scrolls so the
+  terminal keeps its room. The terminal refits once when the row count changes.
+  Drag-to-reorder works across rows. Verified with 3/14/20 tabs, both docks, and
+  a real mouse drag from row 1 to row 2. Takes effect after one ↻ Restart.
+
 ## [0.6.3] — 2026-09-28
 
 ### Added
