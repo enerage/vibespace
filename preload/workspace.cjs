@@ -54,7 +54,6 @@ contextBridge.exposeInMainWorld('vs', {
   waitClaudeExit: (termId, timeoutMs) => ipcRenderer.invoke('pty:waitClaudeExit', termId, timeoutMs),
   onAccountSwitch: (cb) => ipcRenderer.on('account:switch', (e, msg) => cb(msg)),
 
-  restartAll: (wsId) => ipcRenderer.invoke('updater:restartAll', wsId),
   appRestart: () => ipcRenderer.invoke('app:restart'),
   ptyBusy: (wsId) => ipcRenderer.invoke('pty:busy', wsId),
   claudeVersion: () => ipcRenderer.invoke('util:claudeVersion'),
@@ -75,9 +74,6 @@ contextBridge.exposeInMainWorld('vs', {
   onTermFeed: (cb) => ipcRenderer.on('term:feed', (e, msg) => cb(msg && msg.termId, msg && msg.feed)),
   onAccountLimits: (cb) => ipcRenderer.on('account:limits', (e, limits) => cb(limits)),
   onTreeChanged: (cb) => ipcRenderer.on('tree:changed', () => cb()),
-  onUpdaterStage: (cb) => ipcRenderer.on('updater:stage', (e, stage) => cb(stage)),
-  onUpdaterLine: (cb) => ipcRenderer.on('updater:line', (e, line) => cb(line)),
-  onUpdaterDone: (cb) => ipcRenderer.on('updater:done', (e, info) => cb(info)),
   onUpdaterState: (cb) => ipcRenderer.on('updater:state', (e, state) => cb(state)),
   onAppUpdateAvailable: (cb) => ipcRenderer.on('app:updateAvailable', (e, info) => cb(info)),
 });

@@ -96,24 +96,52 @@ function wireLayoutToggle() {
   // source-tree change; restarting relaunches this window and all conversations
   // auto-resume (busy agents get interrupted — the confirm says so)
   const restartBtn = $('#btn-app-restart');
-  // one restart flow for both entry points: the conditional ↻ (new code) and
-  // Preferences → "Restart this workspace" (always there, any reason)
+  // ONE restart flow for every entry point: the top-bar ↻ (new VibeSpace code
+  // and/or a new Claude Code on disk) and Preferences → "Restart this workspace".
+  // Asks only when it would interrupt someone: idle agents → restart at once.
   const restartWorkspace = async (question, btn) => {
     persistNow(); // main needs fresh tab names/ids to answer who is busy
     const r = await vs.ptyBusy(wsId).catch(() => null);
     const names = (r && r.names) || [];
-    const msg = names.length
-      ? `${question}\n\n${names.join(', ')} ${names.length > 1 ? 'are' : 'is'} working right now — ${names.length > 1 ? 'they' : 'it'} will be interrupted and resumed on restart.`
-      : `${question}\n\nEvery agent conversation resumes automatically.`;
-    if (!(await confirmBox(msg, { ok: 'Restart' }))) return;
+    if (names.length) {
+      const msg = `${question}\n\n${names.join(', ')} ${names.length > 1 ? 'are' : 'is'} working right now — ${names.length > 1 ? 'they' : 'it'} will be interrupted and resumed on restart.`;
+      if (!(await confirmBox(msg, { ok: 'Restart anyway' }))) return;
+    }
     btn.disabled = true;
     try { await vs.appRestart(); } catch { btn.disabled = false; }
   };
-  restartBtn.onclick = () => restartWorkspace('Restart VibeSpace to pick up the new code?', restartBtn);
+
+  // why the ↻ is showing. Claude Code updates itself in the background, so a
+  // "new Claude" here means it's ALREADY on disk — restarting the agents is all
+  // that's left, and the app restart does exactly that (0.6.32 merged the old
+  // ⟳ "Update & Restart All" into this button).
+  const why = { code: false, claude: null };
+  const paintRestart = () => {
+    const show = why.code || Boolean(why.claude);
+    restartBtn.classList.toggle('hidden', !show);
+    if (!show) return;
+    restartBtn.textContent = why.code && why.claude ? '↻ Restart · updates ready'
+      : why.claude ? `↻ Restart · Claude ${why.claude}`
+      : '↻ Restart VibeSpace';
+    restartBtn.title = [
+      why.code ? 'VibeSpace code changed on disk.' : '',
+      why.claude ? `Claude Code ${why.claude} is installed — these agents still run the old version.` : '',
+      'Restart this workspace: every agent conversation resumes on the new version.',
+    ].filter(Boolean).join('\n');
+  };
+  const question = () => (why.code && why.claude ? 'Restart to pick up the new VibeSpace code and Claude Code?'
+    : why.claude ? `Restart all agents onto Claude Code ${why.claude}?`
+    : 'Restart VibeSpace to pick up the new code?');
+  restartBtn.onclick = () => restartWorkspace(question(), restartBtn);
   $('#btn-restart-ws').onclick = () => restartWorkspace('Restart this workspace window?', $('#btn-restart-ws'));
   vs.onAppUpdateAvailable(() => {
-    restartBtn.classList.remove('hidden');
-    toast('New VibeSpace code detected — click ↻ Restart VibeSpace when ready', 'ok');
+    why.code = true;
+    paintRestart();
+    toast('New VibeSpace code detected — click ↻ Restart when ready', 'ok');
+  });
+  vs.onUpdaterState((s) => {
+    why.claude = s && s.available && s.diskVersion ? String(s.diskVersion).replace(/\s*\(.*\)$/, '') : null;
+    paintRestart();
   });
   document.addEventListener('keydown', (e) => {
     if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'd') {

@@ -17,9 +17,7 @@ let wsName = '';
 const tabs = new Map(); // termId -> tab record
 const feeds = new Map(); // termId -> latest claude feed snapshot (main/claudefeed.cjs)
 let activeId = null;
-let updating = false;
 let counter = 0;
-let updateSnapshot = null;
 
 // ---- accounts (main/accounts.cjs) --------------------------------------------
 // Each claude tab runs on an ACCOUNT: 'login' = the stored /login, others are
@@ -79,11 +77,6 @@ export function init(opts) {
   vs.onPtyExit((termId) => {
     const tab = tabs.get(termId);
     if (!tab) return;
-    if (updating) {
-      tab.dead = true;
-      renderTabBar();
-      return;
-    }
     removeTab(termId, false);
   });
 
@@ -152,24 +145,6 @@ export function init(opts) {
   // the pill hides a minute after an all-done turn ends — no feed tick says so
   setInterval(() => { for (const tab of tabs.values()) paintMeter(tab); }, 30000);
 
-  vs.onUpdaterStage((stage) => {
-    if (stage === 'stopping-agents') $('#update-status').textContent = 'Closing agent terminals…';
-    if (stage === 'updating') $('#update-status').textContent = 'Running claude update…';
-    if (stage === 'relaunching') $('#update-status').textContent = 'Relaunching agents…';
-  });
-  vs.onUpdaterLine((line) => {
-    const log = $('#update-log');
-    log.textContent += line + '\n';
-    log.scrollTop = log.scrollHeight;
-  });
-  vs.onUpdaterDone(async (info) => {
-    if (!updating) return;
-    $('#update-status').textContent = info.code === 0 ? 'Done — agents relaunching…' : `claude update exited with ${info.code} — relaunching anyway…`;
-    await new Promise(r => setTimeout(r, 900));
-    $('#update-modal').classList.add('hidden');
-    updating = false;
-    relaunchFromSnapshot(updateSnapshot || []);
-  });
 
   $('#btn-new-claude').onclick = () => createTab({ name: nextName('agent'), cwd: repoPath, claude: true });
   // right-click + Claude: start from an EXISTING conversation — claude's own
@@ -181,21 +156,7 @@ export function init(opts) {
   };
   $('#btn-resume').onclick = resumePicker; // the same, as a visible button
   $('#btn-new-term').onclick = () => createTab({ name: nextName('term'), cwd: repoPath });
-  $('#btn-update').onclick = updateRestartAll;
 
-  // the ⟳ button only exists when it has something to do: claude auto-updates in
-  // the background, and the button restarts agents ONTO that new version — so it
-  // stays hidden until the on-disk version differs from what these agents run
-  const updateBtn = $('#btn-update');
-  updateBtn.classList.add('hidden');
-  vs.onUpdaterState((s) => {
-    if (s && s.available && s.diskVersion) {
-      updateBtn.classList.remove('hidden');
-      updateBtn.title = `Claude Code ${s.diskVersion} is ready — restart all agents onto it (every conversation resumes)`;
-    } else {
-      updateBtn.classList.add('hidden');
-    }
-  });
 
   // ---- Ctrl+F: find inside the active terminal ----
   $('#term-find-next').onclick = () => termFind(false);
@@ -988,40 +949,3 @@ export function sendToAgent(id, text) {
   return true;
 }
 
-async function updateRestartAll() {
-  if (updating) return;
-  const n = snapshot().length;
-  if (!(await confirmBox(
-    `Update Claude Code and restart all ${n} terminal${n > 1 ? 's' : ''}?\n\n` +
-    'Every agent conversation is resumed automatically on the new version (claude --resume).',
-    { ok: 'Update & restart' },
-  ))) return;
-
-  updating = true;
-  updateSnapshot = snapshot();
-  $('#update-log').textContent = '';
-  $('#update-status').textContent = '';
-  $('#update-modal').classList.remove('hidden');
-  try {
-    await vs.restartAll(wsId);
-  } catch (e) {
-    toast('Update failed: ' + (e.message || e), 'err');
-    $('#update-modal').classList.add('hidden');
-    updating = false;
-  }
-}
-
-function relaunchFromSnapshot(snap) {
-  // drop the dead tab UI, recreate each terminal resuming its conversation
-  for (const tab of [...tabs.values()]) removeTab(tab.id, true);
-  for (const t of snap) {
-    createTab({
-      name: t.name,
-      cwd: t.cwd || repoPath,
-      claude: t.isClaude && !t.claudeSessionId,
-      resumeId: t.claudeSessionId || null,
-      account: t.account || null,
-    });
-  }
-  toast(`All agents relaunched on the updated Claude Code`, 'ok');
-}

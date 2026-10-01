@@ -311,9 +311,13 @@ Key facts encoded in `main/sessions.cjs`:
   CHANGELOG/DECISIONS/CLAUDE/TODO/README + agent memory, docs only. Copy the skill
   folder into any repo that should join the ritual. (A 📨 broadcast button existed
   briefly in 0.6.0 and was removed in 0.6.6 — Valentin wanted a rule, not a button.)
-- **⟳ update button is conditional** (0.5.1): claude auto-updates in the background;
-  the button restarts agents onto the new version and only renders when
-  disk version ≠ the window's baseline (`main/index.cjs` claudeBaselines).
+- **New Claude Code version → the same ↻ Restart** (0.6.32; the separate ⟳
+  "Update & Restart All" button, its modal and the `claude update` run were
+  removed). Claude auto-updates on disk by itself. When the disk version ≠ the
+  window's baseline (`main/index.cjs` claudeBaselines), `updater:state` lights
+  ↻ with "Restart · Claude <v>", and the app restart starts every agent on the
+  new binary. Restart (both entry points, `restartWorkspace` in app.js) skips
+  the confirm when `pty:busy` names nobody.
 - **↻ Restart VibeSpace button is conditional too** (0.5.2): main/srcstate.cjs
   fingerprints main/preload/renderer at window OPEN (the code that window runs)
   and re-probes every 30 s; a mismatch shows the button. Baseline must be captured

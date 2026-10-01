@@ -2,6 +2,29 @@
 
 Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 
+## [0.6.32] — 2026-10-01
+
+### Changed
+- **One ↻ Restart button instead of two.** Claude Code updates itself in the
+  background, so by the time the old ⟳ "Update & Restart All" button appeared,
+  the new version was already on disk. Its extra `claude update` run did
+  nothing, and restarting is all that's left. ↻ now shows up for new VibeSpace
+  code **or** a new Claude Code, and its label says why: "↻ Restart VibeSpace",
+  "↻ Restart · Claude 2.1.x", or "↻ Restart · updates ready". The ⟳ button, its
+  "Updating Claude Code…" modal and the `claude update` step are gone.
+- **Restart only asks when it would interrupt someone.** If no agent is
+  working, ↻ (and Preferences → Restart this workspace) restarts immediately.
+  If one is busy, the confirm box names it ("Restart anyway").
+- Verified live: the label for each reason, the busy agent named in the
+  confirm, and an idle restart with no dialog. Smoke 83/83.
+
+### Fixed (repair, no code)
+- The 2026-10-01 reboot also zeroed the state files of **flexfunnels** and
+  **justlinked** (all-NUL, the same damage as recruitica and flexiq). Both were
+  rebuilt from the `tabs:` audit log while their windows were closed, so they
+  resume `bee1d73d…` / `7e1eb1dd…` on open (layout back to default). Broken
+  files kept as `state.json.corrupt-*`.
+
 ## [0.6.31] — 2026-10-01
 
 ### Fixed

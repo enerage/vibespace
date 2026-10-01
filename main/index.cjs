@@ -574,11 +574,12 @@ function launchWorkspaceProcess(wsId) {
 }
 
 // ---------- updater flow ----------
-// Claude Code auto-updates in the background; the ⟳ button's job is the clean
-// RESTART of all agents onto the new version (conversations resumed). It is only
-// shown when the on-disk version differs from what a window's agents were started
-// on (baseline captured at window open, disk re-probed every 5 min).
-let updating = false;
+// Claude Code auto-updates itself in the background, so a newer version is
+// already ON DISK when we notice it. A window's agents keep running the version
+// they started on (baseline captured at window open, disk re-probed every 5 min).
+// When they differ, `updater:state` lights the single ↻ Restart button: the
+// restart relaunches every agent, and new processes start on the new version.
+// (The old ⟳ flow also ran `claude update` — redundant, removed in 0.6.32.)
 let diskClaudeVersion = null; // last seen `claude --version` (fresh spawn = disk)
 const claudeBaselines = new Map(); // wsId -> version its agents were started on
 
@@ -606,39 +607,6 @@ async function baselineClaudeFor(wsId) {
   pushUpdaterState(wsId);
 }
 
-ipcMain.handle('updater:restartAll', async (event, wsId) => {
-  const wins = workspaceWindowsFor(wsId);
-  if (updating) return { ok: false, error: 'update already running' };
-  updating = true;
-  const send = (channel, payload) => { for (const w of wins) { if (!w.isDestroyed()) w.webContents.send(channel, payload); } };
-
-  try {
-    send('updater:stage', 'stopping-agents');
-    send('updater:line', '[vibespace] closing all agent terminals…');
-    logger.info('update-restart: stopping all agents');
-    ptyhost.killAll();
-    await new Promise(r => setTimeout(r, 800));
-    send('updater:stage', 'updating');
-    const code = await updater.runClaudeUpdate(line => { send('updater:line', line); logger.info('[claude update] ' + line); });
-    logger.info(`update-restart: claude update exit code ${code}`);
-    send('updater:line', `[vibespace] claude update exited with code ${code}`);
-    send('updater:stage', 'relaunching');
-    send('updater:done', { code });
-    // agents respawn on the new version moments after `done` — re-baseline so the
-    // button hides again, then confirm with a fresh probe
-    setTimeout(async () => {
-      await probeClaudeVersion();
-      for (const id of claudeBaselines.keys()) claudeBaselines.set(id, diskClaudeVersion);
-      for (const id of claudeBaselines.keys()) pushUpdaterState(id);
-    }, 5000);
-    return { ok: code === 0 };
-  } catch (e) {
-    send('updater:done', { code: -1, error: String(e) });
-    return { ok: false, error: String(e) };
-  } finally {
-    updating = false;
-  }
-});
 
 // ---------- IPC ----------
 function initIpc() {
@@ -1239,7 +1207,7 @@ function initStateFlush() {
   }, 10000);
   // background auto-update detection: cheap fresh `claude --version` probe
   setInterval(() => {
-    if (claudeBaselines.size && !updating) probeClaudeVersion();
+    if (claudeBaselines.size) probeClaudeVersion();
   }, 5 * 60 * 1000).unref?.();
   // new-VibeSpace-code detection (dev only; no-op packaged)
   probeSrc();

@@ -21,38 +21,6 @@ function spawnClaude(args, handlers) {
   }
 }
 
-// Runs `claude update` and streams output lines to the caller.
-// All terminals share one Claude Code install, so one update covers every agent.
-function runClaudeUpdate(onLine) {
-  return new Promise((resolve) => {
-    const child = spawnClaude(['update'], {});
-    let killed = false;
-    const timer = setTimeout(() => {
-      killed = true;
-      try { child.kill(); } catch {}
-      onLine('[vibespace] claude update timed out after 5 minutes');
-      resolve(-1);
-    }, 5 * 60 * 1000);
-    const push = (buf) => {
-      for (const line of buf.toString().split(/\r?\n/)) {
-        const t = line.trim();
-        if (t) onLine(t);
-      }
-    };
-    child.stdout?.on('data', push);
-    child.stderr?.on('data', push);
-    child.on('error', (err) => {
-      clearTimeout(timer);
-      onLine(`[vibespace] failed to launch claude: ${err.message}`);
-      resolve(-1);
-    });
-    child.on('close', (code) => {
-      clearTimeout(timer);
-      resolve(killed ? -1 : (code ?? 0));
-    });
-  });
-}
-
 function claudeVersion() {
   return new Promise((resolve) => {
     const child = spawnClaude(['--version'], {});
@@ -80,4 +48,4 @@ function versionChanged(a, b) {
   return pa[0] !== pb[0] || pa[1] !== pb[1] || pa[2] !== pb[2];
 }
 
-module.exports = { runClaudeUpdate, claudeVersion, claudeCommand, _parseVersion: parseVersion, _versionChanged: versionChanged };
+module.exports = { claudeVersion, claudeCommand, _parseVersion: parseVersion, _versionChanged: versionChanged };
