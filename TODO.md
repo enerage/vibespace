@@ -118,6 +118,10 @@ Build in this order. Verify the statusLine and HTTP hooks live in a pty before r
       build this if new VS Code-started sessions keep hitting it.
 
 ## Multi-agent / multi-repo
+- [ ] **Multi-subscription agents** (2026-10-01, RESEARCH-MULTISUB.md) — run tabs on
+      several Max accounts + z.ai, switch a tab to another account when it hits its
+      usage limit (`StopFailure rate_limit` → `--resume <id>` on the next profile).
+      Decided: token profiles, Claude accounts only, auto-switch (DECISIONS.md). L.
 - [x] **Phone / away mode via Remote Control** (0.6.21, RESEARCH-REMOTE.md) —
       per-tab `--remote-control` names, presence marker + 📱 toggle + lock/idle auto-away.
 - [x] **Live-verify phone control** (2026-10-01): question → push → answered on
