@@ -236,6 +236,10 @@ Key facts encoded in `main/sessions.cjs`:
     runs the same idempotent ticker.
   - After Win+L the idle time reads only a few seconds. A locked screen must count
     as infinite idle, or the "back at PC" rule flips straight back.
+  - The `--remote-control` name is fixed at launch. A tab rename is forwarded as
+    a pasted `/rename <ws · name>` (`terms.js` `syncClaudeName`), only when
+    status is `done` and no keystroke has arrived since. Mouse and focus reports
+    don't count as keystrokes.
 - Keys: Ctrl+P file finder · Ctrl+F terminal search (active tab) · Ctrl+Shift+U
   jump-to-attention · Ctrl+Shift+B agent board · Ctrl+Shift+D diagnostics.
 - **Git** (0.6.14, sidebar since 0.6.15): `main/githistory.cjs` (log/commit/fileAt/branch,

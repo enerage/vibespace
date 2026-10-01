@@ -69,6 +69,18 @@ Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 - Symptom it fixes: agent terminals with a 5-entry PATH (`C:WindowsSystem32…`),
   node/npm/pnpm/python/git not found by name. Needs one VibeSpace restart.
 
+## [0.6.26] — 2026-10-01
+
+### Fixed
+- **Renaming an agent tab now renames it on your phone too.** Before, the
+  phone name was fixed when claude started, so a renamed tab still showed up as
+  "VibeSpace · agent-1". The rename is sent to claude as `/rename <workspace> ·
+  <name>`, which updates the Remote Control name and the `/resume` list title.
+  It waits until the agent has finished its turn and you haven't typed since,
+  so it never lands inside a half-typed prompt or a dialog. Verified live:
+  `/rename` from the tab renamed the phone session, and a pasted `/rename` runs
+  as a command.
+
 ## [0.6.25] — 2026-09-30
 
 ### Added

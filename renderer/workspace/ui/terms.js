@@ -72,6 +72,7 @@ export function init(opts) {
     const tab = tabs.get(termId);
     if (!tab || tab.status === st) return;
     tab.status = st;
+    if (st === 'done') { tab.doneAt = Date.now(); syncClaudeName(tab); }
     if ((st === 'waiting' || st === 'done') && activeId !== termId) tab.unread = true;
     renderTabBar();
   });
@@ -449,7 +450,11 @@ export function createTab({ name = 'agent', cwd = repoPath, claude = false, resu
       .catch(e => toast('Terminal failed: ' + (e.message || e), 'err'));
   }
 
-  term.onData(d => vs.ptyWrite(id, d));
+  term.onData(d => {
+    // typed input marks "user may have a half-typed prompt" for syncClaudeName
+    if (!/^\x1b\[(M|<|I$|O$)/.test(d)) tab.lastInputAt = Date.now(); // not mouse/focus reports
+    vs.ptyWrite(id, d);
+  });
   wireClipboard(term);
   wireDrop(term, host);
   term.onResize(({ cols, rows }) => vs.ptyResize(id, cols, rows));
@@ -741,7 +746,11 @@ function startRename(tabEl, labelEl, tab) {
   input.select();
   const commit = () => {
     const v = input.value.trim();
-    if (v) tab.name = v;
+    if (v && v !== tab.name && tab.isClaude) {
+      tab.pendingRename = rcLabel(v); // phone + /resume list name: sent when the agent is idle
+      tab.name = v;
+      syncClaudeName(tab);
+    } else if (v) tab.name = v;
     input.remove(); // redraws are skipped while .rename is live — clear it BEFORE rebuilding
     renderTabBar();
     persist();
@@ -805,6 +814,19 @@ export function attachBackground(bgId, name) {
   if (!/^[0-9a-f]{6,64}$/i.test(String(bgId))) return null;
   const label = 'bg-' + String(name || bgId).replace(/[^\w .-]/g, '').trim().slice(0, 18);
   return createTab({ name: nextName(label.replace(/\s+/g, '-')), cwd: repoPath, run: `claude attach ${bgId}` });
+}
+
+// A tab rename reaches the running claude as `/rename <ws · name>`, which also
+// renames its Remote Control session on the phone (verified 2026-10-01). Only
+// sent at a safe moment: the turn is done and nothing was typed since, so it
+// never lands inside a half-typed prompt or a dialog. Otherwise it waits for the
+// next `done`.
+function syncClaudeName(tab) {
+  if (!tab.pendingRename || tab.dead || tab.status !== 'done') return;
+  if ((tab.lastInputAt || 0) > (tab.doneAt || 0)) return;
+  const cmd = `/rename ${tab.pendingRename}`;
+  tab.pendingRename = null;
+  sendToAgent(tab.id, cmd);
 }
 
 // board quick reply: the same path as typing — term.paste (bracketed when the
