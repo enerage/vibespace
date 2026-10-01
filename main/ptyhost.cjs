@@ -32,6 +32,8 @@ let exitListener = () => {};
 const logger = require('./logger.cjs');
 const U = require('./util.cjs');
 const presence = require('./presence.cjs');
+const accounts = require('./accounts.cjs');
+const { spawn, execFile } = require('node:child_process');
 
 function available() {
   return Boolean(pty);
@@ -100,19 +102,58 @@ function repairPath(env) {
 const CLAUDE_SUBCOMMANDS = ['agents', 'attach', 'auth', 'auto-mode', 'config', 'doctor', 'gateway', 'import',
   'install', 'logs', 'mcp', 'migrate-installer', 'plugin', 'project', 'remote-control', 'respawn', 'rm',
   'setup-token', 'stop', 'ultrareview', 'update'];
+//
+// Accounts (accounts.cjs): the tab's account id is read from
+// $VIBESPACE_ACCOUNT_FILE at every launch (missing/empty = 'login'). A token
+// account's DPAPI blob is decrypted right here and handed to claude ONLY for this
+// call via CLAUDE_CODE_OAUTH_TOKEN (restored afterwards); such agents get no
+// --remote-control (Remote Control refuses setup-tokens). The logged-in account
+// runs with any inherited CLAUDE_CODE_OAUTH_TOKEN removed for the call.
+// DRYRUN prints VSACCT[<id>|token|missing] or VSACCT[login], never the token.
 const CLAUDE_WRAPPER = `
 function global:claude {
   $exe = Get-Command claude -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
   $a = @($args | ForEach-Object { "$_" })
   $sub = @(${CLAUDE_SUBCOMMANDS.map(s => `'${s}'`).join(',')})
   $plain = ($a.Count -gt 0 -and $sub -contains $a[0]) -or @($a | Where-Object { $_ -in '-p','--print','-v','--version','-h','--help' }).Count -gt 0
+  $acct = 'login'
+  $blob = $null
   if (-not $plain) {
-    if ($env:VIBESPACE_RC_LABEL -and @($a | Where-Object { $_ -in '--remote-control','--rc' }).Count -eq 0) { $a += '--remote-control', $env:VIBESPACE_RC_LABEL }
+    if ($env:VIBESPACE_ACCOUNT_FILE -and (Test-Path -LiteralPath $env:VIBESPACE_ACCOUNT_FILE)) {
+      $r = Get-Content -LiteralPath $env:VIBESPACE_ACCOUNT_FILE -Raw -ErrorAction SilentlyContinue
+      if ($r) { $r = $r.Trim() }
+      if ($r) { $acct = $r }
+    }
+    if ($acct -ne 'login') { $blob = Join-Path "$env:VIBESPACE_ACCOUNT_DIR" "$acct.dpapi" }
+    if ($acct -eq 'login' -and $env:VIBESPACE_RC_LABEL -and @($a | Where-Object { $_ -in '--remote-control','--rc' }).Count -eq 0) { $a += '--remote-control', $env:VIBESPACE_RC_LABEL }
     if ($env:VIBESPACE_CLAUDE_SETTINGS -and $a -notcontains '--settings') { $a += '--settings', $env:VIBESPACE_CLAUDE_SETTINGS }
   }
-  if ($env:VIBESPACE_CLAUDE_DRYRUN) { Write-Output ('VSCLAUDE[' + ($a -join '|') + ']'); return }
+  if ($env:VIBESPACE_CLAUDE_DRYRUN) {
+    if (-not $plain) {
+      if ($acct -eq 'login') { $tag = 'login' } elseif (Test-Path -LiteralPath $blob) { $tag = $acct + '|token' } else { $tag = $acct + '|missing' }
+      Write-Output ('VSACCT[' + $tag + ']')
+    }
+    Write-Output ('VSCLAUDE[' + ($a -join '|') + ']'); return
+  }
   if (-not $exe) { Write-Error 'claude is not on PATH'; return }
-  & $exe.Source @a
+  if ($plain) { & $exe.Source @a; return }
+  $tok = $null
+  if ($acct -ne 'login') {
+    try {
+      if (-not (Test-Path -LiteralPath $blob)) { throw 'missing' }
+      ${accounts.DECRYPT_PS}
+    } catch { $tok = $null }
+    if (-not $tok) { Write-Error "VibeSpace: account '$acct' token is unreadable — re-add it in Preferences"; return }
+  }
+  $hadTok = Test-Path env:CLAUDE_CODE_OAUTH_TOKEN
+  $prevTok = $env:CLAUDE_CODE_OAUTH_TOKEN
+  try {
+    if ($tok) { $env:CLAUDE_CODE_OAUTH_TOKEN = $tok } else { Remove-Item env:CLAUDE_CODE_OAUTH_TOKEN -ErrorAction SilentlyContinue }
+    & $exe.Source @a
+  } finally {
+    if ($hadTok) { $env:CLAUDE_CODE_OAUTH_TOKEN = $prevTok } else { Remove-Item env:CLAUDE_CODE_OAUTH_TOKEN -ErrorAction SilentlyContinue }
+    $tok = $null
+  }
 }`;
 const shellArgs = () => ['-NoLogo', '-NoExit', '-EncodedCommand', Buffer.from(CLAUDE_WRAPPER, 'utf16le').toString('base64')];
 
@@ -143,6 +184,13 @@ function create(termId, cwd, cols = 120, rows = 30, wsId = null, { settingsPath 
   // read by the `claude` wrapper (CLAUDE_WRAPPER above)
   if (settingsPath) env.VIBESPACE_CLAUDE_SETTINGS = settingsPath;
   if (rcLabel) env.VIBESPACE_RC_LABEL = rcLabel;
+  // the tab's account: setAccount writes the id, no file = the logged-in account.
+  // A fresh pty starts without one, so a restored plain tab never inherits a
+  // stale account (the renderer sets it before every claude launch).
+  const accountFile = accountFileFor(wsId, termId);
+  try { fs.rmSync(accountFile, { force: true }); } catch {}
+  env.VIBESPACE_ACCOUNT_FILE = accountFile;
+  env.VIBESPACE_ACCOUNT_DIR = accounts.blobDir();
   const proc = pty.spawn('powershell.exe', shellArgs(), {
     name: 'xterm-256color',
     cols,
@@ -160,6 +208,7 @@ function create(termId, cwd, cols = 120, rows = 30, wsId = null, { settingsPath 
     lastActivity.set(termId, t);
     lastOutput.set(termId, t);
     pushBuffer(termId, chunk);
+    feedWaiters(termId, chunk);
     dataListener(termId, chunk);
   });
   proc.onExit(({ exitCode }) => {
@@ -170,10 +219,117 @@ function create(termId, cwd, cols = 120, rows = 30, wsId = null, { settingsPath 
     buffers.delete(termId);
     lastActivity.delete(termId);
     lastOutput.delete(termId);
+    for (const w of [...(waiters.get(termId) || [])]) w.exit();
     logger.info(`pty exit: ${termId} code=${exitCode}`);
     exitListener(termId);
   });
   return proc;
+}
+
+// <instance dir>/accounts/<termId>.account: plain text account id, read by the
+// wrapper at every claude launch (so a change applies to the NEXT launch in the tab)
+function accountFileFor(wsId, termId) {
+  return path.join(U.dataRoot(), 'instances', wsId || '_none', 'accounts', `${termId}.account`);
+}
+
+function setAccount(termId, id, wsId = null) {
+  const file = accountFileFor((metas.get(termId) || {}).wsId || wsId, termId);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, String(id || 'login'));
+  return file;
+}
+
+// After '/exit' was sent: resolve { how: 'prompt' } once the output written from
+// NOW on ends in a PowerShell prompt (claude gave the shell back). On timeout,
+// kill claude processes under the pty's shell -> { how: 'killed' }, or
+// { how: 'timeout' } when none were found (also when the pty itself exits).
+const waiters = new Map(); // termId -> Set<{ tail, check, exit }>
+const ANSI_RE = /\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b\[[0-9;?<>=!]*[ -\/]*[@-~]|\x1b[@-Z\\-_]|[\x00-\x08\x0b\x0c\x0e-\x1f]/g;
+const PROMPT_RE = /PS [A-Za-z]:\\[^\r\n]*> ?$/;
+
+function endsAtPrompt(text) {
+  const lines = String(text).replace(ANSI_RE, '').split(/\r?\n|\r/);
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const l = lines[i].trimEnd();
+    if (l) return PROMPT_RE.test(l);
+  }
+  return false;
+}
+
+function feedWaiters(termId, chunk) {
+  const set = waiters.get(termId);
+  if (!set) return;
+  for (const w of [...set]) {
+    w.tail = (w.tail + chunk).slice(-8192);
+    w.check();
+  }
+}
+
+// claude processes anywhere under the shell (children of a claude are its own)
+function claudePidsUnder(shellPid) {
+  return new Promise((resolve) => {
+    const script = '$all = @(Get-CimInstance Win32_Process -Property ProcessId,ParentProcessId,Name); '
+      + `$q = New-Object System.Collections.Queue; $q.Enqueue([uint32]${Number(shellPid) || 0}); `
+      + 'while ($q.Count) { $p = $q.Dequeue(); foreach ($c in $all) { if ($c.ParentProcessId -eq $p -and $c.ProcessId -ne $p) { '
+      + "if ($c.Name -like 'claude*') { Write-Output $c.ProcessId } else { $q.Enqueue($c.ProcessId) } } } }";
+    // null = the scan itself failed (unknown), [] = no claude under the shell
+    execFile(accounts._psExe(), ['-NoProfile', '-NonInteractive', '-Command', script], { windowsHide: true, timeout: 15000, env: accounts._psEnv() }, (err, stdout) => {
+      if (err) { resolve(null); return; }
+      resolve(String(stdout || '').split(/\r?\n/).map(x => Number(x.trim())).filter(n => Number.isInteger(n) && n > 0));
+    });
+  });
+}
+
+function taskkill(pid) {
+  const exe = path.join(process.env.SystemRoot || process.env.windir || 'C:\\Windows', 'System32', 'taskkill.exe');
+  return new Promise((resolve) => {
+    const child = spawn(fs.existsSync(exe) ? exe : 'taskkill.exe', ['/PID', String(pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
+    child.on('error', () => resolve(false));
+    child.on('close', (code) => resolve(code === 0));
+  });
+}
+
+function waitClaudeExit(termId, timeoutMs = 15000) {
+  return new Promise((resolve) => {
+    const proc = sessions.get(termId);
+    if (!proc) { resolve({ how: 'timeout' }); return; }
+    let set = waiters.get(termId);
+    if (!set) { set = new Set(); waiters.set(termId, set); }
+    let finished = false;
+    let timer = null;
+    const w = { tail: '' };
+    const finish = (how) => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      set.delete(w);
+      if (!set.size && waiters.get(termId) === set) waiters.delete(termId);
+      logger.info(`claude exit wait: ${termId} -> ${how}`);
+      resolve({ how });
+    };
+    // resolves: 'prompt' (PowerShell prompt seen), 'gone' (process scan: no claude
+    // left), 'killed', or 'ptyexit' / 'unknown' — the caller must NOT type a
+    // command then, it could land inside a claude that is still running.
+    // A custom prompt (oh-my-posh…) never matches, so the scan polls too.
+    w.check = () => { if (endsAtPrompt(w.tail)) finish('prompt'); };
+    w.exit = () => finish('ptyexit');
+    set.add(w);
+    const deadline = Date.now() + Math.max(500, Number(timeoutMs) || 15000);
+    const poll = async () => {
+      if (finished) return;
+      const pids = await claudePidsUnder(proc.pid);
+      if (finished) return;
+      if (pids && !pids.length) { finish('gone'); return; }
+      if (Date.now() < deadline) { timer = setTimeout(poll, 2500); return; }
+      if (!pids) { finish('unknown'); return; }
+      logger.warn(`claude exit wait: ${termId} still running after ${timeoutMs} ms, killing pid ${pids.join(',')}`);
+      for (const pid of pids) await taskkill(pid);
+      await new Promise(r => setTimeout(r, 800));
+      const left = await claudePidsUnder(proc.pid);
+      finish(left && !left.length ? 'killed' : 'unknown');
+    };
+    timer = setTimeout(poll, 2500);
+  });
 }
 
 function write(termId, data) {
@@ -267,6 +423,10 @@ module.exports = {
   // the file the claude status hooks append to (main writes it too when the
   // feed's HTTP hooks stand in for the Git Bash ones)
   statusFileOf: (termId) => (metas.get(termId) || {}).statusFile || null,
+  setAccount,
+  accountFileFor,
+  waitClaudeExit,
+  _endsAtPrompt: endsAtPrompt,
   _withSinglePath: withSinglePath,
   onData: (fn) => { dataListener = fn; },
   onExit: (fn) => { exitListener = fn; },

@@ -63,6 +63,12 @@ and the resume picker would also have to learn about several roots.
     "continue".
   - Profiles without `remote-control` drop that flag.
 
+## Status
+
+Built in 0.6.29 (smoke 82/82). Live limit → switch still pending (TODO.md).
+Risk 1 below is moot: GLM is out. Risk 2 doesn't apply: the token goes in through
+the process env, not the `--settings` env block.
+
 ## Open risks (verify live before building)
 
 1. Does a session that started on Anthropic resume cleanly on z.ai? Thinking blocks

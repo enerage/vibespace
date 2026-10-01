@@ -21,6 +21,34 @@ let updating = false;
 let counter = 0;
 let updateSnapshot = null;
 
+// ---- accounts (main/accounts.cjs) --------------------------------------------
+// Each claude tab runs on an ACCOUNT: 'login' = the stored /login, others are
+// `claude setup-token` tokens the shell wrapper hands to claude via env. The
+// list is machine-wide; main pushes every change (any process).
+let accountsState = null; // { accounts: [{ id, label, kind, exhaustedUntil, reason, limits }], pick }
+let accountsReady = Promise.resolve();
+
+export function accounts() { return accountsState; }
+export function accountById(id) {
+  return (accountsState && accountsState.accounts.find(a => a.id === id)) || null;
+}
+const isExhausted = (a) => Boolean(a && a.exhaustedUntil && a.exhaustedUntil > Date.now());
+const multiAccount = () => Boolean(accountsState && accountsState.accounts.length >= 2);
+
+function setAccounts(st) {
+  if (!st || !Array.isArray(st.accounts)) return;
+  accountsState = st;
+  renderTabBar(); // account chips appear/disappear/relabel
+}
+
+// new agent → the first available account; a restored one keeps its saved
+// account while it still exists and isn't out of usage
+function resolveAccount(saved) {
+  const a = saved ? accountById(saved) : null;
+  if (a && !isExhausted(a)) return a.id;
+  return (accountsState && accountsState.pick) || 'login';
+}
+
 const TERM_OPTS = {
   fontSize: 13,
   fontFamily: '"Cascadia Mono", Consolas, "Courier New", monospace',
@@ -77,6 +105,16 @@ export function init(opts) {
     renderTabBar();
   });
   vs.onTermFocus((termId) => { if (tabs.has(termId)) activateTab(termId); });
+
+  accountsReady = vs.accountsList().then(setAccounts).catch((e) => console.warn('accounts: list failed', e && e.message));
+  vs.onAccountsChanged(setAccounts);
+  // main: this tab's turn failed on a usage limit and another account is free
+  vs.onAccountSwitch(({ termId, to, toLabel, reason }) => {
+    const tab = tabs.get(termId);
+    if (!tab) { console.warn(`account switch: unknown term ${termId}`); return; }
+    toast(`${tab.name}: ${reason || 'usage limit'}, continuing on ${toLabel || to}`);
+    relaunchOnAccount(tab, to);
+  });
 
   // tabs wrap onto extra rows when they don't fit: the bar's height changes and
   // the terminal below shrinks or grows, so refit once (throttled) per change
@@ -182,6 +220,7 @@ export function init(opts) {
   // (replaying their buffered output) instead of killing and re-spawning agents.
   const saved = Array.isArray(opts.savedTerminals) ? opts.savedTerminals.filter(t => t && t.name) : [];
   vs.ptyList().then(async live => {
+    await accountsReady; // restored tabs check their saved account against the list
     const liveByTerm = new Map(live.map(p => [p.termId, p]));
     if (saved.length === 0) createTab({ name: 'agent-1', cwd: repoPath, claude: true });
     let attached = 0;
@@ -198,12 +237,13 @@ export function init(opts) {
           attachBuffer: p.buffer,
           savedIsClaude: isClaude,
           savedSessionId: t.claudeSessionId || null,
+          account: t.account || null,
         });
       } else if (opts.autoResume && isClaude && t.claudeSessionId && !(await vs.sessionCheck(wsId, t.claudeSessionId))) {
         // saved session file is gone — open claude's interactive picker instead of
         // typing a resume id that would silently error out
         deadSessions.push(t.name);
-        createTab({ termId: t.termId || null, name: t.name, cwd: t.cwd || repoPath, pickSession: true });
+        createTab({ termId: t.termId || null, name: t.name, cwd: t.cwd || repoPath, pickSession: true, account: t.account || null });
       } else {
         createTab({
           termId: t.termId || null, // keep stable ids across restarts (sessions pin by termId)
@@ -211,6 +251,7 @@ export function init(opts) {
           cwd: t.cwd || repoPath,
           claude: opts.autoResume && isClaude && !t.claudeSessionId,
           resumeId: opts.autoResume ? (t.claudeSessionId || null) : null,
+          account: t.account || null,
         });
       }
     }
@@ -238,6 +279,7 @@ export function init(opts) {
         cwd: t.cwd || repoPath,
         claude: opts.autoResume && isClaude && !t.claudeSessionId,
         resumeId: opts.autoResume ? (t.claudeSessionId || null) : null,
+        account: t.account || null,
       });
     }
   });
@@ -415,7 +457,7 @@ function registerFileLinks(term, tab) {
   } catch {} // xterm without link-provider support — links simply don't light up
 }
 
-export function createTab({ name = 'agent', cwd = repoPath, claude = false, resumeId = null, activate = true, termId = null, attachBuffer = null, savedIsClaude = null, savedSessionId = null, pickSession = false, run = null } = {}) {
+export function createTab({ name = 'agent', cwd = repoPath, claude = false, resumeId = null, activate = true, termId = null, attachBuffer = null, savedIsClaude = null, savedSessionId = null, pickSession = false, run = null, account = null } = {}) {
   const id = termId || newTermId();
   const host = el('div', 'term-host');
   host.style.display = 'none';
@@ -442,6 +484,16 @@ export function createTab({ name = 'agent', cwd = repoPath, claude = false, resu
     term, fit, host, dead: false, search,
     isClaude: savedIsClaude !== null ? Boolean(savedIsClaude) : Boolean(claude || resumeId || pickSession),
   };
+  if (tab.isClaude) {
+    // a live (re-attached) agent keeps whatever account it is running on;
+    // main relearns it so the feed files its limits under the right account
+    tab.account = attachBuffer !== null ? (account || 'login') : resolveAccount(account);
+    if (attachBuffer !== null) {
+      vs.setTermAccount(id, tab.account)
+        .then((used) => { if (typeof used === 'string' && used !== tab.account) { tab.account = used; renderTabBar(); } })
+        .catch((e) => console.warn(`account: set failed for ${id}`, e && e.message));
+    }
+  }
   tabs.set(id, tab);
   registerFileLinks(term, tab);
   renderTabBar();
@@ -471,8 +523,16 @@ export function createTab({ name = 'agent', cwd = repoPath, claude = false, resu
   host.addEventListener('mousedown', () => activateTab(id), true);
 
   if (attachBuffer === null && (claude || resumeId || pickSession)) {
-    setTimeout(() => {
+    setTimeout(async () => {
       if (!tabs.has(id)) return;
+      // the shell's claude wrapper reads the account file at launch: write it first
+      if (tab.account) {
+        try {
+          const used = await vs.setTermAccount(id, tab.account);
+          if (typeof used === 'string') tab.account = used; // removed account → login
+        } catch (e) { console.warn(`account: set failed for ${id}`, e && e.message); }
+        if (!tabs.has(id)) return;
+      }
       const cmd = claudeCommand(tab, pickSession ? '' : resumeId); // '' = picker: saved id is dead
       vs.ptyWrite(id, cmd + '\r');
       vs.claudeStarted(wsId, id, pickSession ? { picker: true } : undefined);
@@ -487,18 +547,72 @@ export function createTab({ name = 'agent', cwd = repoPath, claude = false, resu
 }
 
 // The ONE builder for a new interactive claude:
-//   claude [--resume [<id>]] [--remote-control "<label>"] [--settings "<path>"]
+//   claude [--resume [<id>]] [--remote-control "<label>"] [--settings "<path>"] ["<prompt>"]
 // resumeId: null = fresh, '' = the interactive picker, else that session.
 // --remote-control lists the session in the Claude phone app; --settings
-// injects the status hooks and merges with the user's own settings.
-function claudeCommand(tab, resumeId = null) {
+// injects the status hooks and merges with the user's own settings. Token
+// accounts get no --remote-control (Remote Control refuses setup-tokens).
+// prompt: only ever the literal `continue` (account switch after a limit).
+function claudeCommand(tab, resumeId = null, prompt = null) {
   let cmd = resumeId == null ? 'claude' : `claude --resume${resumeId ? ' ' + resumeId : ''}`;
-  if (remote()) {
+  if (remote() && !(tab.account && tab.account !== 'login')) {
     const label = rcLabel(tab.name);
     if (label) cmd += ` --remote-control "${label}"`;
   }
   if (tab.hookSettings) cmd += ` --settings "${tab.hookSettings}"`;
+  if (prompt) cmd += ` "${prompt}"`;
   return cmd;
+}
+
+// Move a running agent to another account IN THE SAME PTY: /exit claude, wait
+// for the PowerShell prompt (main kills claude after the timeout), then resume
+// the same conversation on the new account. prompt 'continue' restarts a turn
+// that failed on a usage limit; null just resumes and waits.
+export async function relaunchOnAccount(tab, to, { prompt = 'continue' } = {}) {
+  if (!tab || tab.dead || !to) return;
+  const id = tab.id;
+  if (!tab.sessionId) { console.warn(`account switch: ${id} has no session id — not relaunching`); return; }
+  if (tab.switching) { console.warn(`account switch: ${id} already switching`); return; }
+  const from = tab.account || 'login';
+  tab.switching = true;
+  renderTabBar();
+  try {
+    // a running turn or an open dialog would swallow the typed /exit: Esc first
+    if (tab.status === 'working' || tab.status === 'waiting') {
+      vs.ptyWrite(id, '\x1b');
+      await new Promise(r => setTimeout(r, 500));
+    }
+    sendToAgent(id, '/exit');
+    const exit = await vs.waitClaudeExit(id, 15000);
+    const how = exit && exit.how;
+    console.warn(`account switch: ${id} ${from} -> ${to}, claude exit: ${how}`);
+    if (!tabs.has(id) || tab.dead) return;
+    // only type into a shell we KNOW claude left; otherwise the command would
+    // become a prompt inside the still-running agent
+    if (!['prompt', 'gone', 'killed'].includes(how)) {
+      toast(`Couldn't move ${tab.name} to another account: claude didn't exit`, 'err');
+      return;
+    }
+    // switch the account only now: until the old claude exited, its statusLine
+    // ticks still belong to the old account
+    const used = await vs.setTermAccount(id, to);
+    tab.account = typeof used === 'string' ? used : to;
+    // same bookkeeping as createTab's known-resume launch: tracking stays pinned
+    vs.ptyWrite(id, claudeCommand(tab, tab.sessionId, prompt) + '\r');
+    vs.claudeStarted(wsId, id);
+    vs.sessionPinned(wsId, id, tab.sessionId);
+  } catch (e) {
+    console.warn(`account switch: ${id} failed`, e && e.message);
+  } finally {
+    tab.switching = false;
+    renderTabBar();
+    persist();
+  }
+}
+
+// Preferences → "Open a setup-token tab": a plain tab running the token flow
+export function openSetupTokenTab() {
+  return createTab({ name: nextName('setup-token'), cwd: repoPath, run: 'claude setup-token' });
 }
 
 // "<workspace> · <tab>", safe inside a PowerShell double-quoted string: no
@@ -617,7 +731,10 @@ function renderTabBar() {
     tab.statusTitle = status.title;
     tab.pillEl = pill;
 
-    t.append(status, label, pill, close, meter);
+    t.append(status, label);
+    const acct = acctChip(tab);
+    if (acct) t.append(acct);
+    t.append(pill, close, meter);
     paintMeter(tab);
     t.onclick = () => activateTab(tab.id);
     // right-click = options menu (rename, agent info, copy id/name/resume, close)
@@ -641,6 +758,21 @@ function renderTabBar() {
   }
   feedui.refresh(); // the strip follows the active tab + its base status
   notifyAgents(); // board: status changes, renames, tabs added/removed
+}
+
+// account chip next to a claude tab's name — only once there is a choice
+function acctChip(tab) {
+  if (!tab.isClaude || !multiAccount()) return null;
+  if (tab.switching) {
+    const c = el('span', 'acct-pill switching', 'switching…');
+    c.title = 'Moving this agent to another account…';
+    return c;
+  }
+  const a = accountById(tab.account || 'login');
+  const name = a ? a.label : (tab.account || 'login');
+  const c = el('span', 'acct-pill', name.length > 10 ? name.slice(0, 9) + '…' : name);
+  c.title = `Account: ${name}` + (a && a.kind === 'token' ? ' — no phone control' : '');
+  return c;
 }
 
 // ---- context meter (claude data feed) ----------------------------------------
@@ -785,6 +917,7 @@ export function snapshot() {
     cwd: t.cwd,
     isClaude: t.isClaude,
     claudeSessionId: t.sessionId || null,
+    account: t.account || null,
   }));
 }
 
@@ -887,6 +1020,7 @@ function relaunchFromSnapshot(snap) {
       cwd: t.cwd || repoPath,
       claude: t.isClaude && !t.claudeSessionId,
       resumeId: t.claudeSessionId || null,
+      account: t.account || null,
     });
   }
   toast(`All agents relaunched on the updated Claude Code`, 'ok');

@@ -30,6 +30,7 @@ const board = require('./board.cjs');
 const attention = require('./attention.cjs');
 const bgagents = require('./bgagents.cjs');
 const presence = require('./presence.cjs');
+const accounts = require('./accounts.cjs');
 
 // ---------- CLI args ----------
 function parseArgv() {
@@ -200,6 +201,9 @@ async function ensureOverlayIcons() {
 }
 
 const termStatus = new Map(); // termId -> last hook-reported status (working|waiting|done)
+const termAccount = new Map(); // termId -> account id its claude runs on (renderer sets it before launch)
+const switchLog = new Map(); // termId -> [ms] of automatic account switches (loop guard)
+const accountSince = new Map(); // termId -> ms its current account was set (older evidence belongs to the previous one)
 const attnTerms = new Map(); // termId -> attention.cjs arbitration state (file vs instant feed)
 
 function termName(wsId, termId) {
@@ -966,6 +970,30 @@ function initIpc() {
   // manual modes; 'idle' is decided by lock/idle detection
   ipcMain.handle('presence:get', () => presence.get());
   ipcMain.handle('presence:set', (e, mode) => (mode === 'away' || mode === 'present' ? presence.set(mode, 'manual') : presence.get()));
+  // claude accounts (machine-wide, main/accounts.cjs). The token goes renderer →
+  // here → DPAPI on stdin; it is never logged and never sent back.
+  ipcMain.handle('accounts:list', () => accounts.state());
+  ipcMain.handle('accounts:add', (e, label, token) => accounts.add(label, token));
+  ipcMain.handle('accounts:remove', (e, id) => accounts.remove(String(id || '')));
+  ipcMain.handle('accounts:rename', (e, id, label) => accounts.rename(String(id || ''), label));
+  ipcMain.handle('accounts:move', (e, id, delta) => accounts.move(String(id || ''), delta));
+  ipcMain.handle('accounts:clear', (e, id) => accounts.clear(String(id || '')));
+  ipcMain.handle('accounts:setTerm', (e, termId, accountId) => {
+    const win = BrowserWindow.fromWebContents(e.sender);
+    const wsId = win && winInfo.get(win.id)?.wsId;
+    const id = accounts.has(accountId) ? String(accountId) : accounts.LOGIN;
+    if (id !== accountId) logger.warn(`account: term=${termId} asked for unknown account ${accountId}, using login`);
+    ptyhost.setAccount(String(termId), id, wsId || null);
+    if (termAccount.get(String(termId)) !== id) {
+      // older limit windows / transcript errors belong to the previous account
+      claudefeed.clearRateLimits(String(termId));
+      accountSince.set(String(termId), Date.now());
+    }
+    termAccount.set(String(termId), id);
+    logger.info(`account: term=${termId} -> ${id}`);
+    return id; // the account actually used (unknown/removed ids fall back to login)
+  });
+  ipcMain.handle('pty:waitClaudeExit', (e, termId, timeoutMs) => ptyhost.waitClaudeExit(String(termId), Number(timeoutMs) || 15000));
 
   // misc
   ipcMain.handle('util:claudeVersion', () => updater.claudeVersion());
@@ -1008,6 +1036,7 @@ function initIpc() {
   ptyhost.onExit((termId) => {
     termStatus.delete(termId);
     attnTerms.delete(termId);
+    termAccount.delete(termId); // ptyhost.create clears the account file too
     claudefeed.forget(termId);
     for (const win of BrowserWindow.getAllWindows()) {
       if (!win.isDestroyed()) win.webContents.send('pty:exit', termId);
@@ -1068,13 +1097,25 @@ function initIpc() {
         if (!win.isDestroyed()) win.webContents.send('session:found', termId, feed.sessionId);
       }
     }
-    // a failed turn (StopFailure) toasts + badges like a waiting agent — once
+    // a failed turn (StopFailure) toasts + badges like a waiting agent — once.
+    // A USAGE LIMIT instead moves the tab to the next available account
+    // (handleFailure), which skips the toast when it switches.
     if (feed.failure && failureSeen.get(termId) !== feed.failure.at) {
       failureSeen.set(termId, feed.failure.at);
-      logger.info(`term failed: ws=${wsId} term=${termId} ${feed.failure.reason}`);
-      notifyAttention(wsId, termId, 'failed');
+      const f = feed.failure;
+      logger.info(`term failed: ws=${wsId} term=${termId} ${f.reason} [type=${f.type || '-'} message=${JSON.stringify(String(f.message || '').slice(0, 200))}]`);
+      handleFailure(wsId, termId, feed).catch((err) => {
+        logger.warn('account switch check failed: ' + err.message);
+        notifyAttention(wsId, termId, 'failed');
+      });
     }
     board.touch(wsId);
+  });
+  // accounts.json changed (here or in another workspace process) → every window
+  accounts.onChange((st) => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) win.webContents.send('accounts:changed', st);
+    }
   });
   claudefeed.onLimits((limits) => {
     for (const [id] of winInfo) {
@@ -1094,6 +1135,88 @@ function initIpc() {
       if (!win.isDestroyed()) win.webContents.send('tree:changed');
     }
   });
+}
+
+// ---------- usage limit → continue on the next account ----------
+const SWITCH_MIN_GAP_MS = 5 * 1000; // duplicate events only; the 3-in-10-min cap stops real loops
+const SWITCH_WINDOW_MS = 10 * 60 * 1000;
+const SWITCH_MAX_IN_WINDOW = 3;
+const TRANSCRIPT_MAX_AGE_MS = 5 * 60 * 1000;
+
+// the tab's transcript (<projects>/<munged cwd>/<session>.jsonl), or null
+function transcriptOf(wsId, termId, feed) {
+  const sessionId = sessions.getSession(wsId, termId) || (feed && feed.sessionId);
+  if (!sessionId) return null;
+  const t = (rendererState.get(wsId)?.terminals || []).find(x => x.termId === termId);
+  const ws = workspaces.get(wsId);
+  const cwd = (t && t.cwd) || (ws && ws.repoPath);
+  const dir = cwd && U.resolveClaudeProjectDir(cwd);
+  return dir ? path.join(dir, `${sessionId}.jsonl`) : null;
+}
+
+// the transcript's last API error line, only if it belongs to THIS failure: no
+// older than the failure (minus slack; claude may write it just after the hook)
+// and written on the current account. After a switch both accounts share one
+// transcript, so the previous account's limit line must not blame the new one.
+async function transcriptFallback(wsId, termId, feed) {
+  const file = transcriptOf(wsId, termId, feed);
+  if (!file) return null;
+  const at = (feed.failure && Number(feed.failure.at)) || Date.now();
+  const since = Math.max(at - 20000, accountSince.get(termId) || 0, Date.now() - TRANSCRIPT_MAX_AGE_MS);
+  for (let i = 0; i < 2; i++) {
+    if (i) await new Promise(r => setTimeout(r, 1500));
+    const tx = accounts.lastApiErrorText(file);
+    if (tx && tx.timestamp && tx.timestamp >= since) return tx;
+  }
+  return null;
+}
+
+async function handleFailure(wsId, termId, feed) {
+  const f = feed.failure;
+  const t = (rendererState.get(wsId)?.terminals || []).find(x => x.termId === termId);
+  if (!((t && t.isClaude) || termAccount.has(termId))) { notifyAttention(wsId, termId, 'failed'); return; }
+  const acct = termAccount.get(termId) || accounts.LOGIN;
+  let type = f.type;
+  // always read the transcript: its error line carries quotaLimits.resetsAt, the
+  // exact reset time (the feed message has at most the "resets Oct 5, 3pm" text)
+  let text = null;
+  let quota = null;
+  const tx = await transcriptFallback(wsId, termId, feed);
+  if (tx) {
+    text = tx.text || null;
+    quota = tx.quota || null;
+    // the transcript's error field is verified live; the StopFailure body isn't
+    if (tx.error === 'rate_limit' || !type) type = tx.error;
+    logger.info(`term failed: term=${termId} transcript says [error=${tx.error || '-'} quota=${quota ? `${quota.status}/${quota.type}/${quota.resetsAt}` : '-'} text=${JSON.stringify(String(tx.text || '').slice(0, 200))}]`);
+  }
+  const c = accounts.classifyFailure({ type, message: f.message }, feed.rateLimits, text, Date.now(), quota);
+  if (!c.usageLimit) { notifyAttention(wsId, termId, 'failed'); return; }
+  accounts.markExhausted(acct, c.until, c.reason);
+  const now = Date.now();
+  const log = (switchLog.get(termId) || []).filter(ts => now - ts < SWITCH_WINDOW_MS);
+  switchLog.set(termId, log);
+  if (log.length && now - log[log.length - 1] < SWITCH_MIN_GAP_MS) {
+    logger.warn(`account switch skipped: term=${termId} switched < 5 s ago`);
+    notifyAttention(wsId, termId, 'failed');
+    return;
+  }
+  if (log.length >= SWITCH_MAX_IN_WINDOW) {
+    logger.warn(`account switch stopped: term=${termId} switched ${log.length}x in 10 min`);
+    notifyAttention(wsId, termId, 'failed');
+    return;
+  }
+  const to = accounts.pick(acct);
+  if (!to) {
+    logger.warn(`account switch: all accounts exhausted (term=${termId} from=${acct} until=${new Date(c.until).toISOString()})`);
+    notifyAttention(wsId, termId, 'failed');
+    return;
+  }
+  log.push(now);
+  const msg = { termId, from: acct, to, toLabel: accounts.labelOf(to), until: c.until, reason: c.reason };
+  logger.info(`account switch: term=${termId} from=${acct} to=${to} until=${new Date(c.until).toISOString()} (${c.reason})`);
+  for (const win of workspaceWindowsFor(wsId)) {
+    if (!win.isDestroyed()) win.webContents.send('account:switch', msg);
+  }
 }
 
 // periodic state save (captures session ids discovered after the last renderer push)
@@ -1168,6 +1291,7 @@ app.whenReady().then(async () => {
     // feed server up BEFORE any pty/agent exists (ensureHookSettings reads its
     // port; a missing listener = red ECONNREFUSED lines in claude's TUI)
     await claudefeed.start({ resolveTerm: ptyhost.wsOf });
+    claudefeed.setAccountResolver((termId) => termAccount.get(termId) || accounts.LOGIN);
     const ws = workspaces.get(workspaceId);
     if (!ws) {
       dialog.showErrorBox('VibeSpace', `Workspace "${workspaceId}" not found. Open the launcher to create it.`);
@@ -1262,5 +1386,6 @@ app.on('before-quit', () => {
   for (const wsId of new Set([...winInfo.values()].map(v => v.wsId))) persistState(wsId);
   board.stopAll();
   presence.stop();
+  accounts.unwatch();
   ptyhost.killAll();
 });

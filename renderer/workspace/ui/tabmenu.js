@@ -1,5 +1,5 @@
-import { el, toast, showMenu } from './common.js';
-import { feedFor } from './terms.js';
+import { el, toast, showMenu, confirmBox } from './common.js';
+import { feedFor, accounts, relaunchOnAccount } from './terms.js';
 
 // Right-click menu for terminal tabs (was: right-click = rename) + the
 // "Agent info" panel. Kept out of terms.js: terms.js only hands us the tab
@@ -36,9 +36,44 @@ export function openTabMenu(ev, tab, { rename, close }) {
     { label: 'Copy name', run: () => copy(tab.name, 'Name') },
     { label: 'Copy session ID', disabled: !sid, hint: sid || noSid, run: () => copy(sid, 'Session ID') },
     { label: 'Copy resume command', disabled: !sid, hint: sid ? resumeCommand(sid) : noSid, run: () => copy(resumeCommand(sid), 'Resume command') },
+    ...accountItems(tab),
     { sep: true },
     { label: 'Close', danger: true, run: close },
   ]);
+}
+
+// "Continue on <account>": one item per OTHER account, for a claude tab with a
+// conversation, once there are >= 2 accounts. Same pty, `claude --resume`.
+const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+function untilText(ms) {
+  const d = new Date(ms);
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')} ${DAYS[d.getDay()]}`;
+}
+
+function accountItems(tab) {
+  const st = accounts();
+  if (!tab.isClaude || tab.dead || !tab.sessionId || !st || st.accounts.length < 2) return [];
+  const cur = tab.account || 'login';
+  const items = [];
+  for (const a of st.accounts) {
+    if (a.id === cur) continue;
+    const out = Boolean(a.exhaustedUntil && a.exhaustedUntil > Date.now());
+    items.push({
+      label: `Continue on ${a.label}` + (out ? ` (out until ${untilText(a.exhaustedUntil)})` : ''),
+      disabled: out || Boolean(tab.switching),
+      hint: a.kind === 'token' ? 'Resume this conversation on that account (no phone control there)' : 'Resume this conversation on that account',
+      run: () => moveTo(tab, a),
+    });
+  }
+  return items.length ? [{ sep: true }, ...items] : [];
+}
+
+async function moveTo(tab, a) {
+  if (tab.status === 'working' && !(await confirmBox(`Interrupt the running turn and move this agent to ${a.label}?`, { ok: 'Move' }))) return;
+  // a failed last turn (e.g. this account hit its limit) restarts with
+  // `continue`; otherwise the conversation just resumes and waits for you
+  const failed = Boolean(feedFor(tab.id)?.failure);
+  relaunchOnAccount(tab, a.id, { prompt: failed ? 'continue' : null });
 }
 
 // Read-only details panel: every value has its own copy button, plus

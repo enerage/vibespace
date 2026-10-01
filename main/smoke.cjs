@@ -805,6 +805,185 @@ async function runSmoke() {
     check('pty `claude` wrapper adds tracking flags (hand-typed claude)', r.ok, r.detail);
   }
 
+  // 25. accounts (main/accounts.cjs): reset parsing, usage-limit classification,
+  //     store order/exhaustion/pick, DPAPI token blob, wrapper account dry-run,
+  //     transcript fallback, claude-exit wait. Fake tokens only; never printed.
+  {
+    const acc = require('./accounts.cjs');
+    const L = (y, mo, d, h, mi = 0) => new Date(y, mo, d, h, mi, 0, 0).getTime();
+    const now = L(2026, 9, 1, 12); // Oct 1 2026, 12:00 local
+    const pr = {
+      dateComma: acc.parseReset('You\'ve hit your weekly limit · resets Oct 5, 3pm (Europe/Berlin)', now) === L(2026, 9, 5, 15),
+      dateAt: acc.parseReset('resets Oct 5 at 3:30pm', now) === L(2026, 9, 5, 15, 30),
+      timeTz: acc.parseReset('hit your session limit · resets 3pm (Europe/Berlin)', now) === L(2026, 9, 1, 15),
+      time24: acc.parseReset('resets 15:00', now) === L(2026, 9, 1, 15),
+      tomorrow: acc.parseReset('resets 9am', now) === L(2026, 9, 2, 9),
+      nextYear: acc.parseReset('resets Jan 3, 3pm', now) === L(2027, 0, 3, 15),
+      recentPast: acc.parseReset('resets Sep 30, 3pm', now) === L(2026, 8, 30, 15),
+      none: acc.parseReset('resets soon', now) === null && acc.parseReset('', now) === null,
+    };
+    check('accounts.parseReset (4 forms + day/year rollover)', Object.values(pr).every(Boolean), JSON.stringify(pr));
+
+    const weekly = acc.classifyFailure({ type: 'rate_limit', message: 'You\'ve hit your weekly limit · resets Oct 5, 3pm (Europe/Berlin)' }, null, null, now);
+    const viaTranscript = acc.classifyFailure({ type: 'rate_limit', message: null }, null, 'You\'ve hit your 5-hour limit · resets 3:30pm', now);
+    const credits = acc.classifyFailure({ type: 'rate_limit', message: 'You\'re out of usage credits · usage limit for this model' }, null, null, now);
+    const overloaded = acc.classifyFailure({ type: 'server_error', message: '529 Overloaded' }, null, null, now);
+    const plainRate = acc.classifyFailure({ type: 'rate_limit', message: 'Too many requests' }, null, null, now);
+    const in3h = Math.floor(now / 1000) + 3 * 3600;
+    const full = acc.classifyFailure({ type: 'unknown', message: '' }, { five_hour: { used_percentage: 100, resets_at: in3h }, seven_day: { used_percentage: 40, resets_at: 1 } }, null, now);
+    // a 100 % window whose reset already passed is stale: not a limit (529 must not switch)
+    const stale = acc.classifyFailure({ type: 'server_error', message: '529 Overloaded' }, { five_hour: { used_percentage: 100, resets_at: Math.floor(now / 1000) - 60 } }, null, now);
+    const shortRate = acc.classifyFailure({ type: 'rate_limit', message: 'Rate limit reached for requests' }, null, null, now);
+    const fullReduced = acc.classifyFailure({ type: null, message: '' }, { fiveHour: { pct: 30, resetsAt: 1 }, sevenDay: { pct: 100, resetsAt: 1791205200 } }, null, now);
+    const quota = acc.classifyFailure({ type: 'rate_limit', message: null }, null, 'You\'ve hit your weekly limit · resets Oct 5, 3pm (Europe/Berlin)', now, { status: 'rejected', resetsAt: 1791205260, type: 'seven_day' });
+    const quotaCredits = acc.classifyFailure({ type: 'rate_limit', message: 'You\'re out of usage credits' }, null, null, now, { status: 'rejected', resetsAt: 1791205260 });
+    const cf = {
+      quota: quota.usageLimit && quota.until === 1791205260 * 1000,
+      quotaCredits: quotaCredits.usageLimit === false,
+      weekly: weekly.usageLimit && weekly.until === L(2026, 9, 5, 15) && weekly.reason === 'weekly limit',
+      viaTranscript: viaTranscript.usageLimit && viaTranscript.until === L(2026, 9, 1, 15, 30) && viaTranscript.reason === '5-hour limit',
+      credits: credits.usageLimit === false,
+      overloaded: overloaded.usageLimit === false,
+      plainRate: plainRate.usageLimit === false,
+      full: full.usageLimit && full.until === in3h * 1000,
+      stale: stale.usageLimit === false,
+      shortRate: shortRate.usageLimit === false,
+      fullReduced: fullReduced.usageLimit && fullReduced.until === 1791205200 * 1000,
+    };
+    check('accounts.classifyFailure (weekly limit, credits, 529, rate_limits 100 %)', Object.values(cf).every(Boolean), JSON.stringify(cf));
+
+    // store + DPAPI: add → blob → PowerShell decrypt gives the same token back
+    const fakeToken = 'sk-ant-oat01-' + 'SmokeFakeToken_' + U.randId(24) + '-x';
+    const s0 = acc.state();
+    const bad = await acc.add('Nope', 'not-a-token');
+    const added = await acc.add('Second Max', '  ' + fakeToken + '\n');
+    const id2 = added.ok ? added.state.accounts[1].id : null;
+    const blob = id2 ? acc.blobPath(id2) : null;
+    const blobText = blob && fs.existsSync(blob) ? fs.readFileSync(blob, 'utf8') : '';
+    const decrypted = await new Promise((resolve) => {
+      if (!blob) { resolve(''); return; }
+      // the exact snippet the pty wrapper runs
+      const ps = `$blob = $env:VS_SMOKE_BLOB; ${acc.DECRYPT_PS}; [Console]::Out.Write($tok)`;
+      require('node:child_process').execFile(acc._psExe(), ['-NoProfile', '-NonInteractive', '-Command', ps],
+        { windowsHide: true, timeout: 20000, env: acc._psEnv({ VS_SMOKE_BLOB: blob }) }, (err, out) => resolve(String(out || '').trim()));
+    });
+    const dp = {
+      loginFirst: s0.accounts.length === 1 && s0.accounts[0].id === 'login' && s0.accounts[0].kind === 'login' && s0.pick === 'login',
+      badRejected: bad.ok === false && typeof bad.error === 'string',
+      added: Boolean(added.ok && id2 && id2 !== 'login' && added.state.accounts[1].kind === 'token' && added.state.accounts[1].label === 'Second Max'),
+      blobOpaque: blobText.length > 100 && !blobText.includes(fakeToken) && !JSON.stringify(acc.state()).includes(fakeToken),
+      roundtrip: decrypted === fakeToken,
+    };
+    check('accounts DPAPI token blob (add → blob → decrypt round-trip, never in state)', Object.values(dp).every(Boolean),
+      JSON.stringify({ ...dp, roundtrip: dp.roundtrip ? 'ok' : 'MISMATCH' }));
+
+    if (id2) {
+      const t0 = Date.now();
+      const st = {};
+      st.pickLogin = acc.pick() === 'login' && acc.pick('login') === id2;
+      acc.markExhausted('login', t0 + 3600e3, 'weekly limit');
+      const sx = acc.state();
+      st.exhausted = sx.pick === id2 && sx.accounts[0].exhaustedUntil === t0 + 3600e3 && sx.accounts[0].reason === 'weekly limit';
+      st.onlyExtends = acc.markExhausted('login', t0 + 60e3, 'shorter') === false && acc.state().accounts[0].exhaustedUntil === t0 + 3600e3;
+      st.expiry = acc.pick(null, t0 + 2 * 3600e3) === 'login' && acc.state(t0 + 2 * 3600e3).accounts[0].exhaustedUntil === null;
+      acc.markExhausted(id2, t0 + 7200e3, 'session limit');
+      st.allOut = acc.pick() === null && acc.state().pick === null;
+      acc.clear(id2);
+      st.cleared = acc.pick() === id2;
+      acc.clear('login');
+      acc.move(id2, -1);
+      st.moved = acc.state().accounts.map(a => a.id).join(',') === `${id2},login` && acc.pick() === id2;
+      acc.move(id2, -1); // already first: no-op
+      acc.move('login', -1);
+      st.movedBack = acc.state().accounts.map(a => a.id).join(',') === `login,${id2}`;
+      acc.rename(id2, 'Work Max');
+      acc.remove('login'); // cannot be removed
+      st.renamed = acc.labelOf(id2) === 'Work Max' && acc.has('login');
+      acc.setLimits(id2, { five_hour: { used_percentage: 42, resets_at: 1790693400 } });
+      st.limits = acc.state().accounts[1].limits && acc.state().accounts[1].limits.five_hour.used_percentage === 42;
+      check('accounts store (pick, exhaustion only extends, expiry, order/move, rename, limits)', Object.values(st).every(Boolean), JSON.stringify(st));
+
+      // wrapper dry-run with an account file: login keeps --remote-control, a token
+      // account gets none, a missing blob says so. The pty start clears a stale file.
+      const r = await new Promise((resolve) => {
+        let buf = '';
+        const termId = 'smokeacct';
+        const stale = ptyhost.accountFileFor('smoke-acct', termId);
+        fs.mkdirSync(path.dirname(stale), { recursive: true });
+        fs.writeFileSync(stale, id2);
+        const done = (ok, detail) => { clearTimeout(timer); ptyhost.onData(() => {}); ptyhost.kill(termId); resolve({ ok, detail }); };
+        const timer = setTimeout(() => done(false, 'timeout: ' + buf.slice(-300)), 20000);
+        const want = [`VSACCT[login]`, 'VSCLAUDE[--remote-control|WS · t1|--settings|S.json]',
+          `VSACCT[${id2}|token]`, 'VSCLAUDE[--resume|abc|--settings|S.json]',
+          'VSACCT[ghost-zz99|missing]', 'VSCLAUDE[--settings|S.json]'];
+        ptyhost.onData((id, chunk) => {
+          if (id !== termId) return;
+          buf += chunk;
+          const flat = buf.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '').replace(/\r?\n/g, '');
+          const got = [...flat.matchAll(/VS(?:ACCT|CLAUDE)\[[^\]]*\]/g)].map(m => m[0]);
+          if (got.length < want.length) return;
+          const ok = want.every((w, i) => got[i] === w);
+          done(ok, ok ? `${got.length} lines` : 'got=' + JSON.stringify(got));
+        });
+        try { ptyhost.create(termId, U.BIN_ROOT, 220, 30, 'smoke-acct', { settingsPath: 'S.json', rcLabel: 'WS · t1' }); } catch (err) { done(false, 'spawn: ' + err.message); return; }
+        const clearedOnCreate = !fs.existsSync(stale);
+        if (!clearedOnCreate) { done(false, 'stale account file survived pty create'); return; }
+        const setFile = ptyhost.setAccount(termId, 'login');
+        const setOk = fs.readFileSync(setFile, 'utf8') === 'login' && setFile === stale;
+        if (!setOk) { done(false, 'setAccount wrote ' + setFile); return; }
+        const setTo = (v) => `Set-Content -NoNewline -LiteralPath $env:VIBESPACE_ACCOUNT_FILE -Value '${v}'`;
+        setTimeout(() => ptyhost.write(termId, `$env:VIBESPACE_CLAUDE_DRYRUN=1; claude; ${setTo(id2)}; claude --resume abc; ${setTo('ghost-zz99')}; claude\r`), 900);
+      });
+      check('pty `claude` wrapper per-account dry-run (login → RC, token → no RC, missing blob)', r.ok, r.detail);
+
+      acc.remove(id2);
+      check('accounts remove deletes the token blob', !acc.has(id2) && !fs.existsSync(blob));
+    }
+
+    // transcript fallback: the LAST api-error line, read from the tail only
+    {
+      const tdir = path.join(U.dataRoot(), 'tx-smoke');
+      fs.mkdirSync(tdir, { recursive: true });
+      const line = (o) => JSON.stringify(o) + '\n';
+      const apiErr = (text, ts) => line({ type: 'assistant', timestamp: ts, message: { role: 'assistant', content: [{ type: 'text', text }] }, error: 'rate_limit', isApiErrorMessage: true, apiErrorStatus: 429 });
+      const tf = path.join(tdir, 'a.jsonl');
+      fs.writeFileSync(tf, line({ type: 'user', pad: 'x'.repeat(300 * 1024) })
+        + apiErr('older error', '2026-10-01T09:00:00.000Z')
+        + line({ type: 'user', message: { content: 'hi' } })
+        + apiErr('You\'ve hit your weekly limit · resets Oct 5, 3pm (Europe/Berlin)', '2026-10-01T10:00:00.000Z')
+        + line({ type: 'system', subtype: 'x' }));
+      const nf = path.join(tdir, 'b.jsonl');
+      fs.writeFileSync(nf, line({ type: 'user' }));
+      const got = acc.lastApiErrorText(tf);
+      const ok = got && got.error === 'rate_limit' && got.text.startsWith('You\'ve hit your weekly limit') && got.timestamp === Date.parse('2026-10-01T10:00:00.000Z')
+        && acc.lastApiErrorText(nf) === null && acc.lastApiErrorText(path.join(tdir, 'missing.jsonl')) === null;
+      check('accounts.lastApiErrorText (last api-error line, tail read)', Boolean(ok), JSON.stringify(got));
+      try { fs.rmSync(tdir, { recursive: true, force: true }); } catch {}
+    }
+
+    // claude-exit wait: a PowerShell prompt after the call resolves 'prompt'; no
+    // output and no claude under the shell resolves 'timeout'
+    {
+      const termId = 'smokewait';
+      let w1 = null;
+      let w2 = null;
+      try {
+        ptyhost.create(termId, U.BIN_ROOT, 120, 30);
+        await new Promise(r => setTimeout(r, 1500));
+        const p1 = ptyhost.waitClaudeExit(termId, 8000);
+        ptyhost.write(termId, 'echo waited\r');
+        w1 = await p1;
+        await new Promise(r => setTimeout(r, 500));
+        w2 = await ptyhost.waitClaudeExit(termId, 600);
+      } catch (err) {
+        w1 = w1 || { how: 'error: ' + err.message };
+      }
+      ptyhost.kill(termId);
+      check('pty waitClaudeExit (prompt seen → prompt; idle, no claude → gone)', w1 && w1.how === 'prompt' && w2 && w2.how === 'gone',
+        JSON.stringify({ w1, w2 }));
+    }
+  }
+
   // 8. pty echo (powershell)
   const echo = await ptyEchoTest();
   check('pty spawn + echo (powershell)', echo.ok, echo.detail);

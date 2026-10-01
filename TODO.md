@@ -121,7 +121,13 @@ Build in this order. Verify the statusLine and HTTP hooks live in a pty before r
 - [ ] **Multi-subscription agents** (2026-10-01, RESEARCH-MULTISUB.md) — run tabs on
       several Max accounts + z.ai, switch a tab to another account when it hits its
       usage limit (`StopFailure rate_limit` → `--resume <id>` on the next profile).
-      Decided: token profiles, Claude accounts only, auto-switch (DECISIONS.md). L.
+      Decided: token profiles, Claude accounts only, auto-switch (DECISIONS.md).
+      **Built in 0.6.29 (smoke 82/82). Still open: the live test.** Add the
+      exhausted 20x as a token account, start an agent on it, send a prompt, and
+      expect a weekly-limit failure → toast → the tab resumes on the next account.
+      Then grep the log for `StopFailure` / `account switch` to confirm the feed
+      really sends StopFailure for usage limits. The PlacementFlow window that hit
+      the limit on 2026-10-01 had no feed, so this is unverified.
 - [x] **Phone / away mode via Remote Control** (0.6.21, RESEARCH-REMOTE.md) —
       per-tab `--remote-control` names, presence marker + 📱 toggle + lock/idle auto-away.
 - [x] **Live-verify phone control** (2026-10-01): question → push → answered on

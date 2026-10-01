@@ -2,6 +2,29 @@
 
 Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 
+## [0.6.29] — 2026-10-01
+
+### Added
+- **Several Claude subscriptions, automatic switch on usage limit.**
+  - ⚙ Preferences → **Accounts**: your logged-in account plus any extra Max/Pro
+    accounts. To add one, log into it in your browser, run `claude setup-token`
+    (the "Open a setup-token tab" button does it), and paste the token.
+    - Tokens are encrypted with Windows DPAPI in `~/.vibespace/accounts/`. They are
+      never written in plain text, to a terminal or to logs.
+    - Order = preference. New agents start on the first account that still has room.
+  - **Auto-switch.** When an agent's turn dies on "You've hit your weekly/5-hour
+    limit", that account is marked out until its exact reset time. The reset
+    comes from claude's own `quotaLimits` record in the transcript. The same
+    conversation then continues on the next account with `claude --resume <id>
+    "continue"`, in the same tab, with an in-app notice.
+    - What doesn't switch: short 429s, overloaded, and "out of usage credits".
+    - At most 3 switches per tab in 10 min.
+  - Each agent tab shows a small account chip (only when you have 2+ accounts).
+    Right-click → "Continue on <account>" moves an agent by hand.
+  - Token accounts get no phone control: Claude's Remote Control only works on
+    the `/login` account.
+  - Smoke 82/82. The live limit → switch run is still pending.
+
 ## [0.6.28] — 2026-10-01
 
 ### Added

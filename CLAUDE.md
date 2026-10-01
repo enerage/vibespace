@@ -122,7 +122,7 @@ Key facts encoded in `main/sessions.cjs`:
 
 ## Developing VibeSpace
 
-- `npm run smoke` — 72 self-tests (as of 0.6.23) incl. pty echo and live session discovery. Run it after
+- `npm run smoke` — 82 self-tests (as of 0.6.29) incl. pty echo and live session discovery. Run it after
   touching main-process code, **from a normal shell**: inside a Claude pty the stripped
   PATH and nested ConPTY break the pty test (`powershell.exe` "File not found" /
   AttachConsole) — prepend System32 to PATH and give it its own console, or just use a
@@ -247,6 +247,32 @@ Key facts encoded in `main/sessions.cjs`:
     agent starts waiting. A second push ~30 s after another agent's push was
     dropped (once, not yet reproduced). A test must make the agent ask AFTER you
     leave (a delay), not before.
+- **Accounts / multi-subscription** (0.6.29, RESEARCH-MULTISUB.md, `main/accounts.cjs`):
+  - Extra Claude accounts are `claude setup-token` tokens handed to claude as
+    `CLAUDE_CODE_OAUTH_TOKEN`, ONLY for that call. The pty wrapper reads the
+    tab's `$VIBESPACE_ACCOUNT_FILE` and decrypts `<dataRoot>/accounts/<id>.dpapi`
+    itself. Everything shares one `~/.claude`, so session tracking is untouched.
+    Don't switch to `CLAUDE_CONFIG_DIR` per account: it splits transcripts,
+    skills, memory and settings.
+  - DPAPI goes through .NET `ProtectedData`, never `ConvertTo-SecureString`. Under
+    a PSModulePath inherited from PowerShell 7, Windows PowerShell 5.1 can't
+    load that cmdlet's module. The wrapper and smoke run the same
+    `accounts.DECRYPT_PS` snippet.
+  - Token accounts get no `--remote-control` in either the wrapper or
+    `claudeCommand`. Remote Control refuses setup-tokens.
+  - Usage-limit evidence: the transcript's last `isApiErrorMessage` line carries
+    `error: "rate_limit"`, the "You've hit your weekly limit · resets …" text and
+    `quotaLimits { status: "rejected", resetsAt }`. That is the exact reset;
+    verified on real transcripts.
+  - After a switch both accounts share ONE transcript and one feed state. So
+    evidence older than the tab's current account (`accountSince`) is ignored,
+    and `clearRateLimits` drops the old windows. Otherwise the old account's
+    limit blames the new one (found in review).
+  - `setTermAccount` happens only AFTER the old claude exited.
+  - The relaunch types into the shell only when `waitClaudeExit` says `prompt`,
+    `gone` or `killed`. Custom prompts (oh-my-posh) never match the prompt
+    regex, so it also polls the process tree.
+  - A bare "Rate limit reached" (short 429) is not a usage limit.
 - Keys: Ctrl+P file finder · Ctrl+F terminal search (active tab) · Ctrl+Shift+U
   jump-to-attention · Ctrl+Shift+B agent board · Ctrl+Shift+D diagnostics.
 - **Git** (0.6.14, sidebar since 0.6.15): `main/githistory.cjs` (log/commit/fileAt/branch,

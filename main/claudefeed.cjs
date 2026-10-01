@@ -15,6 +15,7 @@ const os = require('node:os');
 const path = require('node:path');
 const logger = require('./logger.cjs');
 const U = require('./util.cjs');
+const accounts = require('./accounts.cjs');
 
 const MAX_BODY = 2 * 1024 * 1024;
 const EMIT_MS = 250; // ≤ 4 feed pushes per second per terminal
@@ -25,6 +26,7 @@ let resolveTerm = () => null; // termId -> wsId (ptyhost owns the mapping)
 let listener = () => {};
 let limitsListener = () => {};
 let hookListener = () => {}; // raw hook events (index.cjs derives status words from them)
+let accountOf = () => 'login'; // termId -> account id (index.cjs owns the mapping)
 
 const terms = new Map(); // termId -> { wsId, state, timer, lastEmit }
 let limits = null; // account-wide 5h/7d rate limits (latest copy from any term)
@@ -103,11 +105,22 @@ function upsertTask(tasks, id, patch) {
   return out;
 }
 
+function failureDetails(body) {
+  return typeof body.error_details === 'string' ? body.error_details.trim()
+    : (body.error_details && typeof body.error_details.message === 'string' ? body.error_details.message.trim() : '');
+}
+
 function failureReason(body) {
   const base = typeof body.error === 'string' && body.error ? body.error.replace(/_/g, ' ') : 'turn failed';
-  const det = typeof body.error_details === 'string' ? body.error_details.trim()
-    : (body.error_details && typeof body.error_details.message === 'string' ? body.error_details.message.trim() : '');
+  const det = failureDetails(body);
   return clip(det && det !== base ? `${base}: ${det}` : base, 200);
+}
+
+// the raw failure kind + text (accounts.classifyFailure tells a usage limit apart)
+function failureOf(body, now) {
+  const type = (typeof body.error === 'string' && body.error) || (typeof body.error_type === 'string' && body.error_type) || null;
+  const message = failureDetails(body) || (typeof body.message === 'string' ? body.message.trim() : '');
+  return { reason: failureReason(body), at: now, type, message: clip(message, 1000) || null };
 }
 
 // reduce(state, 'sl', null, body) | reduce(state, 'hook', '<Event>', body)
@@ -216,7 +229,7 @@ function reduceCore(state, kind, event, body, now) {
     case 'StopFailure':
       return {
         ...s, nowDoing: null, attention: null, subagents: 0, lastMessage: lastMsg, turnEndedAt: now,
-        failure: { reason: failureReason(body), at: now },
+        failure: failureOf(body, now),
       };
     case 'TaskCreated':
     case 'TaskCompleted': {
@@ -279,10 +292,31 @@ function ingest(termId, kind, event, body) {
   t.wsId = wsId;
   if (kind === 'hook') {
     try { hookListener(wsId, termId, event, body); } catch (e) { logger.warn('hook listener: ' + e.message); }
+    // the rate-limit StopFailure body is unverified live: record its shape (keys +
+    // error fields only, clipped) once per failure
+    if (event === 'StopFailure' && body && typeof body === 'object') {
+      const f = (v) => (typeof v === 'string' ? JSON.stringify(clip(v, 300)) : v && typeof v === 'object' ? JSON.stringify(v).slice(0, 300) : String(v));
+      logger.info(`StopFailure body: term=${termId} keys=[${Object.keys(body).join(',')}] error=${f(body.error)} error_type=${f(body.error_type)} error_details=${f(body.error_details)}`);
+    }
   }
   const next = reduce(t.state, kind, event, body);
   if (kind === 'sl') {
-    const rl = readLimits(body && body.rate_limits);
+    let acct = 'login';
+    try { acct = accountOf(termId) || 'login'; } catch {}
+    const raw = body && body.rate_limits;
+    // a full window (>= 100 %) means this account is out until its reset
+    for (const w of raw && typeof raw === 'object' ? [raw.five_hour, raw.seven_day] : []) {
+      if (w && num(w.used_percentage) !== null && w.used_percentage >= 100) {
+        const until = num(w.resets_at) ? w.resets_at * 1000 : Date.now() + 60 * 60 * 1000;
+        try { accounts.markExhausted(acct, until, 'limit reached'); } catch (e) { logger.warn('markExhausted: ' + e.message); }
+      }
+    }
+    // token accounts keep their own limits (accounts.json); only the logged-in
+    // account's ticks feed the shared chip + limits.json
+    const rl = acct === 'login' ? readLimits(raw) : null;
+    if (acct !== 'login' && raw) {
+      try { accounts.setLimits(acct, raw); } catch (e) { logger.warn('account limits: ' + e.message); }
+    }
     const key = rl ? JSON.stringify(rl) : '';
     if (rl && key !== limitsKey) {
       limits = rl;
@@ -419,6 +453,13 @@ function forget(termId) {
   terms.delete(termId);
 }
 
+// the tab moved to another account: the old account's windows must not be read
+// as the new one's (a 100 % window would mark the new account exhausted)
+function clearRateLimits(termId) {
+  const t = terms.get(termId);
+  if (t && t.state && t.state.rateLimits) t.state = { ...t.state, rateLimits: null };
+}
+
 // every term state of a workspace + the account limits (renderer reload/re-attach)
 function snapshot(wsId) {
   const out = {};
@@ -431,6 +472,7 @@ module.exports = {
   start,
   stop,
   forget,
+  clearRateLimits,
   snapshot,
   reduce,
   attentionText,
@@ -441,4 +483,5 @@ module.exports = {
   onData: (fn) => { listener = fn; },
   onLimits: (fn) => { limitsListener = fn; },
   onHook: (fn) => { hookListener = fn; },
+  setAccountResolver: (fn) => { accountOf = typeof fn === 'function' ? fn : () => 'login'; },
 };

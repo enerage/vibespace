@@ -131,6 +131,19 @@
         <button id="btn-restart-ws" class="btn small ghost">↻ Restart</button>
       </div>
 
+      <div class="prefs-label" style="margin-top: 14px;">Accounts</div>
+      <div class="prefs-hint">Log into the other Claude account in your browser, run <code>claude setup-token</code> in a terminal, paste the token here. New agents start on the first available account; when one runs out, its agents continue on the next.</div>
+      <div id="acct-list"></div>
+      <div class="acct-add">
+        <input id="acct-label" type="text" placeholder="Label (e.g. Work)" maxlength="40" autocomplete="off" spellcheck="false" />
+        <input id="acct-token" type="password" placeholder="sk-ant-oat01-…" autocomplete="off" spellcheck="false" />
+        <button id="acct-add-btn" class="btn small">Add</button>
+      </div>
+      <div id="acct-error" class="acct-error hidden"></div>
+      <div class="acct-tools">
+        <button id="btn-setup-token" class="btn small ghost">Open a setup-token tab</button>
+      </div>
+
       <div class="prefs-label" style="margin-top: 14px;">Notifications</div>
       <div class="prefs-hint">Windows pop-ups — one choice for all workspaces. Tab lights and the taskbar badge always show every state.</div>
       <div class="prefs-row">

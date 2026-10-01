@@ -42,6 +42,17 @@ contextBridge.exposeInMainWorld('vs', {
   presenceGet: () => ipcRenderer.invoke('presence:get'),
   presenceSet: (mode) => ipcRenderer.invoke('presence:set', mode),
   onPresence: (cb) => ipcRenderer.on('presence:changed', (e, p) => cb(p)),
+  // claude accounts (main/accounts.cjs): State = { accounts: [...], pick }
+  accountsList: () => ipcRenderer.invoke('accounts:list'),
+  accountsAdd: (label, token) => ipcRenderer.invoke('accounts:add', label, token),
+  accountsRemove: (id) => ipcRenderer.invoke('accounts:remove', id),
+  accountsRename: (id, label) => ipcRenderer.invoke('accounts:rename', id, label),
+  accountsMove: (id, delta) => ipcRenderer.invoke('accounts:move', id, delta),
+  accountsClear: (id) => ipcRenderer.invoke('accounts:clear', id),
+  onAccountsChanged: (cb) => ipcRenderer.on('accounts:changed', (e, state) => cb(state)),
+  setTermAccount: (termId, accountId) => ipcRenderer.invoke('accounts:setTerm', termId, accountId),
+  waitClaudeExit: (termId, timeoutMs) => ipcRenderer.invoke('pty:waitClaudeExit', termId, timeoutMs),
+  onAccountSwitch: (cb) => ipcRenderer.on('account:switch', (e, msg) => cb(msg)),
 
   restartAll: (wsId) => ipcRenderer.invoke('updater:restartAll', wsId),
   appRestart: () => ipcRenderer.invoke('app:restart'),
