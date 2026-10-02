@@ -140,11 +140,15 @@ async function create(repo, name) {
 
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 
-// "2 commits not merged · 3 uncommitted files" ('' = nothing would be lost)
+// "2 commits not merged · 3 uncommitted files" ('' = nothing would be lost).
+// Fails CLOSED: a count we couldn't get (null) is reported as a loss, so a safe
+// remove never deletes a worktree or branch whose state is unknown.
 function lossText(w) {
   const parts = [];
-  if (w.ahead > 0 && !w.merged) parts.push(plural(w.ahead, 'commit', 'commits') + ' not merged');
-  if (w.dirty > 0) parts.push(plural(w.dirty, 'uncommitted file', 'uncommitted files'));
+  if (w.ahead === null) parts.push("couldn't check for unmerged commits");
+  else if (w.ahead > 0 && !w.merged) parts.push(plural(w.ahead, 'commit', 'commits') + ' not merged');
+  if (w.dirty === null) parts.push("couldn't check for uncommitted files");
+  else if (w.dirty > 0) parts.push(plural(w.dirty, 'uncommitted file', 'uncommitted files'));
   return parts.join(' · ');
 }
 
@@ -154,16 +158,18 @@ async function describe(repo, w, mainBranch) {
   const exists = fs.existsSync(w.path);
   const cfg = w.branch ? await git(repo, ['config', '--get', `branch.${w.branch}.${BASE_KEY}`]) : { ok: false };
   const base = (cfg.ok && firstLine(cfg.out)) || mainBranch || null;
+  // null = couldn't tell → lossText reports it, so a safe remove keeps the worktree
   let dirty = 0;
   if (exists) {
     const st = await git(w.path, ['status', '--porcelain']);
-    dirty = st.ok ? st.out.split(/\r?\n/).filter(Boolean).length : 0;
+    dirty = st.ok ? st.out.split(/\r?\n/).filter(Boolean).length : null;
   }
-  let ahead = 0;
+  let ahead = w.branch ? null : 0; // a detached worktree has no branch to lose
   let merged = false;
   if (w.branch && base) {
     const cnt = await git(repo, ['rev-list', '--count', `${base}..${w.branch}`]);
-    ahead = cnt.ok ? Number(firstLine(cnt.out)) || 0 : 0;
+    const n = cnt.ok ? Number(firstLine(cnt.out)) : NaN;
+    ahead = Number.isFinite(n) ? n : null;
     merged = (await git(repo, ['merge-base', '--is-ancestor', w.branch, base])).ok;
   }
   const out = { name, path: w.path, branch: w.branch, base, head: w.head, dirty, ahead, merged, locked: w.locked, exists };

@@ -326,6 +326,12 @@ Key facts encoded in `main/sessions.cjs`:
   its empty folder deleted. `branch -d` judges "merged" against the main tree's
   CURRENT branch, so after our own ahead=0 check we fall back to `-D`. The
   wt:* IPC takes the repo from the sender's window, never from the renderer.
+  **The loss check fails CLOSED** (0.6.37): a `git status` or `rev-list` that
+  fails, or a base branch that's gone, gives `null`, and `lossText` reports it
+  as a loss. So "can't tell" keeps the worktree. Before the fix, a failed count
+  read as 0 = "nothing unmerged", and closing the tab would have deleted
+  unmerged commits. `.claude/worktrees` is hidden from the tree, Ctrl+P and the
+  tree watcher (`U.isAgentWorktrees`); each worktree is a full checkout.
 - **Never use `window.confirm/alert/prompt` in a workspace window.** On Windows
   Electron the window gets no real focus back after the native box closes.
   Keydown still fires, but keypress/beforeinput don't until the window is

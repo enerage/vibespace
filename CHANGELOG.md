@@ -2,6 +2,19 @@
 
 Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 
+## [0.6.37] — 2026-10-02
+
+### Fixed
+- **Closing a worktree tab can no longer delete unmerged work when git can't
+  answer.** If VibeSpace couldn't read the worktree's status or compare its
+  branch with the base (git error, base branch deleted, main tree on a detached
+  HEAD), that used to count as "nothing unmerged", and the tab close would remove
+  the worktree and its branch. Now "couldn't check" is reported as a reason to
+  keep it, and the discard confirm says so too. Found in review of 0.6.36.
+- **Worktree files no longer show up twice** in the file tree and Ctrl+P:
+  `.claude/worktrees/` (each worktree is a full checkout) is hidden there and in
+  the tree watcher. Smoke 91/91. Takes effect after one ↻ Restart.
+
 ## [0.6.36] — 2026-10-02
 
 ### Added

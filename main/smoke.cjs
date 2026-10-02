@@ -292,7 +292,9 @@ async function runSmoke() {
     const deadline = Date.now() + 4000;
     while (!fired && Date.now() < deadline) await new Promise(r => setTimeout(r, 150));
     check('tree watcher fires on new file', fired > 0, `fired=${fired}`);
-    check('ignore-path filter', U.isIgnoredPath('src/node_modules/pkg/x.js') === true && U.isIgnoredPath('a/b.tsbuildinfo') === true && U.isIgnoredPath('src/new-file.ts') === false, '');
+    check('ignore-path filter', U.isIgnoredPath('src/node_modules/pkg/x.js') === true && U.isIgnoredPath('a/b.tsbuildinfo') === true && U.isIgnoredPath('src/new-file.ts') === false
+      && U.isIgnoredPath('.claude/worktrees/agent-5/src/a.js') === true && U.isIgnoredPath('.claude/settings.json') === false
+      && U.isIgnoredPath('src/worktrees/a.js') === false, '');
     tw.stop('tw-ws');
     try { fs.rmSync(path.join(U.dataRoot(), 'treewatch-smoke'), { recursive: true, force: true }); } catch {}
     void ignoredFired;
@@ -462,6 +464,9 @@ async function runSmoke() {
         check('worktrees.list: dirty/ahead/merged/exists', la && la.dirty === 0 && la.ahead === 0 && la.merged && la.exists
           && lb && lb.dirty === 1 && lb.ahead === 1 && !lb.merged && lb.loss === '1 commit not merged · 1 uncommitted file',
           JSON.stringify(ls && ls.map(w => [w.name, w.dirty, w.ahead, w.merged, w.loss])));
+        // an unknown count (git failed / base branch gone) must read as a loss, never as "safe to delete"
+        const closed = [wt.lossText({ ahead: null, dirty: 0 }), wt.lossText({ ahead: 0, dirty: null }), wt.lossText({ ahead: 0, merged: true, dirty: 0 })];
+        check('worktrees.lossText fails closed on unknown counts', closed[0] !== '' && closed[1] !== '' && closed[2] === '', JSON.stringify(closed));
         const refused = await wt.remove(root, 'agent-5-2');
         const safe = await wt.remove(root, 'agent-5');
         const discarded = await wt.remove(root, 'agent-5-2', { discard: true });

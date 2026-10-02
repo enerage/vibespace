@@ -142,8 +142,8 @@ Build in this order. Verify the statusLine and HTTP hooks live in a pty before r
       tab you're looking at, not only the main tree.
 - [ ] **Per-workspace worktree setup command** (S) — run after a worktree is made,
       e.g. copy `.env` or `npm ci`, so the agent doesn't start without deps.
-- [ ] File tree and Ctrl+P index walk into `.claude/worktrees/` (every worktree's
-      files show up twice). Hide that folder in the tree/index/watcher.
+- [x] File tree and Ctrl+P index walk into `.claude/worktrees/` (every worktree's
+      files showed up twice). Hidden in the tree/index/watcher (0.6.37).
 - [ ] **Cross-workspace overview** (M) — small always-on-top window or launcher view:
       all agents across all repos, live status (idle/thinking/waiting-on-permission),
       click to focus. Needs a status signal from claude (OSC title or output heuristics).

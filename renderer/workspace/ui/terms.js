@@ -366,8 +366,11 @@ async function removeWorktree(w, discard) {
 
 async function discardWorktree(w) {
   const lost = [];
-  if (w.ahead > 0 && !w.merged) lost.push(`· ${w.ahead} commit${w.ahead === 1 ? '' : 's'} on ${w.branch} not merged into ${w.base}`);
-  if (w.dirty > 0) lost.push(`· ${w.dirty} uncommitted file${w.dirty === 1 ? '' : 's'} in ${w.path}`);
+  // null = main couldn't check: say so, never imply "nothing is lost"
+  if (w.ahead === null) lost.push(`· possibly commits on ${w.branch}: couldn't compare it with its base`);
+  else if (w.ahead > 0 && !w.merged) lost.push(`· ${w.ahead} commit${w.ahead === 1 ? '' : 's'} on ${w.branch} not merged into ${w.base}`);
+  if (w.dirty === null) lost.push(`· possibly uncommitted files in ${w.path}: couldn't read its status`);
+  else if (w.dirty > 0) lost.push(`· ${w.dirty} uncommitted file${w.dirty === 1 ? '' : 's'} in ${w.path}`);
   const msg = `Remove worktree ${w.name} and delete branch ${w.branch}?\n`
     + (lost.length ? `This permanently loses:\n${lost.join('\n')}` : 'Nothing unmerged or uncommitted is lost.');
   if (!(await confirmBox(msg, { ok: 'Remove and discard', danger: true }))) return;

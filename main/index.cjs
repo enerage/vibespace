@@ -795,6 +795,7 @@ function initIpc() {
     for (const name of fs.readdirSync(dir)) {
       if (U.IGNORED_NAMES.has(name)) continue;
       if (U.IGNORED_SUFFIXES.some(s => name.endsWith(s))) continue;
+      if (U.isAgentWorktrees(path.basename(dir), name)) continue;
       const full = path.join(dir, name);
       let isDir = false;
       try { isDir = fs.statSync(full).isDirectory(); } catch { continue; }
@@ -895,6 +896,7 @@ function initIpc() {
     for (const d of names) {
       if (U.IGNORED_NAMES.has(d.name)) continue;
       if (U.IGNORED_SUFFIXES.some(s => d.name.endsWith(s))) continue;
+      if (U.isAgentWorktrees(path.basename(dir), d.name)) continue;
       if (d.isDirectory()) walkFiles(path.join(dir, d.name), out, depth + 1);
       else if (d.isFile()) out.push(path.join(dir, d.name));
     }

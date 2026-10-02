@@ -127,10 +127,15 @@ function readBackup(file, fallback, why) {
 const IGNORED_NAMES = new Set(['node_modules', '.git', 'dist', 'build', 'out', 'coverage', '__pycache__', '.next', '.venv', 'venv', 'target', '.cache', '.turbo', '.parcel-cache', '.idea', '*.egg-info', 'playwright-report', 'test-results', '.nx', '.angular', '.sst', '.expo', '.output']);
 const IGNORED_SUFFIXES = ['.tsbuildinfo', '.eslintcache', '.stackdump'];
 
+// <repo>/.claude/worktrees holds the worktree tabs' checkouts (0.6.36): full copies
+// of the repo that would show every file twice in the tree and Ctrl+P
+const isAgentWorktrees = (parentName, name) => name === 'worktrees' && parentName === '.claude';
+
 // 'src/node_modules/x' or 'foo.tsbuildinfo' -> ignored (slash-separated, relative)
 function isIgnoredPath(rel) {
   const segs = rel.split('/');
   if (segs.some(s => IGNORED_NAMES.has(s))) return true;
+  if (segs.some((s, i) => i > 0 && isAgentWorktrees(segs[i - 1], s))) return true;
   const last = segs[segs.length - 1];
   return IGNORED_SUFFIXES.some(s => last.endsWith(s));
 }
@@ -216,6 +221,7 @@ module.exports = {
   IGNORED_NAMES,
   IGNORED_SUFFIXES,
   isIgnoredPath,
+  isAgentWorktrees,
   jailed,
   ensureDir,
   mungeClaudeDir,
