@@ -14,14 +14,12 @@ itself while an agent runs in the same window.
       shortcuts. Deliberately left for Valentin (touches his real machine state).
 
 ## Bugs
-- [ ] **Space stops typing in every agent tab** (2026-09-29) — cause found with
-      keydiag: after a native `confirm()` the window never gets a real focus back,
-      so keypress stops firing and xterm's Space (keypress-only) dies while letters
-      (keydown) work. Fixed in 669b11a (in-page `confirmBox()`). Proof so far is 2
-      logged episodes. **Keep** `renderer/workspace/ui/keydiag.js` + its 2 hooks
-      (app.js, terms.js; uncommitted) until one full day on the fixed build with no
-      Space loss. Then delete them and tick this. If it recurs, grep the instance log
-      for `[keydiag]` around the last `window blur`.
+- [x] **Space stops typing in every agent tab** (2026-09-29, closed 2026-10-02):
+      after a native `confirm()` the window never got real focus back, so keypress
+      stopped firing and xterm's Space (keypress-only) died while letters (keydown)
+      worked. Found with temporary keydiag logging, fixed in 669b11a (in-page
+      `confirmBox()`). No episode in any log from the fix until 2026-10-02, so the
+      logging was removed. If it ever recurs: look for another native dialog first.
 - [ ] **Orphaned MCP servers pile up** (2026-09-29) — found 124 `mcp-postgres`
       node processes (~6.4 GB) whose claude + cmd.exe parents were gone; the PC
       was barely usable. Not yet proven that VibeSpace is the cause: check whether
