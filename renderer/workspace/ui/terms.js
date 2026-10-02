@@ -1,4 +1,4 @@
-import { $, el, toast, confirmBox } from './common.js';
+import { $, el, toast, confirmBox, showMenu } from './common.js';
 import { termTheme, onThemeChange } from './themes.js';
 import { openTabMenu } from './tabmenu.js';
 import * as feedui from './feedui.js';
@@ -188,6 +188,8 @@ export function init(opts) {
     resumePicker();
   };
   $('#btn-resume').onclick = resumePicker; // the same, as a visible button
+  // ▾ caret: new agent / new agent in a worktree / resume + kept worktrees
+  $('#btn-new-claude-menu').onclick = (ev) => openClaudeMenu(ev.currentTarget, resumePicker);
   $('#btn-new-term').onclick = () => createTab({ name: nextName('term'), cwd: repoPath });
 
 
@@ -232,12 +234,18 @@ export function init(opts) {
           savedIsClaude: isClaude,
           savedSessionId: t.claudeSessionId || null,
           account: t.account || null,
+          worktree: t.worktree || null,
         });
-      } else if (opts.autoResume && isClaude && t.claudeSessionId && !(await vs.sessionCheck(wsId, t.claudeSessionId))) {
+      } else if (t.worktree && !(await worktreeAlive(t.worktree))) {
+        // the worktree folder is gone: a plain terminal at the repo root, never
+        // an auto-resume into the wrong folder
+        createTab({ termId: t.termId || null, name: t.name, cwd: repoPath });
+        toast(`worktree ${t.worktree.name} no longer exists: the conversation can still be resumed from ↺ Resume`, 'err');
+      } else if (opts.autoResume && isClaude && t.claudeSessionId && !(await vs.sessionCheck(wsId, t.claudeSessionId, t.cwd || repoPath))) {
         // saved session file is gone — open claude's interactive picker instead of
         // typing a resume id that would silently error out
         deadSessions.push(t.name);
-        createTab({ termId: t.termId || null, name: t.name, cwd: t.cwd || repoPath, pickSession: true, account: t.account || null });
+        createTab({ termId: t.termId || null, name: t.name, cwd: t.cwd || repoPath, pickSession: true, account: t.account || null, worktree: t.worktree || null });
       } else {
         createTab({
           termId: t.termId || null, // keep stable ids across restarts (sessions pin by termId)
@@ -246,6 +254,7 @@ export function init(opts) {
           claude: opts.autoResume && isClaude && !t.claudeSessionId,
           resumeId: opts.autoResume ? (t.claudeSessionId || null) : null,
           account: t.account || null,
+          worktree: t.worktree || null,
         });
       }
     }
@@ -274,9 +283,102 @@ export function init(opts) {
         claude: opts.autoResume && isClaude && !t.claudeSessionId,
         resumeId: opts.autoResume ? (t.claudeSessionId || null) : null,
         account: t.account || null,
+        worktree: t.worktree || null,
       });
     }
   });
+}
+
+// ---- worktree tabs (main/worktrees.cjs) --------------------------------------
+// An agent in its own git worktree (<repo>\.claude\worktrees\<name>, branch
+// vs/<name>): parallel agents never touch each other's files. VibeSpace owns the
+// worktree; git writes beyond add/remove (commit, merge) stay with the agents.
+const normPath = (p) => String(p || '').replace(/\//g, '\\').replace(/\\+$/, '').toLowerCase();
+const samePath = (a, b) => normPath(a) === normPath(b);
+const wtInfo = (w) => ({ name: w.name, path: w.path, branch: w.branch, base: w.base });
+
+let wtCache = null; // one wt:list per restore pass
+async function worktreeAlive(wt) {
+  if (!wtCache) wtCache = vs.wtList(wsId).catch(() => null);
+  const list = await wtCache;
+  return Array.isArray(list) && list.some(w => w.exists && samePath(w.path, wt.path));
+}
+
+export function repoRoot() { return repoPath; }
+
+export async function newWorktreeAgent() {
+  const name = nextName('agent');
+  let wt;
+  try { wt = await vs.wtCreate(wsId, name); } catch (e) { wt = { ok: false, reason: (e && e.message) || String(e) }; }
+  if (!wt || !wt.ok) { toast(`Worktree failed: ${(wt && wt.reason) || 'unknown error'}`, 'err'); return null; }
+  const tab = createTab({ name, cwd: wt.path, claude: true, worktree: wtInfo(wt) });
+  const from = feedui.wtText(wt).replace(/^⎇ \S+ · from /, '');
+  toast(`Worktree ready: ${wt.branch} (from ${from}). Not shared: node_modules, .env, build output; the agent may need to install.`, 'ok');
+  return tab;
+}
+
+// our worktrees that no open tab is using (closed with work left in them)
+async function keptWorktrees() {
+  let list = null;
+  try { list = await vs.wtList(wsId); } catch {}
+  if (!Array.isArray(list)) return [];
+  const used = [...tabs.values()].map(t => (t.worktree && t.worktree.path) || t.cwd);
+  return list.filter(w => w.exists && !used.some(u => samePath(u, w.path)));
+}
+
+async function openClaudeMenu(anchor, resumePicker) {
+  const r = anchor.getBoundingClientRect();
+  const kept = await keptWorktrees();
+  const items = [
+    { label: 'New agent', run: () => createTab({ name: nextName('agent'), cwd: repoPath, claude: true }) },
+    { label: 'New agent in a worktree', hint: "Its own git worktree and branch vs/<name>: parallel agents never touch each other's files", run: () => newWorktreeAgent() },
+    { label: 'Resume a conversation…', run: resumePicker },
+  ];
+  if (kept.length) items.push({ sep: true }, { label: `Worktrees (${kept.length}) ▸`, hint: 'Worktrees kept after their tab closed', run: () => worktreesMenu(r, kept) });
+  showMenu(r.left, r.bottom + 4, items);
+}
+
+function worktreesMenu(r, kept) {
+  showMenu(r.left, r.bottom + 4, kept.map(w => ({
+    label: `⎇ ${w.name} — ${w.loss || 'clean'}`,
+    hint: feedui.wtText(w),
+    run: () => worktreeActions(r, w),
+  })));
+}
+
+function worktreeActions(r, w) {
+  showMenu(r.left, r.bottom + 4, [
+    { label: 'Open agent here', hint: "New tab in this worktree with Claude's resume picker", run: () => createTab({ name: nextName('agent'), cwd: w.path, pickSession: true, worktree: wtInfo(w) }) },
+    w.loss
+      ? { label: `Remove — kept: ${w.loss}`, disabled: true, hint: 'Merge or commit first, or use Remove and discard' }
+      : { label: 'Remove', hint: `Removes the worktree and branch ${w.branch} (nothing unmerged)`, run: () => removeWorktree(w, false) },
+    { label: 'Remove and discard…', danger: true, run: () => discardWorktree(w) },
+  ]);
+}
+
+async function removeWorktree(w, discard) {
+  let res;
+  try { res = await vs.wtRemove(wsId, w.name, { discard }); } catch (e) { res = { ok: false, reason: (e && e.message) || String(e) }; }
+  if (res && res.ok) toast(`worktree ${w.name} removed` + (discard ? '' : ' (nothing unmerged)') + (res.branchKept ? `, branch ${w.branch} kept` : ''), 'ok');
+  else toast(`worktree ${w.name} kept: ${(res && res.reason) || 'remove failed'}`, res && res.kept ? '' : 'err');
+  return res;
+}
+
+async function discardWorktree(w) {
+  const lost = [];
+  if (w.ahead > 0 && !w.merged) lost.push(`· ${w.ahead} commit${w.ahead === 1 ? '' : 's'} on ${w.branch} not merged into ${w.base}`);
+  if (w.dirty > 0) lost.push(`· ${w.dirty} uncommitted file${w.dirty === 1 ? '' : 's'} in ${w.path}`);
+  const msg = `Remove worktree ${w.name} and delete branch ${w.branch}?\n`
+    + (lost.length ? `This permanently loses:\n${lost.join('\n')}` : 'Nothing unmerged or uncommitted is lost.');
+  if (!(await confirmBox(msg, { ok: 'Remove and discard', danger: true }))) return;
+  removeWorktree(w, true);
+}
+
+// after a worktree tab closed: clean + nothing unmerged → removed silently;
+// otherwise kept, with the reason. Skipped while another tab still uses it.
+function afterWorktreeTabClosed(wt) {
+  if (!wt || [...tabs.values()].some(t => samePath((t.worktree && t.worktree.path) || t.cwd, wt.path))) return;
+  removeWorktree(wt, false);
 }
 
 function openTermFind() {
@@ -451,7 +553,7 @@ function registerFileLinks(term, tab) {
   } catch {} // xterm without link-provider support — links simply don't light up
 }
 
-export function createTab({ name = 'agent', cwd = repoPath, claude = false, resumeId = null, activate = true, termId = null, attachBuffer = null, savedIsClaude = null, savedSessionId = null, pickSession = false, run = null, account = null } = {}) {
+export function createTab({ name = 'agent', cwd = repoPath, claude = false, resumeId = null, activate = true, termId = null, attachBuffer = null, savedIsClaude = null, savedSessionId = null, pickSession = false, run = null, account = null, worktree = null } = {}) {
   const id = termId || newTermId();
   const host = el('div', 'term-host');
   host.style.display = 'none';
@@ -483,6 +585,7 @@ export function createTab({ name = 'agent', cwd = repoPath, claude = false, resu
     id, name, cwd,
     sessionId: savedSessionId || resumeId || null,
     term, fit, host, dead: false, search,
+    worktree: worktree && worktree.path ? worktree : null, // { name, path, branch, base }
     isClaude: savedIsClaude !== null ? Boolean(savedIsClaude) : Boolean(claude || resumeId || pickSession),
   };
   if (tab.isClaude) {
@@ -537,7 +640,7 @@ export function createTab({ name = 'agent', cwd = repoPath, claude = false, resu
       }
       const cmd = claudeCommand(tab, pickSession ? '' : resumeId); // '' = picker: saved id is dead
       vs.ptyWrite(id, cmd + '\r');
-      vs.claudeStarted(wsId, id, pickSession ? { picker: true } : undefined);
+      vs.claudeStarted(wsId, id, launchOpts(tab, pickSession));
       if (resumeId) vs.sessionPinned(wsId, id, resumeId);
     }, 900);
   } else if (attachBuffer === null && run) {
@@ -546,6 +649,12 @@ export function createTab({ name = 'agent', cwd = repoPath, claude = false, resu
   }
   persist();
   return tab;
+}
+
+// session tracking: offRepo = the cwd isn't the repo root (worktree tab), so
+// main's timing heuristic leaves the tab to the feed
+function launchOpts(tab, picker) {
+  return { picker: Boolean(picker), offRepo: !samePath(tab.cwd, repoPath) };
 }
 
 // The ONE builder for a new interactive claude:
@@ -601,7 +710,7 @@ export async function relaunchOnAccount(tab, to, { prompt = 'continue' } = {}) {
     tab.account = typeof used === 'string' ? used : to;
     // same bookkeeping as createTab's known-resume launch: tracking stays pinned
     vs.ptyWrite(id, claudeCommand(tab, tab.sessionId, prompt) + '\r');
-    vs.claudeStarted(wsId, id);
+    vs.claudeStarted(wsId, id, launchOpts(tab, false));
     vs.sessionPinned(wsId, id, tab.sessionId);
   } catch (e) {
     console.warn(`account switch: ${id} failed`, e && e.message);
@@ -720,7 +829,8 @@ function renderTabBar() {
       : st === 'done' ? 'task completed — agent is idle'
       : (tab.sessionId ? `session ${tab.sessionId.slice(0, 8)}…` : 'no claude session yet');
     const label = el('span', 'label', tab.name);
-    label.title = (tab.sessionId ? `${tab.name} — ${tab.sessionId}` : tab.name) + '  (double-click to rename · right-click for options)';
+    label.title = (tab.sessionId ? `${tab.name} — ${tab.sessionId}` : tab.name) + '  (double-click to rename · right-click for options)'
+      + (tab.worktree ? '\n' + feedui.wtText(tab.worktree) : '');
     const close = el('span', 'close', '✕');
     close.title = 'close terminal';
     const meter = el('span', 'ctx-meter hidden'); // context-window fill, bottom edge
@@ -733,7 +843,13 @@ function renderTabBar() {
     tab.statusTitle = status.title;
     tab.pillEl = pill;
 
-    t.append(status, label);
+    t.append(status);
+    if (tab.worktree) {
+      const wt = el('span', 'wt-badge', '⎇');
+      wt.title = feedui.wtText(tab.worktree);
+      t.append(wt);
+    }
+    t.append(label);
     const acct = acctChip(tab);
     if (acct) t.append(acct);
     t.append(pill, close, meter);
@@ -749,6 +865,7 @@ function renderTabBar() {
       const hasAgent = tab.sessionId || !tab.dead;
       if (hasAgent && !(await confirmBox(`Close "${tab.name}"?\nIts claude conversation is saved and can be resumed later.`, { ok: 'Close', danger: true }))) return;
       removeTab(tab.id);
+      if (tab.worktree) afterWorktreeTabClosed(tab.worktree);
     };
     label.ondblclick = (ev) => {
       ev.stopPropagation();
@@ -920,6 +1037,7 @@ export function snapshot() {
     isClaude: t.isClaude,
     claudeSessionId: t.sessionId || null,
     account: t.account || null,
+    worktree: t.worktree || null,
   }));
 }
 
@@ -949,6 +1067,7 @@ export function feedFor(termId) {
 export function agents() {
   return [...tabs.values()].map(t => ({
     id: t.id, name: t.name, status: t.status || null, isClaude: t.isClaude, dead: t.dead, feed: feeds.get(t.id) || null,
+    worktree: t.worktree || null,
   }));
 }
 

@@ -428,6 +428,56 @@ async function runSmoke() {
       check('githistory branch info', br && br.head && br.oid === lg.commits[0].sha && br.upstream === null && br.operation === null, JSON.stringify(br));
       check('githistory non-repo resolves null', (await gh.log(empty)) === null && (await gh.branch(empty)) === null);
       check('githistory rejects bad sha', (await gh.commit(root, '--output=x')) === null);
+
+      // 17c. worktree tabs (main/worktrees.cjs) on a dirty main tree
+      {
+        const wt = require('./worktrees.cjs');
+        fs.writeFileSync(path.join(root, 'b.txt'), 'main tree edit'); // dirty main tree
+        const a = await wt.create(root, 'Agent 5');
+        const b = await wt.create(root, 'agent-5'); // folder + branch taken → -2
+        const excl = fs.readFileSync(path.join(root, '.git', 'info', 'exclude'), 'utf8').split(/\r?\n/).filter(l => l === '/.claude/worktrees/').length;
+        const st = await new Promise((res) => {
+          let out = '';
+          const p = require('node:child_process').spawn('git', ['status', '--porcelain', '--untracked-files=all'], { cwd: root, windowsHide: true });
+          p.stdout.on('data', (d) => { out += d; });
+          p.on('close', () => res(out));
+        });
+        check('worktrees.create: path/branch/base, unique -2, exclude line once, main status clean of it',
+          a.ok && a.name === 'agent-5' && a.branch === 'vs/agent-5' && a.path === path.join(root, '.claude', 'worktrees', 'agent-5') && fs.existsSync(path.join(a.path, 'a.txt')) === false
+          && fs.existsSync(path.join(a.path, 'b.txt')) && fs.readFileSync(path.join(a.path, 'b.txt'), 'utf8') !== 'main tree edit'
+          && b.ok && b.name === 'agent-5-2' && b.base === a.base && excl === 1 && !st.includes('.claude'),
+          JSON.stringify({ a: a.ok && [a.name, a.branch, a.base], b: b.ok && b.name, excl, st }));
+        // work in b: one commit + one uncommitted file
+        const inB = (args) => new Promise((res) => {
+          const p = require('node:child_process').spawn('git', args, { cwd: b.path, windowsHide: true });
+          p.on('close', (c) => res(c === 0));
+        });
+        fs.writeFileSync(path.join(b.path, 'new.txt'), 'x');
+        await inB(['add', 'new.txt']);
+        await inB(['commit', '-m', 'wt work']);
+        fs.writeFileSync(path.join(b.path, 'loose.txt'), 'y');
+        const ls = await wt.list(root);
+        const la = ls && ls.find(w => w.name === 'agent-5');
+        const lb = ls && ls.find(w => w.name === 'agent-5-2');
+        check('worktrees.list: dirty/ahead/merged/exists', la && la.dirty === 0 && la.ahead === 0 && la.merged && la.exists
+          && lb && lb.dirty === 1 && lb.ahead === 1 && !lb.merged && lb.loss === '1 commit not merged · 1 uncommitted file',
+          JSON.stringify(ls && ls.map(w => [w.name, w.dirty, w.ahead, w.merged, w.loss])));
+        const refused = await wt.remove(root, 'agent-5-2');
+        const safe = await wt.remove(root, 'agent-5');
+        const discarded = await wt.remove(root, 'agent-5-2', { discard: true });
+        const branches = await new Promise((res) => {
+          let out = '';
+          const p = require('node:child_process').spawn('git', ['branch', '--list', 'vs/*'], { cwd: root, windowsHide: true });
+          p.stdout.on('data', (d) => { out += d; });
+          p.on('close', () => res(out.trim()));
+        });
+        const left = await wt.list(root);
+        check('worktrees.remove: safe refuses work, removes clean, discard forces, branches deleted',
+          refused.ok === false && refused.kept === true && /1 commit not merged/.test(refused.reason)
+          && safe.ok && !fs.existsSync(a.path) && discarded.ok && !fs.existsSync(b.path) && branches === '' && left && left.length === 0,
+          JSON.stringify({ refused, safe, discarded, branches, left: left && left.length }));
+        check('worktrees on a non-repo: create refuses, list null', (await wt.create(empty, 'x')).ok === false && (await wt.list(empty)) === null);
+      }
       try { fs.rmSync(root, { recursive: true, force: true }); fs.rmSync(empty, { recursive: true, force: true }); } catch {}
     }
   }
@@ -724,6 +774,41 @@ async function runSmoke() {
     try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
     check('session pinned from feed session_id (/clear re-pins, heuristic never overrides)', early === false && pinA && pinB && kept,
       JSON.stringify({ early, pinA, pinB, kept }));
+
+    // C2 — worktree tabs: the transcript lives in munged(<worktree>), outside
+    // the repo's dir. The feed's transcript_path pins it; sessionExists finds
+    // it with the tab's cwd; the timing heuristic never hands an offRepo term a
+    // repo-dir file.
+    {
+      const wtCwd = repo + BS + '.claude' + BS + 'worktrees' + BS + 'agent-1';
+      const repoDir = path.join(U.claudeProjectsDir(), U.mungeClaudeDir(repo));
+      const wtDir = path.join(U.claudeProjectsDir(), U.mungeClaudeDir(wtCwd));
+      fs.mkdirSync(repoDir, { recursive: true });
+      fs.mkdirSync(wtDir, { recursive: true });
+      const idW = 'dddddddd-0000-4000-8000-000000000004';
+      const tp = path.join(wtDir, idW + '.jsonl');
+      sessions.start('smoke-wt', repo);
+      sessions.trackClaudeStart('smoke-wt', 'tw', { offRepo: true });
+      fs.writeFileSync(path.join(repoDir, 'eeeeeeee-0000-4000-8000-000000000005.jsonl'), '{}'); // a repo-root agent's file
+      sessions._scan('smoke-wt');
+      const notStolen = sessions.getSession('smoke-wt', 'tw') === null;
+      const st = feed.reduce(null, 'hook', 'UserPromptSubmit', { session_id: idW, transcript_path: tp });
+      const tooEarly = sessions.pinFromFeed('smoke-wt', 'tw', st.sessionId, st.transcriptPath); // not written yet
+      fs.writeFileSync(tp, '{}');
+      const wrongName = sessions.pinFromFeed('smoke-wt', 'tw', 'ffffffff-0000-4000-8000-000000000006', tp); // stale path
+      const pinned = sessions.pinFromFeed('smoke-wt', 'tw', st.sessionId, st.transcriptPath) && sessions.getSession('smoke-wt', 'tw') === idW;
+      const slTp = feed.reduce(null, 'sl', null, { session_id: idW, transcript_path: tp }).transcriptPath === tp;
+      check('worktree tab: pin from transcript_path outside the repo dir (offRepo skips heuristic)',
+        st.transcriptPath === tp && slTp && notStolen && tooEarly === false && wrongName === false && pinned,
+        JSON.stringify({ slTp, notStolen, tooEarly, wrongName, pinned }));
+      const withCwd = sessions.sessionExists('smoke-wt', idW, wtCwd);
+      const repoOnly = sessions.sessionExists('smoke-wt', idW);
+      const lowerCwd = sessions.sessionExists('smoke-wt', idW, wtCwd.toLowerCase());
+      check('worktree tab: sessionExists checks the worktree cwd\'s project dir', withCwd === true && repoOnly === false && lowerCwd === true,
+        JSON.stringify({ withCwd, repoOnly, lowerCwd }));
+      sessions.stop('smoke-wt');
+      for (const d of [repoDir, wtDir]) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
+    }
 
     // D — background agents: only kind=background under the repo, newest first
     const bg = require('./bgagents.cjs');

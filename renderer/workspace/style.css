@@ -799,3 +799,11 @@ body.dragging #split-v, body.dragging #split-h { background: color-mix(in srgb, 
 .bg-name { font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bg-state, .bg-age { color: var(--dim); font-size: 11px; white-space: nowrap; flex: none; }
 .bg-row .spacer { flex: 1; }
+/* ---------- worktree tabs (0.6.36) ---------- */
+.btn-group { display: inline-flex; }
+.btn-group > .btn:first-child { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.btn-group > .btn.caret { border-top-left-radius: 0; border-bottom-left-radius: 0; padding: 4px 6px; margin-left: 1px; }
+.wt-badge { flex: none; color: var(--accent); font-size: 12px; line-height: 1; }
+#term-strip .ts-wt { flex: none; color: var(--accent); white-space: nowrap; }
+.fu-pop .fu-wt { color: var(--accent); font-size: 11.5px; margin: -2px 0 6px; }
+.bc-wt { color: var(--accent); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

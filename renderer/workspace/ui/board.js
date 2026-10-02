@@ -1,5 +1,5 @@
 import { $, el } from './common.js';
-import { fmtElapsed, fmtAgo, taskItems, cacheChip, compactSoon } from './feedui.js';
+import { fmtElapsed, fmtAgo, taskItems, cacheChip, compactSoon, wtText } from './feedui.js';
 import * as terms from './terms.js';
 
 // Agent board (▦ / Ctrl+Shift+B): this window's agents as cards in columns —
@@ -68,6 +68,7 @@ function cardBody(a, col) {
   head.append(el('span', lightClass(a)), el('span', 'bc-name', a.name));
   if (f && f.model && f.model.name) head.append(el('span', 'bc-model', f.model.name));
   body.append(head);
+  if (a.worktree) body.append(el('div', 'bc-wt', wtText(a.worktree)));
 
   let line = '';
   let lineCls = 'bc-line';

@@ -77,7 +77,14 @@ non-alphanumeric char with `-` (`D:\Repositories\Foo` → `D--Repositories-Foo`)
 Key facts encoded in `main/sessions.cjs`:
 
 - The `.jsonl` is created **when the first message is sent**, not at `claude` launch —
-  discovery windows must not have short upper bounds.
+  discovery windows must not have short upper bounds. Exception (seen live,
+  2.1.287): a claude started with `--remote-control` writes its `.jsonl`
+  (~3.8 KB) BEFORE the first message.
+- **The transcript lives under munged(<the claude's cwd>)**, not the repo's dir,
+  when the tab's cwd isn't the repo root (worktree tabs). `pinFromFeed` accepts
+  the feed's `transcript_path` (basename must equal the session id, file must
+  exist), `sessions:check` gets the tab's cwd, and `offRepo` terms are skipped
+  by the timing heuristic (it only scans the repo's dir).
 - An unresolved terminal owns the earliest session file born after its claude launched
   and before the *next* terminal's claude launch; tabs resumed with a known id are
   pinned and never rediscovered.
@@ -307,6 +314,18 @@ Key facts encoded in `main/sessions.cjs`:
   emoji output with node, not `Write-Host`: Windows PowerShell 5.1 drops emoji
   from its own output. More suspects (in-box ConPTY strips DEC 2026 sync
   output; `useConptyDll` passes it through) are in RESEARCH-TERMINAL-GARBLE.md.
+- **Worktree tabs** (0.6.36, `main/worktrees.cjs`): ▾ → New agent in a worktree
+  makes `<repo>\.claude\worktrees\<name>` on `vs/<name>` with a plain
+  `git worktree add`. **Never use `claude -w`**: it moves the transcript between
+  project dirs on `/exit` (a hard kill strands it) and its cleanup half-fails on
+  Windows. The base branch is kept in git config `branch.vs/<name>.vibespacebase`
+  (deleted with the branch). `.claude/worktrees/` goes into
+  `<git-common-dir>/info/exclude`, never `.gitignore`, or the main tree's status
+  shows every worktree as untracked. Removal retries because the closed tab's
+  shell can still hold the folder for a moment; a half-removed one is pruned and
+  its empty folder deleted. `branch -d` judges "merged" against the main tree's
+  CURRENT branch, so after our own ahead=0 check we fall back to `-D`. The
+  wt:* IPC takes the repo from the sender's window, never from the renderer.
 - **Never use `window.confirm/alert/prompt` in a workspace window.** On Windows
   Electron the window gets no real focus back after the native box closes.
   Keydown still fires, but keypress/beforeinput don't until the window is

@@ -1,5 +1,5 @@
 import { el, toast, showMenu, confirmBox } from './common.js';
-import { feedFor, accounts, relaunchOnAccount } from './terms.js';
+import { feedFor, accounts, relaunchOnAccount, sendToAgent, repoRoot } from './terms.js';
 
 // Right-click menu for terminal tabs (was: right-click = rename) + the
 // "Agent info" panel. Kept out of terms.js: terms.js only hands us the tab
@@ -37,6 +37,7 @@ export function openTabMenu(ev, tab, { rename, close }) {
     { label: 'Copy session ID', disabled: !sid, hint: sid || noSid, run: () => copy(sid, 'Session ID') },
     { label: 'Copy resume command', disabled: !sid, hint: sid ? resumeCommand(sid) : noSid, run: () => copy(resumeCommand(sid), 'Resume command') },
     ...accountItems(tab),
+    ...worktreeItems(tab),
     { sep: true },
     { label: 'Close', danger: true, run: close },
   ]);
@@ -74,6 +75,32 @@ async function moveTo(tab, a) {
   // `continue`; otherwise the conversation just resumes and waits for you
   const failed = Boolean(feedFor(tab.id)?.failure);
   relaunchOnAccount(tab, a.id, { prompt: failed ? 'continue' : null });
+}
+
+// Worktree tabs: merging back is the AGENT's job (git writes stay with agents),
+// so this only sends it the prompt — the same path as the board's quick reply,
+// and only while it is idle so the text can't land inside a running turn.
+function worktreeItems(tab) {
+  const wt = tab.worktree;
+  if (!wt) return [];
+  const repo = repoRoot();
+  const prompt = `Commit any remaining changes on branch ${wt.branch}, then merge it into ${wt.base} in the main repo at ${repo} `
+    + `(\`git -C "${repo}" merge ${wt.branch}\`). Resolve conflicts if any, run the checks, and report what you merged.`;
+  const idle = tab.isClaude && !tab.dead && tab.status === 'done';
+  return [
+    { sep: true },
+    {
+      label: 'Ask agent to merge back',
+      disabled: !idle,
+      hint: idle ? `Sends the agent: ${prompt}` : 'Only while the agent is idle (its turn is done)',
+      run: () => { if (sendToAgent(tab.id, prompt)) toast(`Asked ${tab.name} to merge ${wt.branch} into ${wt.base}`, 'ok'); },
+    },
+    {
+      label: 'Open worktree folder in Explorer',
+      hint: wt.path,
+      run: () => vs.openFolder(wt.path).catch((e) => toast('Could not open folder: ' + (e.message || e), 'err')),
+    },
+  ];
 }
 
 // Read-only details panel: every value has its own copy button, plus

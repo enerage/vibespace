@@ -136,8 +136,14 @@ Build in this order. Verify the statusLine and HTTP hooks live in a pty before r
 - [x] **Live-verify phone control** (2026-10-01): question → push → answered on
       the phone → PC continued. Still open: permission prompt from the phone; ~20
       sessions at once; whether close-together pushes get dropped (seen once).
-- [ ] **Worktree tabs** (L) — spawn an agent into `repo/.claude/worktrees/<name>`
-      (Claude Desktop-style isolation) with a branch picker.
+- [x] **Worktree tabs** (0.6.36) — ▾ → New agent in a worktree:
+      `repo/.claude/worktrees/<name>` on `vs/<name>`, removed on close when clean.
+- [ ] **Git pane for the active worktree** (M) — Changes/History of the worktree
+      tab you're looking at, not only the main tree.
+- [ ] **Per-workspace worktree setup command** (S) — run after a worktree is made,
+      e.g. copy `.env` or `npm ci`, so the agent doesn't start without deps.
+- [ ] File tree and Ctrl+P index walk into `.claude/worktrees/` (every worktree's
+      files show up twice). Hide that folder in the tree/index/watcher.
 - [ ] **Cross-workspace overview** (M) — small always-on-top window or launcher view:
       all agents across all repos, live status (idle/thinking/waiting-on-permission),
       click to focus. Needs a status signal from claude (OSC title or output heuristics).

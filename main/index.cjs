@@ -25,6 +25,7 @@ const status = require('./status.cjs');
 const gitstatus = require('./gitstatus.cjs');
 const gitdiff = require('./gitdiff.cjs');
 const githistory = require('./githistory.cjs');
+const worktrees = require('./worktrees.cjs');
 const fsops = require('./fsops.cjs');
 const srcstate = require('./srcstate.cjs');
 const treewatch = require('./treewatch.cjs');
@@ -962,7 +963,36 @@ function initIpc() {
     launchWorkspaceProcess(wsId);
     return { ok: true };
   });
-  ipcMain.handle('sessions:check', (e, wsId, sessionId) => sessions.sessionExists(wsId, sessionId));
+  ipcMain.handle('sessions:check', (e, wsId, sessionId, cwd) => sessions.sessionExists(wsId, sessionId, typeof cwd === 'string' ? cwd : null));
+  // worktree tabs (main/worktrees.cjs): the repo always comes from the SENDER's
+  // own workspace, never from the renderer
+  const wtRepo = (e, wsId) => {
+    const win = BrowserWindow.fromWebContents(e.sender);
+    const self = win && winInfo.get(win.id)?.wsId;
+    const ws = self && self === wsId && workspaces.get(self);
+    return ws ? ws.repoPath : null;
+  };
+  ipcMain.handle('wt:create', async (e, wsId, name) => {
+    const repo = wtRepo(e, wsId);
+    if (!repo) return { ok: false, reason: 'no workspace' };
+    const r = await worktrees.create(repo, String(name || 'agent'));
+    logger.info(`worktree create: ws=${wsId} ${r.ok ? `${r.path} branch=${r.branch} base=${r.base}` : 'failed: ' + r.reason}`);
+    if (r.ok) gitstatus.bust(repo);
+    return r;
+  });
+  ipcMain.handle('wt:list', async (e, wsId) => {
+    const repo = wtRepo(e, wsId);
+    return repo ? worktrees.list(repo) : null;
+  });
+  ipcMain.handle('wt:remove', async (e, wsId, name, opts) => {
+    const repo = wtRepo(e, wsId);
+    if (!repo) return { ok: false, reason: 'no workspace' };
+    const discard = Boolean(opts && opts.discard);
+    const r = await worktrees.remove(repo, String(name || ''), { discard });
+    logger.info(`worktree remove: ws=${wsId} ${name}${discard ? ' (discard)' : ''} -> ${r.ok ? 'removed' + (r.branchKept ? ', branch kept' : '') : (r.kept ? 'kept: ' : 'failed: ') + r.reason}`);
+    if (r.ok) gitstatus.bust(repo);
+    return r;
+  });
   // away mode (machine-wide, presence.cjs): the renderer may only toggle the
   // manual modes; 'idle' is decided by lock/idle detection
   ipcMain.handle('presence:get', () => presence.get());
@@ -1091,7 +1121,7 @@ function initIpc() {
     const r = attention.feedState(attnOf(termId), feed);
     if (r.apply) applyStatus(wsId, termId, r.apply, r.notify, 'feed');
     // exact session tracking: the feed's session_id IS this tab's conversation
-    if (feed.sessionId && sessions.pinFromFeed(wsId, termId, feed.sessionId)) {
+    if (feed.sessionId && sessions.pinFromFeed(wsId, termId, feed.sessionId, feed.transcriptPath)) {
       logger.info(`session via feed: term=${termId} session=${feed.sessionId}`);
       for (const win of workspaceWindowsFor(wsId)) {
         if (!win.isDestroyed()) win.webContents.send('session:found', termId, feed.sessionId);

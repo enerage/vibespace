@@ -57,6 +57,13 @@ export function pillText(f, baseStatus) {
   return `${done}/${items.length}`;
 }
 
+// worktree tab line: `⎇ vs/agent-5 · from main` (a detached base shows its short sha)
+export function wtText(wt) {
+  if (!wt || !wt.branch) return '';
+  const base = /^[0-9a-f]{40}$/i.test(wt.base || '') ? wt.base.slice(0, 7) : wt.base;
+  return `⎇ ${wt.branch}` + (base ? ` · from ${base}` : '');
+}
+
 const reasonText = (f) => (f && f.reason ? f.reason.replace(/^is /, '') : '');
 
 // extra light class on top of the base status: failed regardless of base (a
@@ -167,6 +174,7 @@ export function refresh() {
   stripEl.className = 'st-' + line.cls;
   stripEl.innerHTML = '';
   stripEl.append(el('span', 'ts-dot'), el('span', 'ts-name', tab.name), el('span', 'ts-sep', '·'));
+  if (tab.worktree) stripEl.append(el('span', 'ts-wt', wtText(tab.worktree)), el('span', 'ts-sep', '·'));
   const text = el('span', 'ts-text', line.text);
   stripEl.append(text);
   if (line.time) stripEl.append(el('span', 'ts-sep', '·'), el('span', 'ts-time', line.time));
@@ -239,6 +247,7 @@ function renderPeek() {
   const head = el('div', 'fu-head');
   head.append(el('span', 'fu-dot st-' + line.cls), el('span', 'fu-name', tab.name), el('span', 'fu-state', line.text + (line.time ? ` · ${line.time}` : '')));
   peekEl.append(head);
+  if (tab.worktree) peekEl.append(el('div', 'fu-wt', wtText(tab.worktree)));
   const meta = el('div', 'fu-meta');
   if (f.model && f.model.name) meta.append(el('span', '', f.model.name));
   if (f.context && typeof f.context.pct === 'number') meta.append(ctxBar(f.context));

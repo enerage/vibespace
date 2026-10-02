@@ -2,6 +2,42 @@
 
 Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 
+## [0.6.36] — 2026-10-02
+
+### Added
+- **Worktree tabs: an agent in its own git worktree**, so parallel agents never
+  touch each other's files. The **+ Claude** button has a **▾** caret: *New
+  agent*, *New agent in a worktree*, *Resume a conversation…*. A worktree agent
+  gets `<repo>\.claude\worktrees\<name>` on branch `vs/<name>`, made from the
+  repo's current HEAD (a dirty main tree is fine: its uncommitted changes stay
+  there). The tab's shell runs in the worktree too. A toast says what isn't
+  shared (node_modules, .env, build output).
+- Worktree tabs show a **⎇** badge. The tab tooltip, the activity strip, the
+  peek card and the board card show `⎇ vs/agent-5 · from main`. The worktree is
+  saved with the tab and restored into it. If its folder is gone, the tab
+  opens as a plain terminal at the repo root with a toast, and never resumes
+  into the wrong folder.
+- Tab menu on a worktree tab: **Ask agent to merge back** (only while the agent
+  is idle; it sends the agent a commit-and-merge prompt, so git writes stay with
+  agents) and **Open worktree folder in Explorer**.
+- **Closing a worktree tab** removes the worktree and its branch when nothing
+  would be lost ("worktree agent-5 removed (nothing unmerged)"). Otherwise it
+  keeps them and says why ("kept: 2 commits not merged · 3 uncommitted files").
+  Kept worktrees are listed under **▾ → Worktrees (n)**: *Open agent here*
+  (Claude's resume picker in that folder), *Remove* (only when clean), and
+  *Remove and discard…* (a confirm box lists exactly what is lost).
+- `.claude/worktrees/` is ignored locally through `.git/info/exclude` (never
+  `.gitignore`), so the main tree's git status stays clean.
+- Session tracking follows worktree tabs: the feed's `transcript_path` pins the
+  conversation even though it lives in the worktree's own `~/.claude/projects`
+  dir, and the restore check looks there too.
+- Verified live in a throwaway home and repo, with a real Haiku claude: the
+  caret menu opened a ⎇ tab in the worktree with real mouse clicks; the feed
+  pinned the session from the worktree's project dir; a restart restored the
+  tab into the worktree and resumed the conversation; closing it removed the
+  worktree and branch; a second worktree with a commit was kept with its
+  reason, then *Remove and discard…* removed it after the confirm. Smoke 90/90.
+
 ## [0.6.35] — 2026-10-02
 
 ### Added

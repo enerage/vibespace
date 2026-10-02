@@ -45,11 +45,14 @@ function stop(wsId) {
   active.delete(wsId);
 }
 
-function trackClaudeStart(wsId, termId, { picker = false } = {}) {
+// offRepo: the tab's cwd is not the repo root (a worktree tab). Its transcript
+// lives in munged(<cwd>), so the timing heuristic (repo dir only) must never
+// hand it a repo-dir file; the feed pins it instead.
+function trackClaudeStart(wsId, termId, { picker = false, offRepo = false } = {}) {
   const state = active.get(wsId);
   if (!state) return;
   const prev = state.terms.get(termId) || {};
-  state.terms.set(termId, { startedAt: Date.now(), sessionId: prev.sessionId, picker, feed: prev.feed });
+  state.terms.set(termId, { startedAt: Date.now(), sessionId: prev.sessionId, picker, feed: prev.feed, offRepo: Boolean(offRepo) });
   scheduleScan(wsId);
 }
 
@@ -79,12 +82,20 @@ function pinSession(wsId, termId, sessionId) {
 // so the timing heuristic below never reassigns the term. Only pinned once the
 // transcript exists (claude writes it on the first message), so a restore never
 // tries to resume a conversation that was never saved. Returns true on change.
-function pinFromFeed(wsId, termId, sessionId) {
+// transcriptPath (the feed's transcript_path) counts wherever it lives: a
+// worktree tab's transcript sits in munged(<worktree>), not the repo's dir.
+function transcriptMatches(sessionId, transcriptPath) {
+  if (typeof transcriptPath !== 'string' || !transcriptPath) return false;
+  if (path.basename(transcriptPath).toLowerCase() !== `${sessionId}.jsonl`.toLowerCase()) return false; // stale path after /clear
+  try { return fs.existsSync(transcriptPath); } catch { return false; }
+}
+
+function pinFromFeed(wsId, termId, sessionId, transcriptPath = null) {
   const state = active.get(wsId);
   if (!state || !sessionId) return false;
   const prev = state.terms.get(termId) || { startedAt: 0 };
   if (prev.sessionId === sessionId && prev.feed) return false;
-  if (!sessionExists(wsId, sessionId)) return false; // not written yet — retried on the next tick
+  if (!sessionExists(wsId, sessionId) && !transcriptMatches(sessionId, transcriptPath)) return false; // not written yet — retried on the next tick
   state.terms.set(termId, { ...prev, startedAt: prev.startedAt || Date.now(), sessionId, picker: false, feed: true });
   return prev.sessionId !== sessionId;
 }
@@ -95,14 +106,20 @@ function getSession(wsId, termId) {
 
 // Before auto-typing `claude --resume <id>` on restore: does the session file still
 // exist? A dead id must open the interactive picker, not silently error out.
-function sessionExists(wsId, sessionId) {
+// cwd: the tab's folder; when it isn't the repo root (worktree tab) its own
+// project dir is checked too.
+function sessionExists(wsId, sessionId, cwd = null) {
   const state = active.get(wsId);
-  if (!state || !state.dir || !sessionId) return false;
-  try {
-    return fs.existsSync(path.join(state.dir, `${sessionId}.jsonl`));
-  } catch {
-    return false;
+  if (!state || !sessionId) return false;
+  const dirs = [state.dir];
+  if (cwd && path.resolve(cwd).toLowerCase() !== path.resolve(state.repoPath).toLowerCase()) dirs.push(U.resolveClaudeProjectDir(cwd));
+  for (const dir of dirs) {
+    if (!dir) continue;
+    try {
+      if (fs.existsSync(path.join(dir, `${sessionId}.jsonl`))) return true;
+    } catch {}
   }
+  return false;
 }
 
 function scheduleScan(wsId) {
@@ -144,7 +161,7 @@ function scan(wsId) {
 
   const terms = [...state.terms.entries()]
     .map(([termId, t]) => ({ termId, ...t }))
-    .filter(t => t.startedAt)
+    .filter(t => t.startedAt && !t.offRepo) // worktree tabs: feed only (their files aren't here)
     .sort((a, b) => a.startedAt - b.startedAt);
   dbg(`[sessions] tracked terms=${terms.length} -> ${terms.map(t => `${t.termId}@${t.startedAt}${t.sessionId ? '+sess' : ''}`).join(', ')}`);
   if (terms.length === 0) return;

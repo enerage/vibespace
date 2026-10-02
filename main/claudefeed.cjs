@@ -76,7 +76,7 @@ function readLimits(rl) {
 function emptyState() {
   return {
     model: null, context: null, cost: null, linesAdded: 0, linesRemoved: 0,
-    sessionId: null, sessionName: null, promptCache: null, rateLimits: null,
+    sessionId: null, transcriptPath: null, sessionName: null, promptCache: null, rateLimits: null,
     nowDoing: null, attention: null, lastMessage: null, turnStartedAt: null, turnEndedAt: null,
     failure: null, subagents: 0, compacting: null, todos: null, tasks: [],
   };
@@ -127,10 +127,14 @@ function failureOf(body, now) {
 // Returns the SAME object when nothing changed, so callers can skip the push.
 // Every hook body carries session_id too: it is the exact termId → session map
 // (index.cjs pins it — /clear, /resume and the picker all switch it).
+// transcript_path rides along: a worktree tab's .jsonl is outside the repo's dir.
 function reduce(state, kind, event, body, now = Date.now()) {
   const next = reduceCore(state, kind, event, body, now);
-  if (kind === 'hook' && body && typeof body.session_id === 'string' && body.session_id && next.sessionId !== body.session_id) {
-    return { ...next, sessionId: body.session_id };
+  if (kind !== 'hook' || !body) return next;
+  const sid = typeof body.session_id === 'string' && body.session_id ? body.session_id : null;
+  const tp = typeof body.transcript_path === 'string' && body.transcript_path ? body.transcript_path : null;
+  if ((sid && next.sessionId !== sid) || (tp && next.transcriptPath !== tp)) {
+    return { ...next, sessionId: sid || next.sessionId, transcriptPath: tp || next.transcriptPath };
   }
   return next;
 }
@@ -157,6 +161,7 @@ function reduceCore(state, kind, event, body, now) {
       linesAdded: num(cost.total_lines_added) || 0,
       linesRemoved: num(cost.total_lines_removed) || 0,
       sessionId: body.session_id || s.sessionId,
+      transcriptPath: (typeof body.transcript_path === 'string' && body.transcript_path) || s.transcriptPath || null,
       sessionName: body.session_name || null,
       promptCache: pc && typeof pc === 'object'
         ? { warm: Boolean(pc.warm), ttl: pc.ttl || null, expiresAt: num(pc.expires_at), hitRatio: num(pc.hit_ratio) }
