@@ -49,7 +49,7 @@ VibeSpace is that place — built for people who live in agents all day.
 | 💬 **Session tracking** | terminals ↔ conversations are paired automatically; dead sessions reopen Claude's interactive resume picker |
 | ↻ **Smart restart button** | appears only when VibeSpace's own code changed or Claude Code auto-updated (the label says which); restarts at once when no agent is busy (a manual "Restart this workspace" is always in ⚙ Preferences) — restart on your schedule, never mid-agent-run |
 | 🏷 **Logos** | click the logo to give the workspace its own icon; pins refresh automatically |
-| 📋 **Windows integration** | Explorer right-click → "Open with VibeSpace", per-workspace taskbar pins, taskbar badges |
+| 📋 **Windows integration** | Explorer right-click → "Open with VibeSpace"; tree right-click → Open / Reveal in File Explorer; per-workspace taskbar pins, taskbar badges |
 
 ## Install
 

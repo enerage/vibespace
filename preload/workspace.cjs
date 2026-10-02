@@ -24,6 +24,7 @@ contextBridge.exposeInMainWorld('vs', {
   gitBranch: () => ipcRenderer.invoke('git:branch'),
   dropPath: (file) => { try { return webUtils.getPathForFile(file); } catch { return null; } },
   reveal: (file) => ipcRenderer.invoke('fs:reveal', file),
+  openFolder: (dir) => ipcRenderer.invoke('fs:openFolder', dir),
 
   ptyCreate: (opts) => ipcRenderer.invoke('pty:create', opts),
   ptyList: () => ipcRenderer.invoke('pty:list'),

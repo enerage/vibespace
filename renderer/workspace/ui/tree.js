@@ -54,6 +54,8 @@ export function init(root, onOpen, savedExpanded, ops = {}) {
       showCtxMenu(ev.clientX, ev.clientY, [
         { label: 'New file', run: () => newFileIn(rootPath) },
         { label: 'New folder', run: () => newFolderIn(rootPath) },
+        { sep: true },
+        { label: 'Open in File Explorer', run: () => openFolder(rootPath) },
       ]);
       return;
     }
@@ -64,7 +66,10 @@ export function init(root, onOpen, savedExpanded, ops = {}) {
       const items = [
         { label: 'New file here', run: () => newFileIn(absOf(rel)) },
         { label: 'New folder here', run: () => newFolderIn(absOf(rel)) },
+        { sep: true },
+        { label: 'Open in File Explorer', run: () => openFolder(absOf(rel)) },
       ];
+      if (rel) items.push({ label: 'Reveal in File Explorer', run: () => vs.reveal(absOf(rel)) });
       if (rel) { // the repo root itself is never renamed or deleted
         if (hooks.onHistory) items.push({ label: 'Git history', run: () => hooks.onHistory(rel, true) });
         items.push({ label: 'Rename', run: () => startRename(rel) });
@@ -74,6 +79,8 @@ export function init(root, onOpen, savedExpanded, ops = {}) {
     } else {
       showCtxMenu(ev.clientX, ev.clientY, [
         { label: 'New file', run: () => newFileIn(absOf(parentRelOf(rel))) },
+        { sep: true },
+        { label: 'Reveal in File Explorer', run: () => vs.reveal(absOf(rel)) },
         ...(hooks.onHistory ? [{ label: 'Git history', run: () => hooks.onHistory(rel, false) }] : []),
         { label: 'Rename', run: () => startRename(rel) },
         { label: 'Delete', danger: true, run: () => startDelete(rel, false) },
@@ -255,6 +262,10 @@ function escape(s) {
 }
 
 // ---------- context menu + file operations ----------
+
+function openFolder(abs) {
+  vs.openFolder(abs).catch((e) => toast('Could not open folder: ' + (e.message || e), 'err'));
+}
 
 // rows store repo-relative paths (forward slashes); join with '/' for fs calls
 // (Node accepts that on Windows). expanded keys, though, come from fsList

@@ -869,7 +869,20 @@ function initIpc() {
     gitdiff.bust(root);
     return res;
   });
-  ipcMain.handle('fs:reveal', (e, file) => { shell.showItemInFolder(file); return true; });
+  // path.normalize: the tree builds 'D:\repo/sub/file' and Explorer wants backslashes
+  ipcMain.handle('fs:reveal', (e, file) => { shell.showItemInFolder(path.normalize(file)); return true; });
+  // Open a folder itself in Explorer. Jailed to the workspace (root included) and
+  // folders only: shell.openPath on a file would RUN it.
+  ipcMain.handle('fs:openFolder', async (e, dir) => {
+    const root = repoFor(e);
+    if (!root) throw new Error('no workspace');
+    const r = path.resolve(dir);
+    const inside = r.toLowerCase() === path.resolve(root).toLowerCase() || U.jailed(root, r);
+    if (!inside || !fs.statSync(r).isDirectory()) throw new Error('not a workspace folder');
+    const err = await shell.openPath(r);
+    if (err) throw new Error(err);
+    return true;
+  });
 
   // Ctrl+P file finder: recursive walk honoring the same ignore rules as the tree.
   // Bounded (8000 files, depth 12) so huge repos can't stall the main process.

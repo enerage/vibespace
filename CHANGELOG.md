@@ -2,6 +2,18 @@
 
 Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 
+## [0.6.33] — 2026-10-02
+
+### Added
+- **File Explorer from the tree's right-click menu.** On a file: **Reveal in
+  File Explorer** (opens its folder with the file selected). On a folder:
+  **Open in File Explorer** (opens the folder itself) and **Reveal in File
+  Explorer**. On empty space in the tree: **Open in File Explorer** for the repo
+  root. Opening is limited to folders inside the workspace, since Windows
+  would *run* a file handed to it this way.
+- Verified live with real right-clicks: each Explorer window opened at the right
+  place with the right item selected. Smoke 83/83.
+
 ## [0.6.32] — 2026-10-01
 
 ### Changed
