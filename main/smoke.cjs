@@ -225,6 +225,23 @@ async function runSmoke() {
         && w1.length === 1 && w1[0].includes('"B"') && w1[0].includes('live claude feed') && w2.length === 0,
         JSON.stringify({ open, pin, gone, w1, w2 }));
     }
+    // typing-lag log (lagmon): echo timer, threshold, throttle, key filter
+    {
+      const lm = require('./lagmon.cjs');
+      const t0 = 2_000_000;
+      lm.noteInput('lagT', 'x', t0);
+      lm.noteInput('lagT', 'y', t0 + 100); // still pending: first key wins
+      lm.noteOutput('lagT', t0 + 1300);
+      const fast = lm.report({ kind: 'typing', termId: 'lagT', name: 'A', ms: 120 }, t0 + 1400);
+      const slow = lm.report({ kind: 'typing', termId: 'lagT', name: 'A', ms: 1400 }, t0 + 1400);
+      const again = lm.report({ kind: 'typing', termId: 'lagT', name: 'A', ms: 900 }, t0 + 5000);
+      const later = lm.report({ kind: 'typing', termId: 'lagT', name: 'A', ms: 900 }, t0 + 20000);
+      lm.forget('lagT');
+      check('typing-lag log: echo time, threshold, throttle',
+        fast === null && /typing "A" \(lagT\) key→screen 1400ms · claude\/pty echo 1300ms/.test(slow || '') && again === null
+        && /\(\+1 more since last line\)/.test(later || '') && lm._isKey('a') && lm._isKey('\x7f') && !lm._isKey('\x1b[A') && !lm._isKey('paste'),
+        JSON.stringify({ fast, slow, again, later }));
+    }
     // HTTP-hook → status word (replaces the blocking Git Bash echo hooks)
     const w = statusMod.wordForHook;
     check('status word from HTTP hooks', w('UserPromptSubmit', {}) === 'working' && w('PreToolUse', { tool_name: 'Bash' }) === 'working'

@@ -56,6 +56,27 @@ const TERM_OPTS = {
   allowProposedApi: true,
 };
 
+// Typing-lag evidence (main/lagmon.cjs logs it with CPU load + echo time).
+// A single printable key or backspace; pastes and escape sequences don't echo 1:1.
+const LAG_MS = 500;
+const isTypedKey = (d) => d.length === 1 && (d >= ' ' || d === '\x7f' || d === '\b');
+
+// A 250 ms tick that arrives late = this renderer was blocked (xterm parsing,
+// Monaco, a long task). Only while the window is focused and visible: Chromium
+// throttles timers in background windows, which would read as false stalls.
+function watchRendererStalls() {
+  let expect = performance.now() + 250;
+  const rearm = () => { expect = performance.now() + 250; }; // first tick after un-hiding is late by design
+  document.addEventListener('visibilitychange', rearm);
+  window.addEventListener('focus', rearm);
+  setInterval(() => {
+    const now = performance.now();
+    const late = now - expect;
+    expect = now + 250;
+    if (late >= LAG_MS && !document.hidden && document.hasFocus()) vs.lagReport({ kind: 'stall', ms: late });
+  }, 250);
+}
+
 export function init(opts) {
   wsId = opts.wsId;
   repoPath = opts.repoPath;
@@ -71,8 +92,20 @@ export function init(opts) {
 
   vs.onPtyData((termId, chunk) => {
     const tab = tabs.get(termId);
-    if (tab) tab.term.write(chunk);
+    if (!tab) return;
+    const t0 = tab.lagT0;
+    if (t0 == null) { tab.term.write(chunk); return; }
+    // first output after a typed key: time key → parsed (+ next paint)
+    tab.lagT0 = null;
+    tab.term.write(chunk, () => {
+      const done = () => {
+        const ms = performance.now() - t0;
+        if (ms >= LAG_MS) vs.lagReport({ kind: 'typing', termId, name: tab.name, ms });
+      };
+      if (document.hidden) done(); else requestAnimationFrame(done);
+    });
   });
+  watchRendererStalls();
 
   vs.onPtyExit((termId) => {
     const tab = tabs.get(termId);
@@ -483,6 +516,7 @@ export function createTab({ name = 'agent', cwd = repoPath, claude = false, resu
   term.onData(d => {
     // typed input marks "user may have a half-typed prompt" for syncClaudeName
     if (!/^\x1b\[(M|<|I$|O$)/.test(d)) tab.lastInputAt = Date.now(); // not mouse/focus reports
+    if (tab.lagT0 == null && isTypedKey(d)) tab.lagT0 = performance.now(); // typing-lag log
     vs.ptyWrite(id, d);
   });
   wireClipboard(term);

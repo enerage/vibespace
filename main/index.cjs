@@ -19,6 +19,7 @@ const contextmenu = require('./contextmenu.cjs');
 const ptyhost = require('./ptyhost.cjs');
 const sessions = require('./sessions.cjs');
 const tablog = require('./tablog.cjs');
+const lagmon = require('./lagmon.cjs');
 const notifyprefs = require('./notifyprefs.cjs');
 const status = require('./status.cjs');
 const gitstatus = require('./gitstatus.cjs');
@@ -921,7 +922,9 @@ function initIpc() {
     if (live.length) logger.info(`pty attach candidates: ${live.map(p => p.termId).join(', ')}`);
     return live;
   });
-  ipcMain.on('pty:write', (e, termId, data) => ptyhost.write(termId, data));
+  ipcMain.on('pty:write', (e, termId, data) => { lagmon.noteInput(termId, data); ptyhost.write(termId, data); });
+  // typing-lag evidence from the renderer (key→screen, blocked renderer); see lagmon.cjs
+  ipcMain.on('diag:lag', (e, r) => { const line = lagmon.report(r); if (line) logger.warn(line); });
   ipcMain.on('pty:resize', (e, termId, cols, rows) => ptyhost.resize(termId, cols, rows));
   ipcMain.on('pty:kill', (e, termId) => ptyhost.kill(termId));
   ipcMain.on('pty:claudeStarted', (e, wsId, termId, opts) => {
@@ -1022,12 +1025,15 @@ function initIpc() {
   });
 
   // events main -> renderer
+  lagmon.start((line) => logger.warn(line));
   ptyhost.onData((termId, chunk) => {
+    lagmon.noteOutput(termId);
     for (const win of BrowserWindow.getAllWindows()) {
       if (!win.isDestroyed()) win.webContents.send('pty:data', termId, chunk);
     }
   });
   ptyhost.onExit((termId) => {
+    lagmon.forget(termId);
     termStatus.delete(termId);
     attnTerms.delete(termId);
     termAccount.delete(termId); // ptyhost.create clears the account file too

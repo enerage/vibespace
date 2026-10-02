@@ -29,6 +29,7 @@ contextBridge.exposeInMainWorld('vs', {
   ptyCreate: (opts) => ipcRenderer.invoke('pty:create', opts),
   ptyList: () => ipcRenderer.invoke('pty:list'),
   ptyWrite: (termId, data) => ipcRenderer.send('pty:write', termId, data),
+  lagReport: (r) => ipcRenderer.send('diag:lag', r),
   ptyResize: (termId, cols, rows) => ipcRenderer.send('pty:resize', termId, cols, rows),
   ptyKill: (termId) => ipcRenderer.send('pty:kill', termId),
   claudeStarted: (wsId, termId, opts) => ipcRenderer.send('pty:claudeStarted', wsId, termId, opts),

@@ -2,6 +2,20 @@
 
 Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 
+## [0.6.35] — 2026-10-02
+
+### Added
+- **Typing-lag log.** When a typed key takes over 0.5 s to show up, the
+  instance log gets a `lag:` line saying where the time went: key→screen total,
+  how long claude/the shell took to echo it, whole-machine CPU %, and whether
+  VibeSpace's main process was blocked. A blocked window (renderer) and a
+  blocked main process get their own lines. At most one line per tab per 15 s.
+  Prompted by "I type and nothing shows": at that moment all 16 cores were at
+  100 % from agents' vitest and tsc runs in other repos, and VibeSpace itself
+  used about 0.2 of a core. Verified live: a key typed into a busy shell logged
+  `key→screen 2274ms · claude/pty echo 2269ms · cpu 100% · main loop ok`.
+  Smoke 84/84.
+
 ## [0.6.34] — 2026-10-02
 
 ### Fixed

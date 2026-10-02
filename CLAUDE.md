@@ -122,7 +122,7 @@ Key facts encoded in `main/sessions.cjs`:
 
 ## Developing VibeSpace
 
-- `npm run smoke` — 83 self-tests (as of 0.6.32) incl. pty echo and live session discovery. Run it after
+- `npm run smoke` — 84 self-tests (as of 0.6.35) incl. pty echo and live session discovery. Run it after
   touching main-process code, **from a normal shell**: inside a Claude pty the stripped
   PATH and nested ConPTY break the pty test (`powershell.exe` "File not found" /
   AttachConsole) — prepend System32 to PATH and give it its own console, or just use a
@@ -145,6 +145,13 @@ Key facts encoded in `main/sessions.cjs`:
   into one <400 ms burst (devwatch debounce), warn the user first, and expect one
   bounce — resume is verified working. Root-level files (CHANGELOG.md, TODO.md,
   RESEARCH-HOTRELOAD.md) are not watched.
+- **"Typing is laggy" → grep the log for `lag:`** (`main/lagmon.cjs`, 0.6.35).
+  `key→screen` ≈ `claude/pty echo` + high `cpu` = the machine (agents' test
+  runs/builds) or claude itself; a big gap between the two, `renderer
+  blocked` or `main loop stalled` = VibeSpace. Only single typed keys are
+  timed (pastes and escape sequences don't echo 1:1). The renderer stall
+  watch skips hidden/unfocused windows (Chromium throttles their timers) and
+  main skips its first 30 s (boot blocks by design).
 - Logs: `~/.vibespace/logs/<instance>.log` (dev-watch lines, pty spawns, session
   captures, renderer errors, term-status transitions). Renderer `console.warn/error`
   reach the log via `console-message`. Electron 35+ passes that event's `level` as a
