@@ -2,6 +2,18 @@
 
 Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 
+## [0.6.34] — 2026-10-02
+
+### Fixed
+- **Mixed-up characters in Claude Code after an emoji.** xterm counted emoji
+  such as 😀 ✅ as 1 cell wide, while Claude Code and Windows' ConPTY count
+  them as 2. Every emoji shifted the rest of its row by one column, so Claude's
+  partial redraws landed in the wrong cells and left scrambled leftovers. Every
+  terminal now loads xterm's Unicode 11 width table (`@xterm/addon-unicode11`,
+  the same as VS Code's default). Verified live: rows with emoji now line up
+  with plain-text rows. Research and the other, less likely causes are in
+  RESEARCH-TERMINAL-GARBLE.md.
+
 ## [0.6.33] — 2026-10-02
 
 ### Added

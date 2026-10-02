@@ -427,6 +427,13 @@ export function createTab({ name = 'agent', cwd = repoPath, claude = false, resu
   const term = new window.Terminal({ ...TERM_OPTS, theme: termTheme() });
   const fit = new window.FitAddon.FitAddon();
   term.loadAddon(fit);
+  // Unicode 11 widths: xterm's default (v6) counts emoji like 😀 ✅ as 1 cell,
+  // ConPTY and Claude's Ink count 2, so every emoji shifted the rest of its row
+  // and redraws left mixed-up characters behind.
+  const Uni11 = window.Unicode11Addon?.Unicode11Addon;
+  if (Uni11) {
+    try { term.loadAddon(new Uni11()); term.unicode.activeVersion = '11'; } catch {}
+  }
   term.open(host);
 
   // Ctrl+F search addon (per terminal); the find bar drives the ACTIVE tab

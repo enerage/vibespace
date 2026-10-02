@@ -293,6 +293,13 @@ Key facts encoded in `main/sessions.cjs`:
   - `document.hidden` is true for OCCLUDED windows too, not just minimized
     ones. Pollers that skip when hidden must still run once on start and on
     `visibilitychange`.
+- **Terminal widths must match Claude's.** Every xterm loads
+  `@xterm/addon-unicode11` and sets `unicode.activeVersion = '11'`. The default
+  Unicode 6 table counts emoji as 1 cell; Claude and ConPTY count 2, and the
+  mismatch shows up as "mixed-up characters" after any emoji (0.6.34). Test
+  emoji output with node, not `Write-Host`: Windows PowerShell 5.1 drops emoji
+  from its own output. More suspects (in-box ConPTY strips DEC 2026 sync
+  output; `useConptyDll` passes it through) are in RESEARCH-TERMINAL-GARBLE.md.
 - **Never use `window.confirm/alert/prompt` in a workspace window.** On Windows
   Electron the window gets no real focus back after the native box closes.
   Keydown still fires, but keypress/beforeinput don't until the window is
