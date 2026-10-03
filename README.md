@@ -41,6 +41,8 @@ VibeSpace is that place — built for people who live in agents all day.
 | 🔵 **Agent status lights** | amber = working, red pulse = waiting for you, green = finished — driven by Claude Code hooks (`--settings` injection, merges with your own) |
 | 🔔 **Attention toasts** | agent needs your answer or a turn failed → Windows notification (you pick which kinds in Preferences; "finished" is off by default); click focuses window *and* the exact tab |
 | 📱 **Phone control + Away** | every agent shows up in the Claude phone app (Claude Code Remote Control, named "workspace · tab", follows tab renames): read, answer questions, approve, send follow-ups. The 📱 At PC / Away button decides when your phone buzzes: away = screen locked, 10 min idle or set by hand. Opt out per workspace in Preferences |
+| ➕ **+ Claude ▾** | the tab bar's one "new" button: click = new agent; ▾ or right-click = *New agent*, *New agent in a worktree*, *New terminal*, then **Resume**: parked agents, *All conversations…* (Claude's picker), kept worktrees |
+| 🅿 **Parked agents** | tab right-click → Park stops an agent but keeps its conversation, worktree and last reply on a shelf (🅿 n chip, hover for the last reply); click to resume it later with `claude --resume`. Never auto-resumed on restart |
 | ⌨️ **Ctrl+Shift+U** | jump to the next tab that needs you |
 | ▦ **Agent board** (Ctrl+Shift+B) | every agent as a card: Needs you / Working / Done, with context, cost, tasks and a quick-reply box; other open workspaces listed below |
 | 🌲 **Git-colored tree** | modified / added / untracked / deleted files and folders, refreshed live |

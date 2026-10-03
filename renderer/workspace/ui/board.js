@@ -1,6 +1,7 @@
-import { $, el } from './common.js';
+import { $, el, cardOnHover, hideCard } from './common.js';
 import { fmtElapsed, fmtAgo, taskItems, cacheChip, compactSoon, wtText } from './feedui.js';
 import * as terms from './terms.js';
+import { cardFor as parkedCard, metaText as parkedMeta } from './parked.js';
 
 // Agent board (▦ / Ctrl+Shift+B): this window's agents as cards in columns —
 // Needs you · Working · Done · Other — plus a read-only "Other workspaces" strip
@@ -21,6 +22,8 @@ let others = [];
 let bgEl = null;
 let bgAgents = [];
 let bgTimer = null;
+let parkedEl = null;
+let parkedKey = null; // rebuilt only when the shelf changes (a hover card must survive ticks)
 
 const COLS = [
   ['needs', 'Needs you'],
@@ -193,6 +196,7 @@ function render() {
       try { c.input.setSelectionRange(sel[0], sel[1]); } catch {}
     }
   }
+  renderParked();
   renderOthers();
   // elapsed labels: 1 s while someone works, else 30 s
   clearTimeout(tickTimer);
@@ -203,6 +207,30 @@ function render() {
 function schedule() {
   if (!open || renderTimer) return;
   renderTimer = setTimeout(render, Math.max(0, 250 - (Date.now() - lastRender)));
+}
+
+// ---------- parked agents (ui/parked.js): click = unpark, hover = card ----------
+function renderParked() {
+  const list = terms.parkedList();
+  const key = list.map(e => `${e.id}:${e.name}`).join('|');
+  if (key === parkedKey) return;
+  parkedKey = key;
+  hideCard();
+  parkedEl.innerHTML = '';
+  parkedEl.classList.toggle('hidden', list.length === 0);
+  if (!list.length) return;
+  const row = el('div', 'bo-row bp-row');
+  row.append(el('span', 'bo-name', `Parked (${list.length})`));
+  const chips = el('span', 'bo-chips');
+  for (const e of list) {
+    const chip = el('span', 'bchip bp-chip');
+    chip.append(el('span', 'bp-glyph', '🅿'), el('span', 'bchip-name', e.name), el('span', 'bchip-why', parkedMeta(e)));
+    cardOnHover(chip, () => parkedCard(e), { place: 'above' });
+    chip.onclick = (ev) => { ev.stopPropagation(); hideCard(); terms.unparkAgent(e.id); close(); };
+    chips.append(chip);
+  }
+  row.append(chips);
+  parkedEl.append(row);
 }
 
 // ---------- other workspaces (read-only) ----------
@@ -319,7 +347,8 @@ export function init(opts) {
   }
   othersEl = el('div', 'board-others hidden');
   bgEl = el('div', 'board-others board-bg hidden');
-  root.append(head, colsEl, bgEl, othersEl);
+  parkedEl = el('div', 'board-others board-parked hidden');
+  root.append(head, colsEl, parkedEl, bgEl, othersEl);
 
   root.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); }

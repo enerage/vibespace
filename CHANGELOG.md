@@ -2,6 +2,39 @@
 
 Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 
+## [0.6.38] — 2026-10-03
+
+### Added
+- **Park an agent and bring it back later.** Tab right-click → **Park** stops
+  the agent and puts it on a shelf with its name, worktree, model and last
+  reply. Its memory, MCP servers and tab are freed; the conversation is kept.
+  **Unpark** opens it in a new tab with `claude --resume <id>` (about 5 s, and
+  Claude redraws the conversation). Park is greyed out until the agent has
+  saved a conversation ("Nothing saved yet: send a message first"). Parking a
+  working or waiting agent asks first; an idle one parks at once.
+- **🅿 n chip** after the tabs: hover or click it for the parked list. Hover an
+  entry for a card with the name, ⎇ branch, model, "parked 5 days ago" and the
+  last reply (scrollable). Click = unpark; ✕ = forget, with no confirm (the
+  conversation stays in Claude's own history and *All conversations…*).
+- Parked agents survive window close, ↻ Restart, a crash and a damaged
+  state.json (`.bak` restore), and are **never auto-resumed**: a restart keeps
+  them parked. A parked worktree agent keeps its worktree, and *Kept
+  worktrees* shows it as "🅿 parked as <name>" (click = unpark), not as an
+  orphan.
+- The agent board has a **Parked (n)** strip: click a chip to unpark, hover for
+  the same card.
+- The instance log's `tabs:` trail logs `parked` / `unparked` / `forgot` lines
+  and lists parked agents when a window opens.
+
+### Changed
+- **One "+ ▾" menu instead of three buttons.** The tab bar is now
+  `[+ Claude][▾]` and `▦ Board`. The menu: *New agent*, *New agent in a
+  worktree*, *New terminal*, then **Resume**: parked agents (newest first, 10,
+  then *More parked…*), *All conversations…* (Claude's picker, formerly
+  ↺ Resume) and *Kept worktrees (n)*. Right-click on + Claude opens the same
+  menu (it used to start the picker directly). The separate ↺ Resume and
+  + Terminal buttons are gone. Smoke 95/95. Takes effect after one ↻ Restart.
+
 ## [0.6.37] — 2026-10-02
 
 ### Fixed

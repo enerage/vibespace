@@ -13,10 +13,11 @@ let ws = null;
 let state = {};
 
 function persistNow() {
-  if (!ws) return;
+  if (!ws) return Promise.resolve(false);
   const termsRect = $('#terms-pane').getBoundingClientRect();
-  vs.saveState(wsId, {
+  return vs.saveState(wsId, {
     terminals: terms.snapshot(),
+    parked: terms.parkedSnapshot() || state.parked || [], // before terms.init: the saved shelf as is
     activeTerm: terms.activeTermId(),
     autoResume: $('#auto-resume').checked,
     phoneRemote: $('#phone-remote').checked,
@@ -378,6 +379,8 @@ async function main() {
     repoPath: ws.repoPath,
     openFile: (p, n, l) => viewer.openAt(p, n, l), // file:line links → preview
     savedTerminals: state.terminals,
+    savedParked: state.parked,
+    persistNow, // park: the entry is on disk before the agent is stopped
     autoResume: $('#auto-resume').checked,
     remote: () => $('#phone-remote').checked, // read at each launch: applies to new agents
     wsName: ws.name,

@@ -114,13 +114,17 @@ Build in this order. Verify the statusLine and HTTP hooks live in a pty before r
 - [x] Track claude started *manually* inside any tab (0.6.23): the shell's
       `claude` wrapper (ptyhost `CLAUDE_WRAPPER`) adds `--settings` + `--remote-control`,
       so the feed tracks it. Verified live with a hand-typed `claude --resume <id>`.
-- [ ] Optional: our own ↺ Resume picker (lists this repo's transcripts whatever
+- [ ] Optional: our own "All conversations…" picker (lists this repo's transcripts whatever
       the drive-letter case, resumes by id). Claude's picker hides lowercase-`d:\`
       conversations (anthropics/claude-code#90588); drop this if they fix it.
       2026-10-01: the existing 41 were repaired (CLAUDE.md, picker bullet). Only
       build this if new VS Code-started sessions keep hitting it.
 
 ## Multi-agent / multi-repo
+- [x] Parked agents + one "+ ▾" menu (0.6.38): Park stops an agent and keeps
+      its conversation on a shelf (🅿 chip, menu Resume section, board strip);
+      Unpark resumes it by id. ↺ Resume and + Terminal folded into the menu.
+- [ ] Named groups for parked agents (later): one shelf for now.
 - [ ] **Multi-subscription agents** (2026-10-01, RESEARCH-MULTISUB.md) — run tabs on
       several Max accounts + z.ai, switch a tab to another account when it hits its
       usage limit (`StopFailure rate_limit` → `--resume <id>` on the next profile).

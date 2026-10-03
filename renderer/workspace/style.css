@@ -807,3 +807,33 @@ body.dragging #split-v, body.dragging #split-h { background: color-mix(in srgb, 
 #term-strip .ts-wt { flex: none; color: var(--accent); white-space: nowrap; }
 .fu-pop .fu-wt { color: var(--accent); font-size: 11.5px; margin: -2px 0 6px; }
 .bc-wt { color: var(--accent); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* ---------- parked agents + the one "+ ▾" menu (0.6.38) ---------- */
+.ctx-section {
+  padding: 6px 10px 2px; font-size: 10.5px; font-weight: 600; letter-spacing: 0.5px;
+  text-transform: uppercase; color: var(--dim); cursor: default; user-select: none;
+}
+.ctx-item.rich { display: flex; align-items: center; gap: 10px; max-width: 360px; }
+.ctx-item.rich .ctx-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ctx-item.rich .ctx-meta { flex: none; margin-left: auto; color: var(--dim); font-size: 11.5px; }
+.ctx-item.rich .ctx-act {
+  flex: none; width: 18px; height: 18px; border-radius: 4px; margin-right: -4px;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--dim); font-size: 11px; opacity: 0.6;
+}
+.ctx-item.rich:hover .ctx-act { opacity: 1; }
+.ctx-item.rich .ctx-act:hover { background: var(--hover-strong); color: var(--text); }
+.hover-card { z-index: 320; }
+.hover-card .pk-card { width: 380px; max-width: 100%; }
+.pk-card .pk-glyph { flex: none; }
+.pk-card .pk-reply { max-height: calc(12 * 1.45em + 12px); }
+.parked-chip {
+  flex: none; display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 999px;
+  border: 1px solid var(--border); background: var(--panel-2); color: var(--dim);
+  font-size: 11.5px; cursor: pointer; white-space: nowrap; user-select: none;
+}
+.parked-chip:hover { color: var(--text); border-color: var(--accent); }
+.board-parked .bp-row { cursor: default; }
+.board-parked .bp-row:hover { background: transparent; }
+.bp-chip { cursor: pointer; }
+.bp-chip:hover { border-color: var(--accent); }
+.bp-glyph { flex: none; font-size: 11px; }

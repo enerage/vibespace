@@ -225,6 +225,74 @@ async function runSmoke() {
         && w1.length === 1 && w1[0].includes('"B"') && w1[0].includes('live claude feed') && w2.length === 0,
         JSON.stringify({ open, pin, gone, w1, w2 }));
     }
+    // parked agents: tablog shelf lines, main's state merge + the .bak round
+    // trip keep `parked`, restore never turns a parked entry into a tab
+    {
+      const tl = require('./tablog.cjs');
+      const P = (id, name, sid) => ({ id, name, claudeSessionId: sid, parkedAt: 1 });
+      const o = tl.diff('smkp', [{ termId: 'a', name: 'A', isClaude: true, claudeSessionId: 's1' }], 0, [P('p0', 'old', 's0')]);
+      const pk = tl.diff('smkp', [], 1, [P('p0', 'old', 's0'), P('p1', 'A', 's1')]);
+      const un = tl.diff('smkp', [{ termId: 'b', name: 'A', isClaude: true, claudeSessionId: 's1' }], 2, [P('p0', 'old', 's0')]);
+      const fg = tl.diff('smkp', [{ termId: 'b', name: 'A', isClaude: true, claudeSessionId: 's1' }], 3, []);
+      tl.forget('smkp');
+      check('tab log: parked / unparked / forgot lines + parked in the open snapshot',
+        o[0] === 'open: 1 tab, 1 parked' && o.includes('  parked "old" session=s0')
+        && pk.includes('parked "A" session=s1') && pk.some(l => l.startsWith('- "A"'))
+        && un.includes('unparked "A" session=s1') && fg.includes('forgot "old" session=s0'),
+        JSON.stringify({ o, pk, un, fg }));
+
+      const os = require('node:os');
+      const d = fs.mkdtempSync(path.join(os.tmpdir(), 'vibespace-park-'));
+      sessions.start('smk-park', d);
+      sessions.pinSession('smk-park', 't1', 'live-sid');
+      const shelf = [{ id: 'p1', name: 'agent-3', cwd: d, isClaude: true, claudeSessionId: 'parked-sid', worktree: null, account: null, parkedAt: 5, lastMessage: 'hi', model: 'Haiku' }];
+      const merged = sessions.enrichState('smk-park', { terminals: [{ termId: 't1', name: 'a1', claudeSessionId: null }], parked: shelf });
+      const kept = sessions.enrichState('smk-park', { terminals: [] }, shelf); // a snapshot without the key
+      const fresh = sessions.enrichState('smk-park', { terminals: [] }, null);
+      sessions.stop('smk-park');
+      const f = path.join(d, 'state.json');
+      U.writeJsonAtomic(f, merged);
+      U.writeJsonAtomic(f, { ...merged, terminals: [] });
+      fs.writeFileSync(f, Buffer.alloc(128)); // reboot damage → .bak
+      U.onCorruptJson(() => {});
+      const back = U.readJson(f, {});
+      U.onCorruptJson(null);
+      check('parked survives main\'s state merge + writeJsonAtomic/.bak round trip',
+        merged.terminals[0].claudeSessionId === 'live-sid' && JSON.stringify(merged.parked) === JSON.stringify(shelf)
+        && JSON.stringify(kept.parked) === JSON.stringify(shelf) && Array.isArray(fresh.parked) && fresh.parked.length === 0
+        && back.parked && back.parked[0].claudeSessionId === 'parked-sid' && back.parked[0].lastMessage === 'hi',
+        JSON.stringify({ merged: merged.parked, kept: kept.parked, back: back.parked }));
+
+      // the last reply of a transcript with no feed: last assistant TEXT, tail only
+      const tx = path.join(d, 'tx.jsonl');
+      fs.writeFileSync(tx, [
+        JSON.stringify({ type: 'assistant', message: { model: 'claude-haiku-4-5', content: [{ type: 'text', text: 'first reply' }] } }),
+        JSON.stringify({ type: 'user', message: { content: 'go on' } }),
+        JSON.stringify({ type: 'assistant', message: { model: 'claude-haiku-4-5', content: [{ type: 'text', text: 'PONG\nline two' }] } }),
+        JSON.stringify({ type: 'assistant', message: { model: 'claude-haiku-4-5', content: [{ type: 'tool_use', name: 'Bash', input: {} }] } }),
+        JSON.stringify({ type: 'assistant', isApiErrorMessage: true, message: { content: [{ type: 'text', text: 'API Error' }] } }),
+        '',
+      ].join('\n'));
+      const lr = sessions.lastReplyOf(tx);
+      check('parked: last reply from the transcript tail (skips tool-only + API error lines)',
+        lr && lr.text === 'PONG\nline two' && lr.model === 'claude-haiku-4-5', JSON.stringify(lr));
+
+      const pkm = await import(require('node:url').pathToFileURL(path.join(U.ROOT, 'renderer', 'workspace', 'ui', 'parked.js')).href);
+      const saved = [
+        { termId: 'a', name: 'agent-1', claudeSessionId: 'live' },
+        { termId: 'b', name: 'agent-3', claudeSessionId: 'parked-sid' }, // crash between save and kill
+        { termId: 'c', name: 'term-1', claudeSessionId: null },
+      ];
+      const plan = pkm.restorable(saved, [...shelf, { name: 'junk' }]).map(t => t.termId).join(',');
+      const norm = pkm.normalizeParked([{ id: 'x', name: 'old', claudeSessionId: 'o', parkedAt: 1 }, ...shelf, { claudeSessionId: 'o', parkedAt: 9 }, null, { name: 'no-sid' }]);
+      const names = [pkm.uniqueName('agent-3', ['agent-1']), pkm.uniqueName('agent-3', ['agent-3', 'agent-3-2'])];
+      const entry = pkm.makeEntry({ name: 'n', cwd: 'C:\\r', sessionId: 's', worktree: null, account: 'login' }, { lastMessage: 'x'.repeat(3000), model: 'Haiku', now: 7 });
+      check('parked: restore skips the shelf (never auto-resumed), normalize, -2 names, entry shape',
+        plan === 'a,c' && norm.map(e => e.name).join(',') === 'agent-3,old' && names.join(',') === 'agent-3,agent-3-3'
+        && entry.claudeSessionId === 's' && entry.parkedAt === 7 && entry.lastMessage.length === 2000 && entry.isClaude === true,
+        JSON.stringify({ plan, norm: norm.map(e => e.name), names, len: entry.lastMessage.length }));
+      try { fs.rmSync(d, { recursive: true, force: true }); } catch {}
+    }
     // typing-lag log (lagmon): echo timer, threshold, throttle, key filter
     {
       const lm = require('./lagmon.cjs');

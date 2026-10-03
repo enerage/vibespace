@@ -281,19 +281,16 @@ function loadState(wsId) {
 }
 
 const lastStateJson = new Map(); // wsId -> last JSON written (skip identical writes)
+const knownParked = new Map(); // wsId -> last parked list saved (a snapshot without `parked` keeps it)
 let stateFrozen = false; // set on session-end / before-quit: the final save already happened
 
 function persistState(wsId) {
   if (stateFrozen) return;
   const state = rendererState.get(wsId);
   if (!state) return;
-  const enriched = { ...state };
-  if (Array.isArray(enriched.terminals)) {
-    enriched.terminals = enriched.terminals.map(t => ({
-      ...t,
-      claudeSessionId: sessions.getSession(wsId, t.termId) || t.claudeSessionId || null,
-    }));
-  }
+  if (!knownParked.has(wsId)) knownParked.set(wsId, loadState(wsId).parked || null);
+  const enriched = sessions.enrichState(wsId, state, knownParked.get(wsId));
+  knownParked.set(wsId, enriched.parked);
   // the renderer pushes every ~5 s; only touch the disk when something changed —
   // fewer writes = fewer chances for a reboot to catch one mid-flight
   const json = JSON.stringify(enriched);
@@ -309,7 +306,7 @@ function persistState(wsId) {
   // audit trail: which tab holds which conversation, and tabs that look like
   // agents but would NOT resume on restart (main/tablog.cjs)
   try {
-    for (const l of tablog.diff(wsId, enriched.terminals)) logger.info(`tabs: ws=${wsId} ${l}`);
+    for (const l of tablog.diff(wsId, enriched.terminals, Date.now(), enriched.parked)) logger.info(`tabs: ws=${wsId} ${l}`);
     const opts = { hasFeed: (id) => Boolean(claudefeed.stateOf(id)), alive: (id) => ptyhost.alive(id) };
     for (const l of tablog.audit(wsId, enriched.terminals, opts)) logger.warn(`tabs: ws=${wsId} ${l}`);
   } catch (e) {
@@ -726,7 +723,7 @@ function initIpc() {
     for (const t of terms) {
       const age = ptyhost.outputAge(t.termId);
       // any tab with a hook-reported status is judged by it (also covers claude
-      // typed by hand in a "+ Terminal" tab); status-less tabs by output alone
+      // typed by hand in a plain terminal tab); status-less tabs by output alone
       const st = termStatus.get(t.termId);
       const busy = st ? st === 'working' && age < 15000 : age < 5000;
       if (busy) names.push(t.name || t.termId);
@@ -966,6 +963,8 @@ function initIpc() {
     return { ok: true };
   });
   ipcMain.handle('sessions:check', (e, wsId, sessionId, cwd) => sessions.sessionExists(wsId, sessionId, typeof cwd === 'string' ? cwd : null));
+  // parking an agent with no feed: its last reply from the transcript tail
+  ipcMain.handle('sessions:lastReply', (e, wsId, sessionId, cwd) => sessions.lastReply(wsId, String(sessionId || ''), typeof cwd === 'string' ? cwd : null));
   // worktree tabs (main/worktrees.cjs): the repo always comes from the SENDER's
   // own workspace, never from the renderer
   const wtRepo = (e, wsId) => {

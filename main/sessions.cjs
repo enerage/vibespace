@@ -109,17 +109,74 @@ function getSession(wsId, termId) {
 // cwd: the tab's folder; when it isn't the repo root (worktree tab) its own
 // project dir is checked too.
 function sessionExists(wsId, sessionId, cwd = null) {
+  return transcriptFile(wsId, sessionId, cwd) !== null;
+}
+
+// the session's .jsonl (repo dir first, then the tab cwd's own dir), or null
+function transcriptFile(wsId, sessionId, cwd = null) {
   const state = active.get(wsId);
-  if (!state || !sessionId) return false;
+  if (!state || !sessionId) return null;
   const dirs = [state.dir];
   if (cwd && path.resolve(cwd).toLowerCase() !== path.resolve(state.repoPath).toLowerCase()) dirs.push(U.resolveClaudeProjectDir(cwd));
   for (const dir of dirs) {
     if (!dir) continue;
+    const file = path.join(dir, `${sessionId}.jsonl`);
     try {
-      if (fs.existsSync(path.join(dir, `${sessionId}.jsonl`))) return true;
+      if (fs.existsSync(file)) return file;
     } catch {}
   }
-  return false;
+  return null;
+}
+
+// Parked agents: the last assistant TEXT of a transcript (tool-only and API
+// error lines skipped), read from the tail only → { text (≤ maxChars), model } | null
+function lastReplyOf(jsonlPath, { maxBytes = 512 * 1024, maxChars = 2000 } = {}) {
+  let fd = null;
+  try {
+    fd = fs.openSync(jsonlPath, 'r');
+    const size = fs.fstatSync(fd).size;
+    const len = Math.min(size, maxBytes);
+    const buf = Buffer.alloc(len);
+    fs.readSync(fd, buf, 0, len, size - len);
+    const lines = buf.toString('utf8').split('\n');
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const line = lines[i];
+      if (!line.includes('"assistant"') || line.includes('"isApiErrorMessage":true')) continue;
+      let j;
+      try { j = JSON.parse(line); } catch { continue; } // the cut first line
+      if (j.type !== 'assistant' || !j.message) continue;
+      const c = j.message.content;
+      const text = typeof c === 'string' ? c
+        : (Array.isArray(c) ? c.filter(b => b && b.type === 'text' && typeof b.text === 'string').map(b => b.text).join('\n') : '');
+      if (!text.trim()) continue;
+      return { text: text.trim().slice(0, maxChars), model: typeof j.message.model === 'string' ? j.message.model : null };
+    }
+    return null;
+  } catch {
+    return null;
+  } finally {
+    if (fd !== null) { try { fs.closeSync(fd); } catch {} }
+  }
+}
+
+function lastReply(wsId, sessionId, cwd = null) {
+  const file = transcriptFile(wsId, sessionId, cwd);
+  return file ? lastReplyOf(file) : null;
+}
+
+// main's state merge: the renderer snapshot + tracked session ids. `parked`
+// (stopped agents on the shelf) is carried as-is; a snapshot without the key
+// (a renderer that predates it) keeps the previous list instead of wiping it.
+function enrichState(wsId, state, prevParked = null) {
+  const enriched = { ...state };
+  if (Array.isArray(enriched.terminals)) {
+    enriched.terminals = enriched.terminals.map(t => ({
+      ...t,
+      claudeSessionId: getSession(wsId, t.termId) || t.claudeSessionId || null,
+    }));
+  }
+  if (!Array.isArray(enriched.parked)) enriched.parked = Array.isArray(prevParked) ? prevParked : [];
+  return enriched;
 }
 
 function scheduleScan(wsId) {
@@ -215,4 +272,4 @@ function sessionIdsFor(wsId) {
   return out;
 }
 
-module.exports = { start, stop, trackClaudeStart, pinSession, pinFromFeed, getSession, sessionExists, sessionIdsFor, onData, _scan: scan, _pickResumed: pickResumed };
+module.exports = { start, stop, trackClaudeStart, pinSession, pinFromFeed, getSession, sessionExists, transcriptFile, lastReply, lastReplyOf, enrichState, sessionIdsFor, onData, _scan: scan, _pickResumed: pickResumed };

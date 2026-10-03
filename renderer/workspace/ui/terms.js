@@ -3,6 +3,7 @@ import { termTheme, onThemeChange } from './themes.js';
 import { openTabMenu } from './tabmenu.js';
 import * as feedui from './feedui.js';
 import * as board from './board.js';
+import * as parked from './parked.js';
 
 // terminal tabs: each hosts a PowerShell pty; "claude" tabs run Claude Code and
 // get their session id tracked (main process) so they can be resumed after updates.
@@ -18,6 +19,10 @@ const tabs = new Map(); // termId -> tab record
 const feeds = new Map(); // termId -> latest claude feed snapshot (main/claudefeed.cjs)
 let activeId = null;
 let counter = 0;
+// parked agents (ui/parked.js): stopped, conversation kept; null until init
+// loaded them, so an early snapshot can't save an empty shelf
+let shelf = null;
+let persistNow = async () => persist();
 
 // ---- accounts (main/accounts.cjs) --------------------------------------------
 // Each claude tab runs on an ACCOUNT: 'login' = the stored /login, others are
@@ -81,7 +86,10 @@ export function init(opts) {
   wsId = opts.wsId;
   repoPath = opts.repoPath;
   persist = opts.persist || persist;
+  persistNow = opts.persistNow || persistNow;
   openFile = opts.openFile || openFile;
+  shelf = parked.normalizeParked(opts.savedParked);
+  parked.init({ list: () => shelf || [], unpark: unparkAgent, forget: forgetParked });
   remote = opts.remote || remote;
   wsName = opts.wsName || '';
 
@@ -180,17 +188,14 @@ export function init(opts) {
 
 
   $('#btn-new-claude').onclick = () => createTab({ name: nextName('agent'), cwd: repoPath, claude: true });
-  // right-click + Claude: start from an EXISTING conversation — claude's own
-  // resume picker opens in the new tab and the picked session gets pinned
-  const resumePicker = () => createTab({ name: nextName('agent'), cwd: repoPath, pickSession: true });
+  // ONE "new" menu: the ▾ caret and right-click on + Claude open the same one
+  // (new agent / worktree agent / terminal, then Resume: parked agents, Claude's
+  // own picker, kept worktrees)
   $('#btn-new-claude').oncontextmenu = (ev) => {
     ev.preventDefault();
-    resumePicker();
+    openClaudeMenu();
   };
-  $('#btn-resume').onclick = resumePicker; // the same, as a visible button
-  // ▾ caret: new agent / new agent in a worktree / resume + kept worktrees
-  $('#btn-new-claude-menu').onclick = (ev) => openClaudeMenu(ev.currentTarget, resumePicker);
-  $('#btn-new-term').onclick = () => createTab({ name: nextName('term'), cwd: repoPath });
+  $('#btn-new-claude-menu').onclick = () => openClaudeMenu();
 
 
   // ---- Ctrl+F: find inside the active terminal ----
@@ -214,11 +219,13 @@ export function init(opts) {
   // restore saved terminals (or start one fresh agent on first run).
   // A renderer reload leaves every pty alive in the main process — attach to them
   // (replaying their buffered output) instead of killing and re-spawning agents.
-  const saved = Array.isArray(opts.savedTerminals) ? opts.savedTerminals.filter(t => t && t.name) : [];
+  // Parked agents are NOT restored as tabs: they stay on the shelf (🅿).
+  const saved = parked.restorable(opts.savedTerminals, shelf);
+  const firstRun = saved.length === 0 && shelf.length === 0; // everything parked = no fresh agent
   vs.ptyList().then(async live => {
     await accountsReady; // restored tabs check their saved account against the list
     const liveByTerm = new Map(live.map(p => [p.termId, p]));
-    if (saved.length === 0) createTab({ name: 'agent-1', cwd: repoPath, claude: true });
+    if (firstRun) createTab({ name: 'agent-1', cwd: repoPath, claude: true });
     let attached = 0;
     const deadSessions = [];
     for (const t of saved) {
@@ -240,7 +247,7 @@ export function init(opts) {
         // the worktree folder is gone: a plain terminal at the repo root, never
         // an auto-resume into the wrong folder
         createTab({ termId: t.termId || null, name: t.name, cwd: repoPath });
-        toast(`worktree ${t.worktree.name} no longer exists: the conversation can still be resumed from ↺ Resume`, 'err');
+        toast(`worktree ${t.worktree.name} no longer exists: the conversation can still be resumed from + ▾ → All conversations…`, 'err');
       } else if (opts.autoResume && isClaude && t.claudeSessionId && !(await vs.sessionCheck(wsId, t.claudeSessionId, t.cwd || repoPath))) {
         // saved session file is gone — open claude's interactive picker instead of
         // typing a resume id that would silently error out
@@ -273,7 +280,7 @@ export function init(opts) {
     }
   }).catch(() => {
     // pty:list failed — fall back to the classic spawn/resume path
-    if (saved.length === 0) { createTab({ name: 'agent-1', cwd: repoPath, claude: true }); return; }
+    if (firstRun) { createTab({ name: 'agent-1', cwd: repoPath, claude: true }); return; }
     for (const t of saved) {
       const isClaude = t.isClaude === undefined ? true : Boolean(t.isClaude);
       createTab({
@@ -317,29 +324,46 @@ export async function newWorktreeAgent() {
   return tab;
 }
 
-// our worktrees that no open tab is using (closed with work left in them)
+// the parked agent that owns a worktree (its folder is kept for the unpark)
+const parkedOwner = (wtPath) => (shelf || []).find(e => e.worktree && samePath(e.worktree.path, wtPath)) || null;
+
+// our worktrees that no open tab is using: closed with work left in them, or
+// held by a parked agent (listed as such, never as an orphan)
 async function keptWorktrees() {
   let list = null;
   try { list = await vs.wtList(wsId); } catch {}
   if (!Array.isArray(list)) return [];
   const used = [...tabs.values()].map(t => (t.worktree && t.worktree.path) || t.cwd);
-  return list.filter(w => w.exists && !used.some(u => samePath(u, w.path)));
+  return list.filter(w => w.exists && !used.some(u => samePath(u, w.path)))
+    .map(w => ({ ...w, parkedBy: parkedOwner(w.path) }));
 }
 
-async function openClaudeMenu(anchor, resumePicker) {
-  const r = anchor.getBoundingClientRect();
+// claude's own resume picker in a new tab; the picked session gets pinned
+const resumePicker = () => createTab({ name: nextName('agent'), cwd: repoPath, pickSession: true });
+
+async function openClaudeMenu() {
+  const r = $('#btn-new-claude').closest('.btn-group').getBoundingClientRect();
   const kept = await keptWorktrees();
+  const list = shelf || [];
   const items = [
     { label: 'New agent', run: () => createTab({ name: nextName('agent'), cwd: repoPath, claude: true }) },
     { label: 'New agent in a worktree', hint: "Its own git worktree and branch vs/<name>: parallel agents never touch each other's files", run: () => newWorktreeAgent() },
-    { label: 'Resume a conversation…', run: resumePicker },
+    { label: 'New terminal', hint: 'A plain PowerShell terminal', run: () => createTab({ name: nextName('term'), cwd: repoPath }) },
+    { sep: true },
+    { section: 'Resume' },
+    ...parked.menuItems(list, { max: parked.MENU_MAX, more: () => parked.openList(r) }),
+    { label: 'All conversations…', hint: "Claude's own resume picker in a new tab; the pick is saved to that tab", run: resumePicker },
   ];
-  if (kept.length) items.push({ sep: true }, { label: `Worktrees (${kept.length}) ▸`, hint: 'Worktrees kept after their tab closed', run: () => worktreesMenu(r, kept) });
+  if (kept.length) items.push({ label: `Kept worktrees (${kept.length}) ▸`, hint: 'Worktrees kept after their tab closed, or held by a parked agent', run: () => worktreesMenu(r, kept) });
   showMenu(r.left, r.bottom + 4, items);
 }
 
 function worktreesMenu(r, kept) {
-  showMenu(r.left, r.bottom + 4, kept.map(w => ({
+  showMenu(r.left, r.bottom + 4, kept.map(w => (w.parkedBy ? {
+    label: `⎇ ${w.name} — 🅿 parked as ${w.parkedBy.name}`,
+    hint: `${feedui.wtText(w)}\nKept for the parked agent: click to unpark it`,
+    run: () => unparkAgent(w.parkedBy.id),
+  } : {
     label: `⎇ ${w.name} — ${w.loss || 'clean'}`,
     hint: feedui.wtText(w),
     run: () => worktreeActions(r, w),
@@ -381,7 +405,108 @@ async function discardWorktree(w) {
 // otherwise kept, with the reason. Skipped while another tab still uses it.
 function afterWorktreeTabClosed(wt) {
   if (!wt || [...tabs.values()].some(t => samePath((t.worktree && t.worktree.path) || t.cwd, wt.path))) return;
+  if (parkedOwner(wt.path)) return; // a parked agent resumes in it later
   removeWorktree(wt, false);
+}
+
+// ---- parked agents (ui/parked.js) ---------------------------------------------
+// Park = stop the agent, keep its conversation on the shelf; unpark resumes that
+// exact conversation (claude --resume <id>) in a new tab. The entry is on disk
+// BEFORE the pty dies, and a parked agent is never auto-resumed on restore.
+export function parkedList() { return shelf || []; }
+
+// null before init loaded the shelf: app.js then keeps the saved list as is
+export function parkedSnapshot() { return shelf ? shelf.map(e => ({ ...e })) : null; }
+
+// a conversation on disk: an id AND its transcript (claude writes it on the first message)
+export async function isParkable(tab) {
+  if (!tab || !tab.isClaude || tab.dead || !tab.sessionId) return false;
+  return Boolean(await vs.sessionCheck(wsId, tab.sessionId, tab.cwd || repoPath).catch(() => false));
+}
+
+const parking = new Set(); // termIds mid-park
+const unparking = new Set(); // shelf ids mid-unpark
+
+export async function parkTab(tab) {
+  if (!tab || !tabs.has(tab.id) || parking.has(tab.id)) return false;
+  if (!(await isParkable(tab))) { toast(`${tab.name}: nothing saved yet: send a message first`, 'err'); return false; }
+  // stopping a busy agent interrupts it: the one case worth a question
+  if (tab.status === 'working' || tab.status === 'waiting') {
+    const what = tab.status === 'working' ? 'is working' : 'is waiting for your answer';
+    if (!(await confirmBox(`${tab.name} ${what}. Parking stops it mid-task; the conversation is kept up to this point.`, { ok: 'Park' }))) return false;
+    if (!tabs.has(tab.id)) return false;
+  }
+  parking.add(tab.id);
+  try {
+    const f = feeds.get(tab.id);
+    let lastMessage = (f && f.lastMessage) || null;
+    let model = (f && f.model && f.model.name) || null;
+    if (!lastMessage || !model) { // no feed (or no finished turn yet): the transcript's tail
+      const r = await vs.sessionLastReply(wsId, tab.sessionId, tab.cwd || repoPath).catch(() => null);
+      if (r) { lastMessage = lastMessage || r.text || null; model = model || r.model || null; }
+    }
+    const entry = parked.makeEntry(tab, { lastMessage, model });
+    const before = shelf;
+    shelf = parked.normalizeParked([entry, ...shelf.filter(e => e.claudeSessionId !== entry.claudeSessionId)]);
+    // 1. on disk first: a crash after this point still has the entry
+    try {
+      await persistNow();
+    } catch (e) {
+      shelf = before;
+      toast(`${tab.name} not parked: saving failed (${(e && e.message) || e})`, 'err');
+      return false;
+    }
+    // 2. stop it the way tab-close does, minus the worktree auto-remove: a
+    // parked worktree agent keeps its worktree
+    if (tabs.has(tab.id)) removeTab(tab.id);
+    else { parked.paintChip(); notifyAgents(); persist(); }
+    toast(`${tab.name} parked: 🅿 menu or chip to bring it back`, 'ok');
+    return true;
+  } finally {
+    parking.delete(tab.id);
+  }
+}
+
+export async function unparkAgent(id) {
+  const e = (shelf || []).find(x => x.id === id);
+  if (!e || unparking.has(id)) return null;
+  unparking.add(id);
+  try {
+    const name = parked.uniqueName(e.name, new Set([...tabs.values()].map(t => t.name)));
+    const cwd = e.cwd || repoPath;
+    let tab;
+    wtCache = null; // the restore's cached list is stale by now
+    if (e.worktree && !(await worktreeAlive(e.worktree))) {
+      // same fallback as restore: never resume into the wrong folder
+      tab = createTab({ name, cwd: repoPath });
+      toast(`worktree ${e.worktree.name} no longer exists: the conversation can still be resumed from + ▾ → All conversations…`, 'err');
+    } else if (!(await vs.sessionCheck(wsId, e.claudeSessionId, cwd).catch(() => false))) {
+      // transcript gone: claude's picker instead of a resume id that would error out
+      tab = createTab({ name, cwd, pickSession: true, account: e.account || null, worktree: e.worktree || null });
+      toast(`${name}: saved session gone — resume picker opened in tab`, 'err');
+    } else {
+      tab = createTab({ name, cwd, resumeId: e.claudeSessionId, account: e.account || null, worktree: e.worktree || null, activate: true });
+    }
+    shelf = shelf.filter(x => x.id !== id);
+    parked.paintChip();
+    notifyAgents();
+    persist();
+    return tab;
+  } finally {
+    unparking.delete(id);
+  }
+}
+
+// forget = off the shelf only; the conversation stays in claude's own history.
+// No confirm: nothing is lost.
+export function forgetParked(id) {
+  const e = (shelf || []).find(x => x.id === id);
+  if (!e) return;
+  shelf = shelf.filter(x => x.id !== id);
+  parked.paintChip();
+  notifyAgents();
+  persist();
+  toast(`forgot ${e.name} — still in All conversations`, 'ok');
 }
 
 function openTermFind() {
@@ -861,7 +986,12 @@ function renderTabBar() {
     // right-click = options menu (rename, agent info, copy id/name/resume, close)
     t.oncontextmenu = (ev) => {
       ev.preventDefault();
-      openTabMenu(ev, tab, { rename: () => startRename(t, label, tab), close: () => close.onclick(new MouseEvent('click')) });
+      openTabMenu(ev, tab, {
+        rename: () => startRename(t, label, tab),
+        close: () => close.onclick(new MouseEvent('click')),
+        park: () => parkTab(tab),
+        parkable: () => isParkable(tab),
+      });
     };
     close.onclick = async (ev) => {
       ev.stopPropagation();
@@ -878,6 +1008,9 @@ function renderTabBar() {
 
     bar.appendChild(t);
   }
+  // 🅿 n chip right after the tabs (wraps with them); hidden when nothing is parked
+  const chip = parked.chipEl();
+  if (chip) { bar.appendChild(chip); parked.paintChip(); }
   feedui.refresh(); // the strip follows the active tab + its base status
   notifyAgents(); // board: status changes, renames, tabs added/removed
 }
@@ -970,14 +1103,14 @@ function wireTabDrag(bar, t) {
       // the bar wraps into rows: drop before the first tab that sits in a row
       // below the pointer, or in the pointer's row past its midpoint
       for (const sib of bar.children) {
-        if (sib === t) continue;
+        if (sib === t || !sib.classList.contains('tab')) continue; // the 🅿 chip stays last
         const r = sib.getBoundingClientRect();
         if (ev.clientY < r.top || (ev.clientY <= r.bottom && ev.clientX < r.left + r.width / 2)) {
           bar.insertBefore(t, sib);
           return;
         }
       }
-      bar.appendChild(t); // pointer is past everything
+      bar.insertBefore(t, bar.querySelector(':scope > .parked-chip')); // pointer is past every tab
     };
     const up = () => {
       window.removeEventListener('pointermove', move, true);

@@ -3,7 +3,7 @@ import { feedFor, accounts, relaunchOnAccount, sendToAgent, repoRoot } from './t
 
 // Right-click menu for terminal tabs (was: right-click = rename) + the
 // "Agent info" panel. Kept out of terms.js: terms.js only hands us the tab
-// object and two callbacks.
+// object and its callbacks (rename, close, park, parkable).
 //   tab: { id, name, sessionId, isClaude, dead, status, cwd }
 
 function copy(text, what) {
@@ -26,10 +26,14 @@ function statusText(tab) {
     || (tab.sessionId ? 'idle' : 'starting — no conversation yet');
 }
 
-export function openTabMenu(ev, tab, { rename, close }) {
+export async function openTabMenu(ev, tab, { rename, close, park, parkable }) {
+  const x = ev.clientX;
+  const y = ev.clientY;
   const sid = tab.sessionId;
   const noSid = 'No conversation captured yet — send a first message';
-  showMenu(ev.clientX, ev.clientY, [
+  // Park needs a saved conversation: a session id AND its transcript on disk
+  const canPark = tab.isClaude && parkable ? await parkable().catch(() => false) : false;
+  showMenu(x, y, [
     { label: 'Rename…', run: rename },
     { label: 'Agent info…', run: () => showAgentInfo(tab) },
     { sep: true },
@@ -39,6 +43,14 @@ export function openTabMenu(ev, tab, { rename, close }) {
     ...accountItems(tab),
     ...worktreeItems(tab),
     { sep: true },
+    ...(tab.isClaude && park ? [{
+      label: 'Park',
+      disabled: !canPark,
+      hint: canPark
+        ? 'Stop this agent and keep it on the shelf (🅿). Unpark resumes the same conversation.'
+        : 'Nothing saved yet: send a message first',
+      run: park,
+    }] : []),
     { label: 'Close', danger: true, run: close },
   ]);
 }

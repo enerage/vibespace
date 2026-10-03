@@ -103,7 +103,8 @@ Key facts encoded in `main/sessions.cjs`:
   gets a new write) is now just the pre-feed fallback. If a future claude
   stopped ticking there, a SessionStart COMMAND hook that curls the id to the
   feed server would close the gap (SessionStart never fires as an HTTP hook).
-  The ↺ Resume button (0.6.20) = right-click + Claude = `pickSession`.
+  + ▾ → "All conversations…" (was the ↺ Resume button, 0.6.20–0.6.37) =
+  `pickSession`.
 - The heuristic above is now only the fallback for agents without a feed
   (started before 0.6.16). Its known holes (manual `/resume`, near-simultaneous
   launches) remain for those only; see TODO.md.
@@ -120,7 +121,8 @@ Key facts encoded in `main/sessions.cjs`:
   (anthropics/claude-code#90588, open). A session first recorded as `d:\…`
   (VS Code, cmd) is hidden from the list and refuses to open ("from a
   different directory"). `claude --resume <id>` works, so restore (by id) is
-  unaffected. Only ↺ Resume and right-click + Claude go through the picker.
+  unaffected (unpark too). Only + ▾ → All conversations… and a dead-session
+  restore go through the picker.
   Repair (the issue's own workaround, done for 41 conversations on 2026-10-01):
   rewrite only the `"cwd":"x:\\` drive letter to uppercase in the `.jsonl`.
   Skip sessions listed in `~/.claude/sessions/*.json` (live) and files written
@@ -129,7 +131,7 @@ Key facts encoded in `main/sessions.cjs`:
 
 ## Developing VibeSpace
 
-- `npm run smoke` — 84 self-tests (as of 0.6.35) incl. pty echo and live session discovery. Run it after
+- `npm run smoke` — 95 self-tests (as of 0.6.38) incl. pty echo and live session discovery. Run it after
   touching main-process code, **from a normal shell**: inside a Claude pty the stripped
   PATH and nested ConPTY break the pty test (`powershell.exe` "File not found" /
   AttachConsole) — prepend System32 to PATH and give it its own console, or just use a
@@ -332,6 +334,27 @@ Key facts encoded in `main/sessions.cjs`:
   read as 0 = "nothing unmerged", and closing the tab would have deleted
   unmerged commits. `.claude/worktrees` is hidden from the tree, Ctrl+P and the
   tree watcher (`U.isAgentWorktrees`); each worktree is a full checkout.
+- **Parked agents + the one "+ ▾" menu** (0.6.38, `renderer/workspace/ui/parked.js`):
+  - Tab right-click → Park STOPS the agent (pty killed like tab-close) and keeps
+    `{ name, cwd, claudeSessionId, worktree, account, parkedAt, lastMessage,
+    model }` in state.json `parked`. Disabled until the transcript exists
+    (`sessions:check` with the tab's cwd). Confirm only while working/waiting.
+  - The entry is persisted FIRST (`persistNow`, awaited), then the pty dies.
+    Restore skips any saved tab whose session is also parked, so a crash in
+    between can't bring it back twice.
+  - Parked entries are NEVER auto-resumed; an all-parked workspace opens with
+    no fresh agent-1. Unpark = `createTab({ resumeId })` with the restore's
+    dead-session and worktree-gone fallbacks; name clash → `-2`.
+  - A parked worktree agent keeps its worktree: no auto-remove on park, and
+    `afterWorktreeTabClosed` skips worktrees a parked entry owns. Kept
+    worktrees lists it as "🅿 parked as <name>" (click = unpark), not as an
+    orphan. Forget (✕, no confirm) drops only the shelf entry.
+  - Main keeps `parked` through its merge (`sessions.enrichState`); a snapshot
+    without the key keeps the previous list. tablog logs `parked` /
+    `unparked` / `forgot` lines and lists parked in the open snapshot.
+  - Toolbar: `[+ Claude][▾]` + `▦ Board` only. The caret and right-click on
+    + Claude open the same menu. `showMenu` items take `section`, `meta`,
+    `card()` (hover card, `common.js showCard`) and `action` (row ✕).
 - **Never use `window.confirm/alert/prompt` in a workspace window.** On Windows
   Electron the window gets no real focus back after the native box closes.
   Keydown still fires, but keypress/beforeinput don't until the window is
