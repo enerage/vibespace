@@ -125,6 +125,14 @@ Build in this order. Verify the statusLine and HTTP hooks live in a pty before r
       its conversation on a shelf (🅿 chip, menu Resume section, board strip);
       Unpark resumes it by id. ↺ Resume and + Terminal folded into the menu.
 - [ ] Named groups for parked agents (later): one shelf for now.
+- [ ] Worktree-gone fallback (restore/unpark) points to "All conversations…", but
+      Claude's picker at the repo root lists only the current tree's sessions
+      (Ctrl+W shows all worktrees). Say "press Ctrl+W in the picker", or open the
+      picker with that view (found 0.6.38 review). S
+- [ ] With VibeSpace phone control OFF, a resumed agent still printed
+      "/remote-control is active". Check whether the user's global Claude setting
+      enables Remote Control on its own, and whether the wrapper should pass an
+      explicit opt-out. S
 - [ ] **Multi-subscription agents** (2026-10-01, RESEARCH-MULTISUB.md) — run tabs on
       several Max accounts + z.ai, switch a tab to another account when it hits its
       usage limit (`StopFailure rate_limit` → `--resume <id>` on the next profile).
