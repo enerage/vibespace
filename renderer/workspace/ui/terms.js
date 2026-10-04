@@ -4,6 +4,7 @@ import { openTabMenu } from './tabmenu.js';
 import * as feedui from './feedui.js';
 import * as board from './board.js';
 import * as parked from './parked.js';
+import * as inputsel from './inputsel.js';
 
 // terminal tabs: each hosts a PowerShell pty; "claude" tabs run Claude Code and
 // get their session id tracked (main process) so they can be resumed after updates.
@@ -559,10 +560,12 @@ async function pasteInto(term) {
   if (text) term.paste(text);
 }
 
-function wireClipboard(term) {
+function wireClipboard(term, id) {
   // Ctrl+C copies when something is selected, interrupts otherwise (pass through).
   term.attachCustomKeyEventHandler((ev) => {
     if (ev.type !== 'keydown') return true;
+    // Shift(+Ctrl)+arrows select text in claude's prompt (ui/inputsel.js)
+    if (inputsel.onKey(term, ev, (d) => vs.ptyWrite(id, d))) { ev.preventDefault(); return false; }
     const key = ev.key.toLowerCase();
     if (key === 'insert') {
       if (ev.ctrlKey && term.hasSelection()) { ev.preventDefault(); copySelection(term); return false; }
@@ -750,10 +753,10 @@ export function createTab({ name = 'agent', cwd = repoPath, claude = false, resu
     if (tab.lagT0 == null && isTypedKey(d)) tab.lagT0 = performance.now(); // typing-lag log
     vs.ptyWrite(id, d);
   });
-  wireClipboard(term);
+  wireClipboard(term, id);
   wireDrop(term, host);
   term.onResize(({ cols, rows }) => vs.ptyResize(id, cols, rows));
-  host.addEventListener('mousedown', () => activateTab(id), true);
+  host.addEventListener('mousedown', () => { inputsel.reset(term); activateTab(id); }, true);
 
   if (attachBuffer === null && (claude || resumeId || pickSession)) {
     setTimeout(async () => {

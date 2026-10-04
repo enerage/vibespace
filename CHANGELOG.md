@@ -2,6 +2,25 @@
 
 Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 
+## [0.6.39] — 2026-10-04
+
+### Added
+- **Select text in Claude's prompt with the keyboard.** Shift+←/→ selects by
+  character, Ctrl+Shift+←/→ by word, Shift+Home/End to the start/end of the
+  line. Then Backspace or Delete removes the selection, Ctrl+C copies it, and
+  typing replaces it. Claude Code itself can't start a selection from the
+  keyboard (anthropics/claude-code#80734; it's the same in Windows Terminal),
+  but in fullscreen mode it has a mouse selection that it extends with
+  Shift+arrows. So VibeSpace starts one for it with a synthetic mouse drag at
+  the caret (`renderer/workspace/ui/inputsel.js`).
+- Limits: one prompt line at a time (it doesn't cross into a wrapped or second
+  line), and a line containing emoji or other wide characters falls back to
+  Claude's normal behaviour. Plain shell tabs are untouched, so PowerShell's
+  own Shift+arrow selection still works there.
+- Verified live against Claude Code 2.1.289 with real key presses: single
+  character left and right, word left and right, shrink, Home/End, collapse,
+  Backspace, Delete, type-to-replace and Ctrl+C.
+
 ## [0.6.38] — 2026-10-03
 
 ### Added

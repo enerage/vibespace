@@ -289,6 +289,22 @@ Key facts encoded in `main/sessions.cjs`:
     `gone` or `killed`. Custom prompts (oh-my-posh) never match the prompt
     regex, so it also polls the process tree.
   - A bare "Rate limit reached" (short 429) is not a usage limit.
+- **Keyboard selection in claude's prompt** (0.6.39, `renderer/workspace/ui/inputsel.js`,
+  RESEARCH-INPUT-SELECTION.md). Claude has no keyboard-started selection, so
+  Shift(+Ctrl)+←/→ and Shift+Home/End are turned into: a synthetic two-cell SGR
+  mouse drag at the caret, written to the pty in ONE write, trimmed to one cell
+  with Shift+←, then Claude's own Shift+←/→ extension, N presses for a word.
+  Facts it stands on, all verified live on 2.1.289 and none documented: the
+  terminal cursor sits on the caret; the prompt is the rows between two `─`
+  border rows with text from col 2; a drag doesn't move the caret; press+release
+  on one cell is a click (clears the selection, moves the caret), which is why
+  a one-cell selection needs the trim; Esc does NOT clear a selection; Backspace
+  and Delete remove it. Typing over a selection sends `\x7f` first, only when
+  the selected cells really have a background colour. If selection breaks after
+  a Claude update, re-check those facts first. Testing gotchas: xterm's DOM
+  renderer only updates on a frame, so in an occluded test window read the DOM
+  AFTER a CDP screenshot; and a CDP `char` event has no keydown, so the custom
+  key handler never sees it (use `keyDown` with `text`).
 - Keys: Ctrl+P file finder · Ctrl+F terminal search (active tab) · Ctrl+Shift+U
   jump-to-attention · Ctrl+Shift+B agent board · Ctrl+Shift+D diagnostics.
 - **Git** (0.6.14, sidebar since 0.6.15): `main/githistory.cjs` (log/commit/fileAt/branch,

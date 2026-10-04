@@ -91,6 +91,10 @@ Build in this order. Verify the statusLine and HTTP hooks live in a pty before r
 - [x] **Editor tabs** (done 0.6.0) — dirty dots, per-tab edit state, persisted
       across reloads, agent-edited files refresh in place.
 - [ ] Full-text grep panel (S/M).
+- [ ] Prompt keyboard selection (inputsel.js): cross wrapped/multi-line prompts
+      (Shift+↑/↓, Left past the line start), and handle lines with emoji / wide
+      characters (S/M). Drop the whole module once anthropics/claude-code#80734
+      ships natively.
 - [ ] tablog: include the layout (`termPosition`, sizes) in the `open:` line, so a
       state rebuilt from the log keeps the terminal on the right (S). The
       2026-10-01 reboot rebuilds lost it.

@@ -49,6 +49,7 @@ VibeSpace is that place — built for people who live in agents all day.
 | 🌿 **Git sidebar** | Files \| Git tabs on the left, like VS Code. **Changes**: side-by-side diff of uncommitted work. **History**: searchable commit list with unpushed ↑, `agent` badges and "new since you looked" dots; click a commit for its files; diffs open in the preview. Top-bar branch chip shows ahead/behind. Right-click a tree file → Git history. Read-only on purpose: agents do the git work |
 | 🔍 **Ctrl+P** | fuzzy file finder over the whole repo |
 | 🔍 **Ctrl+F** | search inside the active terminal (Monaco keeps its own find) |
+| ⇧ **Keyboard selection in Claude's prompt** | Shift+←/→, Ctrl+Shift+←/→ (word), Shift+Home/End; then Backspace, Ctrl+C or just type. Claude Code can't do this itself yet |
 | 💬 **Session tracking** | terminals ↔ conversations are paired automatically; dead sessions reopen Claude's interactive resume picker |
 | ↻ **Smart restart button** | appears only when VibeSpace's own code changed or Claude Code auto-updated (the label says which); restarts at once when no agent is busy (a manual "Restart this workspace" is always in ⚙ Preferences) — restart on your schedule, never mid-agent-run |
 | 🏷 **Logos** | click the logo to give the workspace its own icon; pins refresh automatically |
