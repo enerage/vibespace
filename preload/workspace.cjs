@@ -68,6 +68,7 @@ contextBridge.exposeInMainWorld('vs', {
   notifyGet: () => ipcRenderer.invoke('notify:get'),
   notifySet: (patch) => ipcRenderer.invoke('notify:set', patch),
   pickLogo: () => ipcRenderer.invoke('dialog:pickLogo'),
+  logoCandidates: () => ipcRenderer.invoke('logo:candidates'),
   updateLogo: (id, logoPath) => ipcRenderer.invoke('ws:updateLogo', id, logoPath),
   writeClipboard: (text) => ipcRenderer.invoke('util:writeClipboard', text),
   readClipboard: () => ipcRenderer.invoke('util:readClipboard'),

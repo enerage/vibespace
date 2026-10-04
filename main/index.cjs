@@ -20,6 +20,7 @@ const ptyhost = require('./ptyhost.cjs');
 const sessions = require('./sessions.cjs');
 const tablog = require('./tablog.cjs');
 const lagmon = require('./lagmon.cjs');
+const logoscan = require('./logoscan.cjs');
 const notifyprefs = require('./notifyprefs.cjs');
 const status = require('./status.cjs');
 const gitstatus = require('./gitstatus.cjs');
@@ -627,11 +628,24 @@ function initIpc() {
   });
   ipcMain.handle('dialog:pickLogo', async (e) => {
     const win = BrowserWindow.fromWebContents(e.sender);
+    // a workspace window starts in its own repo (the logo usually lives there);
+    // the launcher has no repo, so Windows picks the folder as before
+    const root = repoFor(e);
     const r = await dialog.showOpenDialog(win, {
       properties: ['openFile'],
       filters: [{ name: 'Images', extensions: ['png', 'ico', 'jpg', 'jpeg', 'svg', 'webp'] }],
+      ...(root ? { defaultPath: root } : {}),
     });
     return r.canceled ? null : r.filePaths[0];
+  });
+  // images in the sender's repo that could be its logo, best guess first (logoscan.cjs)
+  ipcMain.handle('logo:candidates', async (e) => {
+    const root = repoFor(e);
+    if (!root) return [];
+    const t0 = Date.now();
+    const list = await logoscan.scan(root);
+    logger.info(`logo scan: ${list.length} candidates in ${Date.now() - t0} ms`);
+    return list.map(({ path: file, rel, w, h, thumb }) => ({ path: file, rel, w, h, thumb }));
   });
   ipcMain.handle('app:openWorkspace', (e, id) => {
     if (!workspaces.get(id)) return { ok: false, error: 'unknown workspace' };

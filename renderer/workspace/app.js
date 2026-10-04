@@ -7,6 +7,7 @@ import * as diffpane from './ui/diff.js';
 import * as prefs from './ui/prefs.js';
 import { applyTheme } from './ui/themes.js';
 import * as limits from './ui/limits.js';
+import { pickLogo } from './ui/logopick.js';
 
 const wsId = new URLSearchParams(location.search).get('id');
 let ws = null;
@@ -62,7 +63,7 @@ function wireLayoutToggle() {
   // window reloads onto the new icon — agents survive and re-attach).
   // The topbar logo image is the natural click target; the 🏷 button labels it.
   const changeLogo = async () => {
-    const file = await vs.pickLogo();
+    const file = await pickLogo(); // images found in the repo, or Browse… (ui/logopick.js)
     if (!file) return;
     try {
       await vs.updateLogo(wsId, file);

@@ -2,6 +2,24 @@
 
 Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 
+## [0.6.40] — 2026-10-04
+
+### Changed
+- **Changing the logo starts in the repo.** Clicking the logo (top left) now
+  opens a picker that shows the images found in this repo, most logo-like
+  first (`logo.*`, favicons, app icons; screenshots and banners last). Click
+  one to use it. **Browse…** is still there for any other file, and it now
+  opens in the repo folder instead of wherever Windows last was. Dropping an
+  image on the logo works as before.
+- The search never looks in `node_modules`, build output (`dist`, `.next`,
+  `build`…), dot-folders or agent worktrees, skips files over 2 MB, and is
+  capped in depth, folder count and time. On real repos it took under a second
+  (PlacementFlow: 312 images, 0.9 s) and put the real logo first.
+- Verified live: the picker listed the repo's images and not the copy planted
+  in `node_modules`, Browse… opened in the repo folder, and picking an image
+  replaced the icon and reloaded the window with agents re-attached.
+  Smoke 96/96.
+
 ## [0.6.39] — 2026-10-04
 
 ### Added

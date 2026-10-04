@@ -131,7 +131,7 @@ Key facts encoded in `main/sessions.cjs`:
 
 ## Developing VibeSpace
 
-- `npm run smoke` — 95 self-tests (as of 0.6.38) incl. pty echo and live session discovery. Run it after
+- `npm run smoke` — 96 self-tests (as of 0.6.40) incl. pty echo and live session discovery. Run it after
   touching main-process code, **from a normal shell**: inside a Claude pty the stripped
   PATH and nested ConPTY break the pty test (`powershell.exe` "File not found" /
   AttachConsole) — prepend System32 to PATH and give it its own console, or just use a
@@ -371,6 +371,17 @@ Key facts encoded in `main/sessions.cjs`:
   - Toolbar: `[+ Claude][▾]` + `▦ Board` only. The caret and right-click on
     + Claude open the same menu. `showMenu` items take `section`, `meta`,
     `card()` (hover card, `common.js showCard`) and `action` (row ✕).
+- **Logo picker** (0.6.40, `main/logoscan.cjs` + `renderer/workspace/ui/logopick.js`):
+  clicking the top-left logo lists the repo's images, best guess first, with
+  Browse… (`dialog:pickLogo`, `defaultPath` = the sender's repo). The scan is
+  breadth-first and bounded (depth 7, 4000 folders, 1.5 s, files ≤ 2 MB), so a
+  budget that runs out only misses deep folders. It skips `U.IGNORED_NAMES`,
+  every dot-folder except `.github`, and agent worktrees. Thumbnails are 96 px
+  PNG data URLs made by sharp, 6 at a time (one by one took 3.4 s on
+  Recruitica); `.ico` goes through as-is because sharp can't read it. An image
+  sharp can't read is dropped: it couldn't become the icon either. To check a
+  native file dialog's folder in a test, read the `Address: …` pane of the
+  `#32770` child window through UI Automation, then close it with WindowPattern.
 - **Never use `window.confirm/alert/prompt` in a workspace window.** On Windows
   Electron the window gets no real focus back after the native box closes.
   Keydown still fires, but keypress/beforeinput don't until the window is

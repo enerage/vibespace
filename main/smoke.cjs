@@ -293,6 +293,36 @@ async function runSmoke() {
         JSON.stringify({ plan, norm: norm.map(e => e.name), names, len: entry.lastMessage.length }));
       try { fs.rmSync(d, { recursive: true, force: true }); } catch {}
     }
+    // logo picker scan (logoscan): ranks the logo first, never looks in
+    // node_modules / build output / dot-folders, drops unreadable images
+    {
+      const os = require('node:os');
+      const ls = require('./logoscan.cjs');
+      const sharp = require('sharp');
+      const d = fs.mkdtempSync(path.join(os.tmpdir(), 'vibespace-logo-'));
+      const png = async (w, h) => sharp({ create: { width: w, height: h, channels: 4, background: { r: 90, g: 120, b: 255, alpha: 1 } } }).png().toBuffer();
+      const put = (rel, buf) => { const f = path.join(d, rel); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, buf); };
+      const sq = await png(128, 128);
+      put('public/logo.png', sq);
+      put('public/favicon-32.png', await png(32, 32));
+      put('docs/screenshot.png', await png(800, 500));
+      put('src/assets/banner-logo.png', await png(900, 120));
+      put('node_modules/pkg/logo.png', sq);
+      put('.next/static/logo.png', sq);
+      put('dist/logo.png', sq);
+      put('.claude/worktrees/x/public/logo.png', sq);
+      put('public/broken-logo.png', Buffer.from('this is not an image, but it is long enough to pass the size floor. '.repeat(3)));
+      const found = await ls.scan(d);
+      const rels = found.map(c => c.rel);
+      check('logo scan: logo first, node_modules/build/dot-folders skipped, broken image dropped',
+        rels[0] === 'public/logo.png' && rels.includes('public/favicon-32.png') && rels.includes('docs/screenshot.png')
+        && rels.indexOf('docs/screenshot.png') > rels.indexOf('public/favicon-32.png')
+        && !rels.some(r => /node_modules|\.next|^dist\/|\.claude|broken/.test(r))
+        && found[0].w === 128 && found[0].thumb.startsWith('data:image/png;base64,')
+        && ls.score('public/logo.svg') > ls.score('src/components/hero-banner.png'),
+        JSON.stringify(rels));
+      try { fs.rmSync(d, { recursive: true, force: true }); } catch {}
+    }
     // typing-lag log (lagmon): echo timer, threshold, throttle, key filter
     {
       const lm = require('./lagmon.cjs');
