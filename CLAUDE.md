@@ -65,6 +65,20 @@ Knowledge is tracked **as we go**, never batched for later:
   correct = Windows icon cache: stop explorer, delete
   `%LOCALAPPDATA%\Microsoft\Windows\Explorer\iconcache_*.db`, start explorer
   (`ie4uinit -show` alone is not always enough — confirmed 2026-09-28).
+- **A logo change needs a new icon PATH and a new taskbar button** (0.6.41).
+  Windows caches a taskbar button's icon by file path and reads it only when
+  it creates the button, so rebuilding `<id>.ico` in place left the old icon
+  on the taskbar even after reopening the window. `workspaces.updateLogo`
+  writes `<id>.v<stamp>.ico` (ids never contain a dot) and prunes older
+  versions; `rebuildTaskbarButton` moves the window to `<aumid>.refresh` and
+  back after 300 ms. What did NOT refresh it (all tested with taskbar
+  screenshots): `setAppDetails` with the new path alone, `setSkipTaskbar`
+  off/on, `SHCNE_UPDATEITEM` on the .lnk, `SHCNE_ASSOCCHANGED`. `hide()`/
+  `show()` also works but blinks. Explorer's FOLDER view refreshes on its own,
+  so a correct icon there proves nothing about the taskbar. To see a button
+  that sits in the taskbar overflow, toggle `OverflowButton` through UI
+  Automation and screenshot above it. Never read `ws.iconPath` once and keep
+  it: it changes with every logo.
 - GPU acceleration is deliberately off (`app.disableHardwareAcceleration()`) — windows
   went blank over remote-display software. Renderers self-heal via
   `render-process-gone` → reload WITHOUT killing ptys — the renderer re-attaches.
@@ -131,7 +145,7 @@ Key facts encoded in `main/sessions.cjs`:
 
 ## Developing VibeSpace
 
-- `npm run smoke` — 96 self-tests (as of 0.6.40) incl. pty echo and live session discovery. Run it after
+- `npm run smoke` — 97 self-tests (as of 0.6.41) incl. pty echo and live session discovery. Run it after
   touching main-process code, **from a normal shell**: inside a Claude pty the stripped
   PATH and nested ConPTY break the pty test (`powershell.exe` "File not found" /
   AttachConsole) — prepend System32 to PATH and give it its own console, or just use a

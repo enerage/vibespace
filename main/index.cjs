@@ -434,6 +434,22 @@ function claimTaskbarIdentity(win, ws) {
   }, 1500);
 }
 
+// The taskbar reads a window's icon ONCE, when it creates the window's button,
+// and caches it by file path. A logo change therefore needs both a new icon
+// path (workspaces.updateLogo) and a new button. Moving the window to a
+// throwaway AppID and back makes the taskbar build one, with no visible blink.
+// Verified live 2026-10-04 (taskbar screenshots): setAppDetails with the new
+// path alone, setSkipTaskbar off/on, SHCNE_UPDATEITEM and SHCNE_ASSOCCHANGED
+// all left the old icon; this and hide()/show() refreshed it.
+function rebuildTaskbarButton(win, ws) {
+  try {
+    win.setAppDetails({ appId: shortcuts.aumidFor(ws.id) + '.refresh' });
+  } catch (e) {
+    logger.warn('taskbar button rebuild failed: ' + e.message);
+  }
+  setTimeout(() => { if (!win.isDestroyed()) claimTaskbarIdentity(win, ws); }, 300);
+}
+
 // ---------- window geometry memory ----------
 // Per-workspace bounds + maximized state (instances/<id>/window.json), so reopening
 // — and especially ↻ Restart, which relaunches the process — doesn't reset the
@@ -706,7 +722,7 @@ function initIpc() {
     for (const win of workspaceWindowsFor(id)) {
       if (!win.isDestroyed()) {
         win.setIcon(ws.iconPath);
-        claimTaskbarIdentity(win, ws); // re-announce: the shell cached the old icon at open
+        rebuildTaskbarButton(win, ws); // the taskbar cached the old icon when the button was made
         // reload without killing: the renderer re-attaches to live ptys (Layer 2)
         win.reload(); // pick up the new logo in the top bar
       }

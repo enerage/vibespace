@@ -73,7 +73,7 @@ function wireLayoutToggle() {
     }
   };
   const logoImg = $('#ws-logo');
-  logoImg.title = 'Change this workspace’s logo — window icon updates live; re-pin the taskbar shortcut to refresh it';
+  logoImg.title = 'Change this workspace’s logo (pick an image from the repo or browse). The window and taskbar icon update right away.';
   logoImg.onclick = changeLogo;
 
   // drop an image ON the logo to set it (drag a png from the desktop → logo)

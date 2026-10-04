@@ -2,6 +2,25 @@
 
 Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 
+## [0.6.41] — 2026-10-04
+
+### Fixed
+- **A new logo now shows on the taskbar right away.** The taskbar button kept
+  the old icon after a logo change, even after the window was reopened (seen
+  on Cosiall Org: new logo in the window and in the Start Menu folder, old
+  purple "C" on the taskbar). Two causes, both fixed:
+  - Windows caches a taskbar button's icon by file path, and the icon was
+    always rebuilt at the same path. Every logo change now gets a new icon
+    file name (`<id>.v<stamp>.ico`); older ones are cleaned up.
+  - The taskbar only reads the icon when it creates the button. After a logo
+    change the window is moved to a throwaway app identity and back, which
+    makes the taskbar build a new button. No visible blink.
+- Verified live with taskbar screenshots: eight logo changes in a row each
+  showed the new icon at once. Not yet verified for a workspace that is
+  PINNED to the taskbar (pinning can't be scripted on Windows 11).
+- A workspace whose taskbar icon is already stale (Cosiall Org) needs its logo
+  picked once more after the restart. Smoke 97/97.
+
 ## [0.6.40] — 2026-10-04
 
 ### Changed

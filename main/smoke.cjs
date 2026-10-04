@@ -115,6 +115,22 @@ async function runSmoke() {
   // 4. registry CRUD
   const ws = await workspaces.create({ name: 'Smoke Repo', repoPath: 'D:\\Repositories', logoPath: tmpPng });
   check('workspace create', Boolean(workspaces.get(ws.id)) && ws.iconPath && fs.existsSync(ws.iconPath), ws.id);
+  {
+    // a logo change must land at a NEW icon path (Windows caches taskbar icons by
+    // path); the first icon stays, older versioned ones are pruned
+    const first = ws.iconPath;
+    const a = await workspaces.updateLogo(ws.id, tmpPng, 1_000_000);
+    const pathA = a.iconPath;
+    const b = await workspaces.updateLogo(ws.id, tmpPng, 2_000_000);
+    const pathB = b.iconPath;
+    const c = await workspaces.updateLogo(ws.id, tmpPng, 3_000_000);
+    const versioned = (p) => path.basename(p).startsWith(ws.id + '.v') && p.endsWith('.ico');
+    check('logo change gets a new icon path each time; old versions pruned',
+      pathA !== first && pathB !== pathA && c.iconPath !== pathB && versioned(pathA) && versioned(c.iconPath)
+      && fs.existsSync(c.iconPath) && fs.existsSync(pathB) && !fs.existsSync(pathA) && fs.existsSync(first)
+      && workspaces.get(ws.id).iconPath === c.iconPath,
+      JSON.stringify([first, pathA, pathB, c.iconPath].map(p => path.basename(p))));
+  }
   check('workspace remove', workspaces.remove(ws.id) && !workspaces.get(ws.id));
 
   // 5. session tracker assign logic (simulated on real dir)
