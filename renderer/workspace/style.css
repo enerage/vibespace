@@ -651,12 +651,14 @@ body.dragging #split-v, body.dragging #split-h { background: color-mix(in srgb, 
   white-space: nowrap;
 }
 .acct-pill.switching { color: var(--yellow); background: color-mix(in srgb, var(--yellow) 14%, transparent); font-style: italic; }
-/* activity strip: one line between the tab bar and the active terminal */
+/* activity strip: a status bar BELOW the active terminal (0.6.42; it sat between
+   the tab bar and the terminal before). Claude's prompt and mode line are at the
+   bottom, so that's where the eyes already are. */
 #term-strip {
   height: 22px; flex: none;
   display: flex; align-items: center; gap: 6px;
   padding: 0 10px; font-size: 11.5px; color: var(--dim);
-  background: var(--panel); border-bottom: 1px solid var(--border-soft);
+  background: var(--panel); border-top: 1px solid var(--border-soft);
   white-space: nowrap; overflow: hidden; user-select: none;
 }
 #term-strip .ts-dot, .fu-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--status-idle); }

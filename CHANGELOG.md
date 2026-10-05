@@ -2,6 +2,16 @@
 
 Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 
+## [0.6.42] — 2026-10-05
+
+### Changed
+- **The activity strip is now a status bar below the terminal** (it sat between
+  the tabs and the terminal). Claude's prompt and mode line are at the bottom,
+  so the agent's state, context %, model and tasks are next to where you type,
+  and the top keeps its room for wrapped tab rows. The task checklist opens
+  upward from it. Checked in both dock positions. Takes effect after one
+  ↻ Restart.
+
 ## [0.6.41] — 2026-10-04
 
 ### Fixed

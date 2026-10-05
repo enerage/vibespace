@@ -5,7 +5,7 @@ import { $, el } from './common.js';
 // (working/waiting/done lights); everything here only adds detail, and a tab
 // without a feed (plain terminal, agent started before the feed existed) looks
 // exactly as before: no strip, no pill, no peek.
-//   - activity strip: one line above the active terminal
+//   - activity strip: a status bar below the active terminal
 //   - peek card: hover a tab ~350 ms (or click the strip's reply text)
 //   - task checklist popover: click the strip's tasks part
 
@@ -223,7 +223,10 @@ function renderList(anchor) {
   const r = anchor.getBoundingClientRect();
   const w = listEl.offsetWidth;
   listEl.style.left = Math.max(8, Math.min(r.right - w, window.innerWidth - w - 8)) + 'px';
-  listEl.style.top = (r.bottom + 4) + 'px';
+  // the strip is a bottom status bar: open upward when there's no room below
+  const h = listEl.offsetHeight;
+  const below = r.bottom + 4;
+  listEl.style.top = (below + h > window.innerHeight - 8 ? Math.max(8, r.top - h - 4) : below) + 'px';
 }
 
 function toggleList(anchor) {
