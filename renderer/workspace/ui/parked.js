@@ -53,6 +53,7 @@ export function makeEntry(tab, { lastMessage = null, model = null, now = Date.no
     claudeSessionId: tab.sessionId,
     worktree: tab.worktree || null,
     account: tab.account || null,
+    accountAt: tab.accountAt || 0,
     parkedAt: now,
     lastMessage: typeof lastMessage === 'string' && lastMessage.trim() ? lastMessage.trim().slice(0, MAX_LAST) : null,
     model: model || null,

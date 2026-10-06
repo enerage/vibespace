@@ -145,7 +145,7 @@ Key facts encoded in `main/sessions.cjs`:
 
 ## Developing VibeSpace
 
-- `npm run smoke` — 99 self-tests (as of 0.6.46) incl. pty echo and live session discovery. Run it after
+- `npm run smoke` — 99 self-tests (as of 0.6.47) incl. pty echo and live session discovery. Run it after
   touching main-process code, **from a normal shell**: inside a Claude pty the stripped
   PATH and nested ConPTY break the pty test (`powershell.exe` "File not found" /
   AttachConsole) — prepend System32 to PATH and give it its own console, or just use a
@@ -312,6 +312,25 @@ Key facts encoded in `main/sessions.cjs`:
     when a main-thread turn that STARTED after `at` ends with Stop
     (`noteTurnForAccount`). A turn already streaming when another tab hit the
     limit proves nothing.
+  - **"Move all here"** (0.6.47, `accounts.switchAll` + `terms.js` `drainMoves`):
+    a machine-wide request `{ to, at }` in its OWN file,
+    `<dataRoot>/accounts-switch.json`. A window on older main code rewrites
+    accounts.json without keys it doesn't know and would erase it. Each tab has
+    `accountAt` (when its account was chosen, saved in state.json); a request
+    newer than that moves the tab. It is retired after 12 h, when its account
+    runs out, and on a manual reorder.
+  - **A tab moves only on evidence seen by this window**: a live `done` event
+    AND `tab.draft === false` (nothing typed since the last Enter). Both are
+    unknown after a reload, so a re-attached tab waits for its next turn. Do
+    not infer "idle" from the feed or from `lastInputAt > doneAt`: a prompt
+    drafted WHILE the turn ran is older than `doneAt`, and `/exit` pasted onto
+    it gets submitted as "draft/exit".
+  - `term.paste` fires `onData`, so our own pastes (`sendToAgent`: /exit,
+    /rename, board replies) set the `appWriting` flag and don't count as typing.
+  - Before typing `/exit`, `moveOne` asks `pty:claudeRunning`. No claude under
+    the shell = the user left it, so the shell may run anything: only the
+    account file is written. The bulk path waits with `noKill` and never kills
+    a claude that didn't leave; the kill-on-timeout is for the limit switch only.
   - Claude repeats its last `rate_limits` reading on every statusLine tick until
     its next API response. Only a reading that just became full marks an account
     (`becameFull`), or an idle tab's stale 100 % re-marks it after a reset.

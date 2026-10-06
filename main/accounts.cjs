@@ -105,6 +105,33 @@ function write(data) {
   cache = null;
 }
 
+// "Move all agents here": a machine-wide request { to, at } every workspace
+// window applies to the tabs whose own account choice is older (renderer
+// terms.js drainMoves). It lives in its OWN file: a window still running older
+// main code rewrites accounts.json without keys it doesn't know, which would
+// erase the request. It is retired after 12 h, when its account runs out and
+// when the order is changed by hand, so it can never resurface days later.
+const SWITCH_TTL_MS = 12 * 3600 * 1000;
+const switchFile = () => path.join(U.dataRoot(), 'accounts-switch.json');
+function readSwitch(now = Date.now()) {
+  let j = null;
+  try { j = JSON.parse(fs.readFileSync(switchFile(), 'utf8')); } catch {}
+  if (!j || typeof j.to !== 'string' || !Number.isFinite(j.at) || now - j.at > SWITCH_TTL_MS) return null;
+  return read().accounts[j.to] ? { to: j.to, at: j.at } : null;
+}
+function writeSwitch(v) {
+  const f = switchFile();
+  const tmp = `${f}.${process.pid}.tmp`;
+  try {
+    U.ensureDir(path.dirname(f));
+    fs.writeFileSync(tmp, JSON.stringify(v || { to: null, at: Date.now() }));
+    fs.renameSync(tmp, f);
+  } catch (e) {
+    logger.warn('accounts-switch.json write failed: ' + e.message);
+    try { fs.rmSync(tmp, { force: true }); } catch {}
+  }
+}
+
 // read-modify-write; fn returns false to skip the write
 function update(fn) {
   const d = read();
@@ -159,7 +186,7 @@ function state(now = Date.now()) {
       limits: id === LOGIN ? loginLimits(now) : ((d.limits[id] && d.limits[id].limits) || null),
     };
   });
-  return { accounts, pick: pick(null, now) };
+  return { accounts, pick: pick(null, now), switchAll: readSwitch(now) };
 }
 
 const has = (id) => Boolean(read().accounts[id]);
@@ -255,6 +282,27 @@ function move(id, delta) {
     [d.order[i], d.order[j]] = [d.order[j], d.order[i]];
     return true;
   });
+  if (readSwitch()) writeSwitch(null); // a new preference by hand ends a standing "move all"
+  return state();
+}
+
+// "Move all agents here": the account becomes the first choice (new agents) and
+// every window moves its open agents to it — idle ones at once, busy ones when
+// their turn ends (renderer terms.js drainMoves). Throws for an account that is
+// out of usage: moving agents onto it would stop them all.
+function switchAll(id) {
+  const d0 = read();
+  if (!d0.accounts[id]) throw new Error('Unknown account');
+  if (isExhausted(d0, id, Date.now())) throw new Error(`${d0.accounts[id].label} is out of usage right now`);
+  // a token account whose token file is gone would stop every agent at a shell
+  if (!usable(d0, id, Date.now())) throw new Error(`${d0.accounts[id].label} has no stored token: remove it and add it again`);
+  update((d) => {
+    if (d.order[0] === id) return false;
+    d.order = [id, ...d.order.filter(x => x !== id)];
+    return true;
+  });
+  writeSwitch({ to: id, at: Date.now() });
+  logger.info(`accounts: move all agents to ${id}`);
   return state();
 }
 
@@ -288,7 +336,11 @@ function markExhausted(id, untilMs, reason) {
     extended = true;
     return true;
   });
-  if (extended) logger.info(`accounts: ${id} exhausted until ${new Date(until).toISOString()} (${reason || '?'})`);
+  if (extended) {
+    logger.info(`accounts: ${id} exhausted until ${new Date(until).toISOString()} (${reason || '?'})`);
+    const sw = readSwitch();
+    if (sw && sw.to === id) writeSwitch(null); // never pull agents onto it when it comes back
+  }
   return extended;
 }
 
@@ -339,8 +391,13 @@ function setLimits(id, rateLimits) {
 const listeners = [];
 let watching = false;
 let lastKey = null;
+const watchKey = () => {
+  let sw = '';
+  try { const st = fs.statSync(switchFile()); sw = `${st.mtimeMs}:${st.size}`; } catch {}
+  return `${statKey()}|${sw}`;
+};
 function onFileChange() {
-  const key = statKey();
+  const key = watchKey();
   if (key === lastKey) return;
   lastKey = key;
   const s = state();
@@ -351,14 +408,16 @@ function onChange(fn) {
   listeners.push(fn);
   if (watching) return;
   watching = true;
-  lastKey = statKey();
+  lastKey = watchKey();
   fs.watchFile(file(), { interval: 1000 }, onFileChange);
+  fs.watchFile(switchFile(), { interval: 1000 }, onFileChange);
 }
 
 function unwatch() {
   if (!watching) return;
   watching = false;
   try { fs.unwatchFile(file(), onFileChange); } catch {}
+  try { fs.unwatchFile(switchFile(), onFileChange); } catch {}
 }
 
 // ---------- limit detection ----------
@@ -479,6 +538,7 @@ module.exports = {
   remove,
   rename,
   move,
+  switchAll,
   clear,
   markExhausted,
   exhaustedAt,

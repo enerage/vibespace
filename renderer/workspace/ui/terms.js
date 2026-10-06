@@ -41,16 +41,118 @@ const multiAccount = () => Boolean(accountsState && accountsState.accounts.lengt
 
 function setAccounts(st) {
   if (!st || !Array.isArray(st.accounts)) return;
+  const prev = accountsState;
   accountsState = st;
   renderTabBar(); // account chips appear/disappear/relabel
+  // a new "move all agents here" (from any window): say what happens here
+  if (prev && st.switchAll && (!prev.switchAll || prev.switchAll.at !== st.switchAll.at)) {
+    const pending = [...tabs.values()].filter(pendingMove);
+    const later = pending.filter(busyForMove).length;
+    const a = accountById(st.switchAll.to);
+    if (pending.length) {
+      toast(`Moving ${pending.length} agent${pending.length > 1 ? 's' : ''} to ${a ? a.label : st.switchAll.to}`
+        + (later ? ` (${later} when ${later > 1 ? 'their' : 'its'} turn ends)` : ''));
+    }
+  }
+  drainMoves();
+}
+
+// The account a "move all agents here" (Preferences → Accounts, machine-wide)
+// asks for, when that request is newer than the tab's own account choice
+// (accountAt) and the account still has room.
+const SWITCH_TTL_MS = 12 * 3600 * 1000; // same as main/accounts.cjs
+function switchTarget(accountAt) {
+  const sw = accountsState && accountsState.switchAll;
+  if (!sw || !(sw.at > (accountAt || 0)) || Date.now() - sw.at > SWITCH_TTL_MS) return null;
+  const a = accountById(sw.to);
+  return a && !isExhausted(a) ? a.id : null;
 }
 
 // new agent → the first available account; a restored one keeps its saved
-// account while it still exists and isn't out of usage
-function resolveAccount(saved) {
+// account while it still exists and isn't out of usage, unless a newer
+// "move all" asks for another one
+function resolveAccount(saved, savedAt = 0) {
+  if (saved) {
+    const to = switchTarget(savedAt);
+    if (to) return to;
+  }
   const a = saved ? accountById(saved) : null;
   if (a && !isExhausted(a)) return a.id;
   return (accountsState && accountsState.pick) || 'login';
+}
+
+// ---- "move all agents here" ----------------------------------------------------
+// A tab still owes a move when the request is newer than its account choice.
+// Only tabs with a known conversation move: without a session id there is
+// nothing to resume, and a relaunch could strand an untracked conversation.
+function pendingMove(tab) {
+  if (!tab || !tab.isClaude || tab.dead || !tab.sessionId) return null;
+  const to = switchTarget(tab.accountAt);
+  return to && to !== (tab.account || 'login') ? to : null;
+}
+
+// Never interrupt, never guess. A tab moves only on positive evidence that it is
+// idle, seen by THIS window: a `done` status event (after a reload the status
+// is unknown until the next one) and an empty prompt (tab.draft: nothing typed
+// since the last Enter, also unknown after a reload). A running turn, an open
+// dialog, a compaction, background work the turn left running (exiting claude
+// would kill it) and a claude that is still starting all wait.
+const MOVE_SETTLE_MS = 20000;
+function busyForMove(tab) {
+  if (tab.switching || tab.status !== 'done' || !tab.doneAt || tab.draft) return true;
+  if (Date.now() - (tab.launchedAt || 0) < MOVE_SETTLE_MS) return true;
+  const f = feeds.get(tab.id);
+  if (f && (f.compacting || f.attention)) return true;
+  return feedui.bgTasks(f, 'done').length > 0;
+}
+
+// one agent at a time: every relaunch stops and starts a claude
+let moveChain = Promise.resolve();
+let appWriting = false; // sendToAgent is pasting (see term.onData)
+let moveRetry = null;
+function drainLater(ms) {
+  if (moveRetry) return;
+  moveRetry = setTimeout(() => { moveRetry = null; drainMoves(); }, ms);
+}
+function drainMoves() {
+  if (!accountsState || !accountsState.switchAll) return;
+  for (const tab of tabs.values()) {
+    if (tab.moveQueued || !pendingMove(tab)) continue;
+    if (busyForMove(tab)) {
+      // only "claude is still starting" ends by itself; the rest end with a `done`
+      if (tab.status === 'done' && tab.doneAt && !tab.draft && !tab.switching) drainLater(MOVE_SETTLE_MS + 1000);
+      continue;
+    }
+    tab.moveQueued = true;
+    moveChain = moveChain.then(() => moveOne(tab)).catch((e) => console.warn('account move failed', e && e.message));
+  }
+}
+
+async function moveOne(tab) {
+  tab.moveQueued = false;
+  const id = tab.id;
+  let to = pendingMove(tab);
+  if (!to || !tabs.has(id) || busyForMove(tab)) return;
+  // The user may have left claude by hand: then this shell could be running
+  // anything (a REPL, an editor), and nothing must be typed into it.
+  const running = await vs.claudeRunning(id);
+  to = pendingMove(tab);
+  if (!to || !tabs.has(id) || busyForMove(tab)) return; // typed or started meanwhile
+  if (running === false) {
+    const used = await vs.setTermAccount(id, to); // the next `claude` typed here uses it
+    tab.account = typeof used === 'string' ? used : to;
+    tab.accountAt = Date.now();
+    console.warn(`account move: ${id} has no claude running, account set to ${tab.account} without a relaunch`);
+    renderTabBar();
+    persist();
+    return;
+  }
+  if (running === true) await relaunchOnAccount(tab, to, { prompt: null, gentle: true });
+  if ((tab.account || 'login') !== to) {
+    // couldn't tell, or claude didn't leave: one retry, then leave the tab alone
+    tab.moveFails = (tab.moveFails || 0) + 1;
+    if (tab.moveFails >= 2) { tab.accountAt = Date.now(); renderTabBar(); persist(); } else drainLater(30000);
+  }
 }
 
 const TERM_OPTS = {
@@ -136,7 +238,11 @@ export function init(opts) {
     const tab = tabs.get(termId);
     if (!tab || tab.status === st) return;
     tab.status = st;
-    if (st === 'done') { tab.doneAt = Date.now(); syncClaudeName(tab); }
+    if (st === 'done') {
+      tab.doneAt = Date.now();
+      syncClaudeName(tab);
+      setTimeout(drainMoves, 1500); // the feed's background list lands with Stop
+    }
     autoName(tab);
     if ((st === 'waiting' || st === 'done') && activeId !== termId) tab.unread = true;
     renderTabBar();
@@ -245,6 +351,7 @@ export function init(opts) {
           savedIsClaude: isClaude,
           savedSessionId: t.claudeSessionId || null,
           account: t.account || null,
+          accountAt: t.accountAt || 0,
           worktree: t.worktree || null,
         });
       } else if (t.worktree && !(await worktreeAlive(t.worktree))) {
@@ -256,7 +363,7 @@ export function init(opts) {
         // saved session file is gone — open claude's interactive picker instead of
         // typing a resume id that would silently error out
         deadSessions.push(t.name);
-        createTab({ termId: t.termId || null, name: t.name, cwd: t.cwd || repoPath, pickSession: true, account: t.account || null, worktree: t.worktree || null });
+        createTab({ termId: t.termId || null, name: t.name, cwd: t.cwd || repoPath, pickSession: true, account: t.account || null, accountAt: t.accountAt || 0, worktree: t.worktree || null });
       } else {
         createTab({
           termId: t.termId || null, // keep stable ids across restarts (sessions pin by termId)
@@ -265,6 +372,7 @@ export function init(opts) {
           claude: opts.autoResume && isClaude && !t.claudeSessionId,
           resumeId: opts.autoResume ? (t.claudeSessionId || null) : null,
           account: t.account || null,
+          accountAt: t.accountAt || 0,
           worktree: t.worktree || null,
         });
       }
@@ -294,6 +402,7 @@ export function init(opts) {
         claude: opts.autoResume && isClaude && !t.claudeSessionId,
         resumeId: opts.autoResume ? (t.claudeSessionId || null) : null,
         account: t.account || null,
+        accountAt: t.accountAt || 0,
         worktree: t.worktree || null,
       });
     }
@@ -486,10 +595,10 @@ export async function unparkAgent(id) {
       toast(`worktree ${e.worktree.name} no longer exists: the conversation can still be resumed from + ▾ → All conversations…`, 'err');
     } else if (!(await vs.sessionCheck(wsId, e.claudeSessionId, cwd).catch(() => false))) {
       // transcript gone: claude's picker instead of a resume id that would error out
-      tab = createTab({ name, cwd, pickSession: true, account: e.account || null, worktree: e.worktree || null });
+      tab = createTab({ name, cwd, pickSession: true, account: e.account || null, accountAt: e.accountAt || 0, worktree: e.worktree || null });
       toast(`${name}: saved session gone — resume picker opened in tab`, 'err');
     } else {
-      tab = createTab({ name, cwd, resumeId: e.claudeSessionId, account: e.account || null, worktree: e.worktree || null, activate: true });
+      tab = createTab({ name, cwd, resumeId: e.claudeSessionId, account: e.account || null, accountAt: e.accountAt || 0, worktree: e.worktree || null, activate: true });
     }
     shelf = shelf.filter(x => x.id !== id);
     parked.paintChip();
@@ -687,7 +796,7 @@ function registerFileLinks(term, tab) {
   } catch {} // xterm without link-provider support — links simply don't light up
 }
 
-export function createTab({ name = 'agent', cwd = repoPath, claude = false, resumeId = null, activate = true, termId = null, attachBuffer = null, savedIsClaude = null, savedSessionId = null, pickSession = false, run = null, account = null, worktree = null } = {}) {
+export function createTab({ name = 'agent', cwd = repoPath, claude = false, resumeId = null, activate = true, termId = null, attachBuffer = null, savedIsClaude = null, savedSessionId = null, pickSession = false, run = null, account = null, accountAt = 0, worktree = null } = {}) {
   const id = termId || newTermId();
   const host = el('div', 'term-host');
   host.style.display = 'none';
@@ -726,7 +835,12 @@ export function createTab({ name = 'agent', cwd = repoPath, claude = false, resu
   if (tab.isClaude) {
     // a live (re-attached) agent keeps whatever account it is running on;
     // main relearns it so the feed files its limits under the right account
-    tab.account = attachBuffer !== null ? (account || 'login') : resolveAccount(account);
+    tab.account = attachBuffer !== null ? (account || 'login') : resolveAccount(account, accountAt);
+    // when this tab's account was chosen: a newer "move all" outranks it
+    tab.accountAt = attachBuffer !== null || tab.account === account ? (accountAt || 0) : Date.now();
+    // draft = something typed since the last Enter may sit in the prompt. A
+    // re-attached agent's prompt can't be seen: assume it has one.
+    tab.draft = attachBuffer !== null;
     if (attachBuffer !== null) {
       vs.setTermAccount(id, tab.account)
         .then((used) => { if (typeof used === 'string' && used !== tab.account) { tab.account = used; renderTabBar(); } })
@@ -753,7 +867,11 @@ export function createTab({ name = 'agent', cwd = repoPath, claude = false, resu
 
   term.onData(d => {
     // typed input marks "user may have a half-typed prompt" for syncClaudeName
-    if (!/^\x1b\[(M|<|I$|O$)/.test(d)) tab.lastInputAt = Date.now(); // not mouse/focus reports
+    // (our own pastes — /exit, /rename, a board reply — are not the user typing)
+    if (!appWriting && !/^\x1b\[(M|<|I$|O$)/.test(d)) { // not mouse/focus reports
+      tab.lastInputAt = Date.now();
+      tab.draft = !d.endsWith('\r'); // Enter submits and empties the prompt
+    }
     if (tab.lagT0 == null && isTypedKey(d)) tab.lagT0 = performance.now(); // typing-lag log
     vs.ptyWrite(id, d);
   });
@@ -776,6 +894,7 @@ export function createTab({ name = 'agent', cwd = repoPath, claude = false, resu
       }
       const cmd = claudeCommand(tab, pickSession ? '' : resumeId); // '' = picker: saved id is dead
       vs.ptyWrite(id, cmd + '\r');
+      tab.launchedAt = Date.now();
       vs.claudeStarted(wsId, id, launchOpts(tab, pickSession));
       if (resumeId) vs.sessionPinned(wsId, id, resumeId);
     }, 900);
@@ -815,12 +934,13 @@ function claudeCommand(tab, resumeId = null, prompt = null) {
 // for the PowerShell prompt (main kills claude after the timeout), then resume
 // the same conversation on the new account. prompt 'continue' restarts a turn
 // that failed on a usage limit; null just resumes and waits.
-export async function relaunchOnAccount(tab, to, { prompt = 'continue' } = {}) {
+export async function relaunchOnAccount(tab, to, { prompt = 'continue', gentle = false } = {}) {
   if (!tab || tab.dead || !to) return;
   const id = tab.id;
   if (!tab.sessionId) { console.warn(`account switch: ${id} has no session id — not relaunching`); return; }
   if (tab.switching) { console.warn(`account switch: ${id} already switching`); return; }
   const from = tab.account || 'login';
+  const askedAt = Date.now(); // a "move all" issued while this runs must still apply
   tab.switching = true;
   renderTabBar();
   try {
@@ -830,7 +950,8 @@ export async function relaunchOnAccount(tab, to, { prompt = 'continue' } = {}) {
       await new Promise(r => setTimeout(r, 500));
     }
     sendToAgent(id, '/exit');
-    const exit = await vs.waitClaudeExit(id, 15000);
+    // gentle ("move all agents"): a claude that doesn't leave is never killed
+    const exit = await vs.waitClaudeExit(id, 15000, gentle);
     const how = exit && exit.how;
     console.warn(`account switch: ${id} ${from} -> ${to}, claude exit: ${how}`);
     if (!tabs.has(id) || tab.dead) return;
@@ -844,6 +965,10 @@ export async function relaunchOnAccount(tab, to, { prompt = 'continue' } = {}) {
     // ticks still belong to the old account
     const used = await vs.setTermAccount(id, to);
     tab.account = typeof used === 'string' ? used : to;
+    tab.accountAt = askedAt;
+    tab.moveFails = 0;
+    tab.draft = false; // a new claude starts with an empty prompt
+    tab.launchedAt = Date.now();
     // same bookkeeping as createTab's known-resume launch: tracking stays pinned
     vs.ptyWrite(id, claudeCommand(tab, tab.sessionId, prompt) + '\r');
     vs.claudeStarted(wsId, id, launchOpts(tab, false));
@@ -1033,6 +1158,14 @@ function acctChip(tab) {
   }
   const a = accountById(tab.account || 'login');
   const name = a ? a.label : (tab.account || 'login');
+  const to = pendingMove(tab);
+  if (to) {
+    const target = accountById(to);
+    const toName = target ? target.label : to;
+    const p = el('span', 'acct-pill switching', '→ ' + (toName.length > 9 ? toName.slice(0, 8) + '…' : toName));
+    p.title = `On ${name}. Moves to ${toName} after its next finished turn, while the prompt is empty. Right-click → Continue on ${toName} moves it now.`;
+    return p;
+  }
   const c = el('span', 'acct-pill', name.length > 10 ? name.slice(0, 9) + '…' : name);
   c.title = `Account: ${name}` + (a && a.kind === 'token' ? ' — no phone control' : '');
   return c;
@@ -1182,6 +1315,7 @@ export function snapshot() {
     isClaude: t.isClaude,
     claudeSessionId: t.sessionId || null,
     account: t.account || null,
+    accountAt: t.accountAt || 0,
     worktree: t.worktree || null,
     named: t.named || null,
   }));
@@ -1266,7 +1400,7 @@ async function autoName(tab) {
 
 function syncClaudeName(tab) {
   if (!tab.pendingRename || tab.dead || tab.status !== 'done') return;
-  if ((tab.lastInputAt || 0) > (tab.doneAt || 0)) return;
+  if (tab.draft || (tab.lastInputAt || 0) > (tab.doneAt || 0)) return; // draft: typed while the turn ran
   const cmd = `/rename ${tab.pendingRename}`;
   tab.pendingRename = null;
   sendToAgent(tab.id, cmd);
@@ -1278,7 +1412,9 @@ function syncClaudeName(tab) {
 export function sendToAgent(id, text) {
   const tab = tabs.get(id);
   if (!tab || tab.dead || !text) return false;
-  tab.term.paste(text);
+  // term.paste fires onData synchronously: flag it so it doesn't count as typing
+  appWriting = true;
+  try { tab.term.paste(text); } finally { appWriting = false; }
   setTimeout(() => { if (tabs.has(id)) vs.ptyWrite(id, '\r'); }, 120);
   return true;
 }

@@ -1042,6 +1042,7 @@ function initIpc() {
   ipcMain.handle('accounts:remove', (e, id) => accounts.remove(String(id || '')));
   ipcMain.handle('accounts:rename', (e, id, label) => accounts.rename(String(id || ''), label));
   ipcMain.handle('accounts:move', (e, id, delta) => accounts.move(String(id || ''), delta));
+  ipcMain.handle('accounts:switchAll', (e, id) => accounts.switchAll(String(id || '')));
   ipcMain.handle('accounts:clear', (e, id) => accounts.clear(String(id || '')));
   ipcMain.handle('accounts:setTerm', (e, termId, accountId) => {
     const win = BrowserWindow.fromWebContents(e.sender);
@@ -1058,7 +1059,8 @@ function initIpc() {
     logger.info(`account: term=${termId} -> ${id}`);
     return id; // the account actually used (unknown/removed ids fall back to login)
   });
-  ipcMain.handle('pty:waitClaudeExit', (e, termId, timeoutMs) => ptyhost.waitClaudeExit(String(termId), Number(timeoutMs) || 15000));
+  ipcMain.handle('pty:waitClaudeExit', (e, termId, timeoutMs, noKill) => ptyhost.waitClaudeExit(String(termId), Number(timeoutMs) || 15000, { kill: !noKill }));
+  ipcMain.handle('pty:claudeRunning', (e, termId) => ptyhost.claudeRunning(String(termId)));
 
   // misc
   ipcMain.handle('util:claudeVersion', () => updater.claudeVersion());

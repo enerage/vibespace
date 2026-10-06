@@ -2,6 +2,29 @@
 
 Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 
+## [0.6.47] — 2026-10-06
+
+### Added
+- **Move all agents to another account in one click.** ⚙ Preferences → Accounts
+  → **Move all here** on an account's row. That account becomes the first choice
+  for new agents, and every open agent in ALL workspaces moves to it.
+  - Nothing is interrupted. Idle agents move right away, one at a time. An agent
+    that is working, waiting for an answer, compacting, running background
+    tasks or has something typed in its prompt moves after its next finished
+    turn. Until then its chip shows "→ <account>".
+  - Right-click → "Continue on <account>" still moves a single agent now.
+  - The request ends by itself: after 12 hours, when that account runs out of
+    usage, or when you reorder the accounts by hand.
+  - A tab where claude was exited by hand is never typed into. Only its account
+    is changed, for the next `claude` you start there.
+  - Not available for an account that is out of usage or has lost its token.
+  - Smoke 99/99 and an independent review (7 findings, all fixed). The move
+    itself has NOT been run live yet. Needs ↻ Restart in each window.
+
+### Fixed
+- A tab rename could be pasted onto a prompt you had drafted while the agent
+  was still working. Renames now wait for an empty prompt too.
+
 ## [0.6.46] — 2026-10-06
 
 ### Fixed

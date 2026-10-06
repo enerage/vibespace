@@ -56,10 +56,12 @@ contextBridge.exposeInMainWorld('vs', {
   accountsRemove: (id) => ipcRenderer.invoke('accounts:remove', id),
   accountsRename: (id, label) => ipcRenderer.invoke('accounts:rename', id, label),
   accountsMove: (id, delta) => ipcRenderer.invoke('accounts:move', id, delta),
+  accountsSwitchAll: (id) => ipcRenderer.invoke('accounts:switchAll', id),
   accountsClear: (id) => ipcRenderer.invoke('accounts:clear', id),
   onAccountsChanged: (cb) => ipcRenderer.on('accounts:changed', (e, state) => cb(state)),
   setTermAccount: (termId, accountId) => ipcRenderer.invoke('accounts:setTerm', termId, accountId),
-  waitClaudeExit: (termId, timeoutMs) => ipcRenderer.invoke('pty:waitClaudeExit', termId, timeoutMs),
+  waitClaudeExit: (termId, timeoutMs, noKill) => ipcRenderer.invoke('pty:waitClaudeExit', termId, timeoutMs, Boolean(noKill)),
+  claudeRunning: (termId) => ipcRenderer.invoke('pty:claudeRunning', termId),
   onAccountSwitch: (cb) => ipcRenderer.on('account:switch', (e, msg) => cb(msg)),
 
   appRestart: () => ipcRenderer.invoke('app:restart'),

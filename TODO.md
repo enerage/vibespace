@@ -147,6 +147,9 @@ Build in this order. Verify the statusLine and HTTP hooks live in a pty before r
       far logged "all accounts exhausted", because the second account (MAIN,
       token) was only added on 2026-10-06. The next limit hit is the test: expect
       a toast and the tab resuming on the other account; grep `account switch`.
+      **"Move all here" (0.6.47) has not run live**: first try it in ONE
+      restarted window with 2-3 agents (one idle, one working, one with a
+      half-typed prompt) and check the log for `account switch:` / `account move:`.
       Also open: a model-specific weekly limit (Fable has its own) marks the
       WHOLE account out. Check `quotaLimits.rateLimitType` on such a hit first.
 - [x] **Phone / away mode via Remote Control** (0.6.21, RESEARCH-REMOTE.md) —

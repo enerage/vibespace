@@ -157,6 +157,15 @@ export function init(opts) {
         reset.onclick = () => act(vs.accountsClear(a.id));
         actions.append(reset);
       }
+      if (st.accounts.length >= 2) {
+        const all = el('button', 'btn small ghost', 'Move all here');
+        all.title = out
+          ? 'This account is out of usage right now'
+          : 'Make this the first choice and move every open agent to it, in all workspaces.\nIdle agents move now, one at a time. Busy ones move when their turn ends. Nothing is interrupted.';
+        all.disabled = Boolean(out);
+        all.onclick = () => act(vs.accountsSwitchAll(a.id));
+        actions.append(all);
+      }
       const up = el('button', 'btn small ghost', '↑');
       up.title = 'Prefer this account';
       up.disabled = i === 0;

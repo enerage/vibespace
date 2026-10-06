@@ -289,7 +289,7 @@ function taskkill(pid) {
   });
 }
 
-function waitClaudeExit(termId, timeoutMs = 15000) {
+function waitClaudeExit(termId, timeoutMs = 15000, { kill = true } = {}) {
   return new Promise((resolve) => {
     const proc = sessions.get(termId);
     if (!proc) { resolve({ how: 'timeout' }); return; }
@@ -322,6 +322,8 @@ function waitClaudeExit(termId, timeoutMs = 15000) {
       if (pids && !pids.length) { finish('gone'); return; }
       if (Date.now() < deadline) { timer = setTimeout(poll, 2500); return; }
       if (!pids) { finish('unknown'); return; }
+      // kill = false ("move all agents"): a claude that didn't leave is left alone
+      if (!kill) { finish('running'); return; }
       logger.warn(`claude exit wait: ${termId} still running after ${timeoutMs} ms, killing pid ${pids.join(',')}`);
       for (const pid of pids) await taskkill(pid);
       await new Promise(r => setTimeout(r, 800));
@@ -330,6 +332,14 @@ function waitClaudeExit(termId, timeoutMs = 15000) {
     };
     timer = setTimeout(poll, 2500);
   });
+}
+
+// is a claude running under this tab's shell? true / false / null (can't tell)
+async function claudeRunning(termId) {
+  const proc = sessions.get(termId);
+  if (!proc) return null;
+  const pids = await claudePidsUnder(proc.pid);
+  return pids ? pids.length > 0 : null;
 }
 
 function write(termId, data) {
@@ -426,6 +436,7 @@ module.exports = {
   setAccount,
   accountFileFor,
   waitClaudeExit,
+  claudeRunning,
   _endsAtPrompt: endsAtPrompt,
   _withSinglePath: withSinglePath,
   onData: (fn) => { dataListener = fn; },

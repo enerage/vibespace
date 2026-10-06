@@ -1219,6 +1219,24 @@ async function runSmoke() {
       acc.move(id2, -1); // already first: no-op
       acc.move('login', -1);
       st.movedBack = acc.state().accounts.map(a => a.id).join(',') === `login,${id2}`;
+      // "move all agents here": first in the order + a standing request; refused
+      // for an account that is out
+      const sw = acc.switchAll(id2);
+      st.switchAll = sw.accounts[0].id === id2 && sw.switchAll && sw.switchAll.to === id2 && sw.switchAll.at >= t0 && sw.pick === id2;
+      acc.markExhausted('login', Date.now() + 3600e3, 'weekly limit');
+      let refused = false;
+      try { acc.switchAll('login'); } catch { refused = true; }
+      st.switchAllRefused = refused && acc.state().switchAll.to === id2;
+      acc.clear('login');
+      // retired when its account runs out, and by a manual reorder
+      acc.markExhausted(id2, Date.now() + 3600e3, 'weekly limit');
+      st.switchAllRetired = acc.state().switchAll === null;
+      acc.clear(id2);
+      acc.switchAll(id2);
+      acc.move('login', -1);
+      st.switchAllReorder = acc.state().switchAll === null && acc.state().accounts[0].id === 'login';
+      st.switchAllTtl = (acc.switchAll(id2), acc.state(Date.now() + 13 * 3600e3).switchAll === null);
+      acc.move('login', -1);
       acc.rename(id2, 'Work Max');
       acc.remove('login'); // cannot be removed
       st.renamed = acc.labelOf(id2) === 'Work Max' && acc.has('login');
@@ -1296,7 +1314,9 @@ async function runSmoke() {
         const p1 = ptyhost.waitClaudeExit(termId, 8000);
         ptyhost.write(termId, 'echo waited\r');
         w1 = await p1;
-        await new Promise(r => setTimeout(r, 500));
+        // let the prompt finish redrawing: a late chunk would end the next wait as
+        // 'prompt' instead of exercising the process scan (seen once under load)
+        await new Promise(r => setTimeout(r, 2500));
         w2 = await ptyhost.waitClaudeExit(termId, 600);
       } catch (err) {
         w1 = w1 || { how: 'error: ' + err.message };
