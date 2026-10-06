@@ -640,6 +640,18 @@ body.dragging #split-v, body.dragging #split-h { background: color-mix(in srgb, 
   box-shadow: 0 0 6px color-mix(in srgb, var(--danger) 80%, transparent);
 }
 .tab .status.failed::after, #board .status.failed::after { content: '✕'; font-size: 8px; }
+/* turn finished, background work still running (subagents / shells): a spinning
+   ring in the accent colour. Not the solid green "done" (it continues by itself)
+   and not amber "working" (the main thread is idle). */
+.tab .status.bg, #board .status.bg, #term-strip.st-bg .ts-dot, .fu-dot.st-bg {
+  width: 9px; height: 9px; background: transparent; box-shadow: none;
+  border: 2px solid var(--accent); border-top-color: transparent;
+  animation: status-spin 1.1s linear infinite;
+}
+@keyframes status-spin { to { transform: rotate(360deg); } }
+#term-strip.st-bg .ts-text { color: var(--accent-text); }
+.fu-pop .fu-bg { color: var(--dim); margin-bottom: 6px; font-size: 11.5px; }
+.fu-pop .fu-bg > div { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .task-pill {
   flex: none; font-size: 10.5px; line-height: 15px; padding: 0 5px; border-radius: 8px;
   color: var(--accent-text); background: color-mix(in srgb, var(--accent) 16%, transparent);

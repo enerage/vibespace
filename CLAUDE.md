@@ -145,7 +145,7 @@ Key facts encoded in `main/sessions.cjs`:
 
 ## Developing VibeSpace
 
-- `npm run smoke` — 98 self-tests (as of 0.6.43) incl. pty echo and live session discovery. Run it after
+- `npm run smoke` — 99 self-tests (as of 0.6.45) incl. pty echo and live session discovery. Run it after
   touching main-process code, **from a normal shell**: inside a Claude pty the stripped
   PATH and nested ConPTY break the pty test (`powershell.exe` "File not found" /
   AttachConsole) — prepend System32 to PATH and give it its own console, or just use a
@@ -319,6 +319,28 @@ Key facts encoded in `main/sessions.cjs`:
   renderer only updates on a frame, so in an occluded test window read the DOM
   AFTER a CDP screenshot; and a CDP `char` event has no keydown, so the custom
   key handler never sees it (use `keyDown` with `text`).
+- **Background state** (0.6.45): a turn can END while work it started still
+  runs. Facts captured from claude 2.1.289:
+  - `Stop` (and `SubagentStop`) carry `background_tasks: [{ id, type:
+    'subagent' | 'shell', status: 'running', description, agent_type?,
+    command? }]`. `SubagentStop`'s list still includes the agent that is
+    stopping. `claudefeed` keeps the running ones in `feed.background`.
+  - When a background task finishes, claude wakes ITSELF: a `UserPromptSubmit`
+    whose prompt starts with `<task-notification>`, then a normal turn and Stop.
+  - A subagent's tool events carry `agent_id`; the main thread's don't.
+    `status.wordForHook` ignores `PreToolUse` with `agent_id`, or a background
+    subagent turns a finished tab amber until the next Stop. After the turn
+    ended those events go to `feed.bgNow`, never `nowDoing`. "Turn ended" is the
+    `turnOpen` flag, not a timestamp comparison.
+  - The state is DERIVED in the renderer: base `done` + `feed.background` non-empty
+    (`feedui.bgTasks`) → light class `bg`, strip `st-bg`, board per `columnOf`.
+    No new status word, so the status files / toasts / badge rule is untouched.
+  - `attention.cjs` hands back the status from BEFORE the ask (`before`), so a
+    background subagent's answered permission returns to `done`.
+  - Test without spending tokens: capture hook bodies once (replace
+    `claudefeed.onHook` through the main inspector), then POST them to the
+    running instance's feed port with `x-vs-term: <a live termId>`
+    (`scratchpad/replayhttp.mjs`); `reduce` is pure, so a plain node replay works too.
 - **Tab auto-name** (0.6.43, `terms.js` `autoName` + `sessions.tabNameFor`):
   a claude tab still matching `/^agent-\d+$/` with `named` unset takes the
   session's name. Claude writes `{"type":"ai-title","aiTitle":…}` to the

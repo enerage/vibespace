@@ -16,7 +16,7 @@
 const ASK = new Set(['permission', 'question']);
 
 function newTerm() {
-  return { status: null, override: false, ask: false, turnEndedAt: null };
+  return { status: null, override: false, ask: false, turnEndedAt: null, before: null };
 }
 
 // a status-file line (working | waiting | done)
@@ -39,6 +39,7 @@ function feedState(t, feed) {
   if (ask && !t.ask) {
     t.ask = true;
     t.turnEndedAt = (feed && feed.turnEndedAt) || null;
+    t.before = t.status; // what to hand back: a background subagent can ask AFTER the turn ended
     if (t.status === 'waiting') return { apply: null, notify: false }; // already red
     t.status = 'waiting';
     t.override = true;
@@ -53,8 +54,11 @@ function feedState(t, feed) {
     // the turn ended (Stop) while we held it: the Stop hook's `done` line is on
     // its way — never clobber it with `working`
     if (((feed && feed.turnEndedAt) || null) !== t.turnEndedAt) return { apply: null, notify: false };
-    t.status = 'working'; // the tool was approved/answered and runs now
-    return { apply: 'working', notify: false };
+    // the tool was approved/answered and runs now. If the ask came from a
+    // background subagent while the tab was already `done`, it goes back to
+    // `done` (the main turn is still over), not to `working`
+    t.status = t.before === 'done' ? 'done' : 'working';
+    return { apply: t.status, notify: false };
   }
   return { apply: null, notify: false };
 }

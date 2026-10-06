@@ -1,5 +1,5 @@
 import { $, el, cardOnHover, hideCard } from './common.js';
-import { fmtElapsed, fmtAgo, taskItems, cacheChip, compactSoon, wtText } from './feedui.js';
+import { fmtElapsed, fmtAgo, taskItems, cacheChip, compactSoon, wtText, bgTasks, bgText, bgOnlyShells } from './feedui.js';
 import * as terms from './terms.js';
 import { cardFor as parkedCard, metaText as parkedMeta } from './parked.js';
 
@@ -39,6 +39,11 @@ export function columnOf(a) {
   if (a.dead) return 'other';
   if (st === 'waiting' || (f && (f.failure || f.attention === 'permission' || f.attention === 'question'))) return 'needs';
   if (st !== 'done' && (st === 'working' || (f && f.nowDoing))) return 'working';
+  // turn finished but a background subagent still runs: claude continues by
+  // itself, so it is still Working. Background SHELLS alone stay in Done (it may
+  // be a dev server, and then the agent really is waiting for you).
+  const bg = bgTasks(f, st);
+  if (bg.length && !bgOnlyShells(bg)) return 'working';
   if (st === 'done' || (f && f.turnEndedAt)) return 'done';
   return 'other';
 }
@@ -60,6 +65,7 @@ function lightClass(a) {
   if (f && f.failure) cls += ' failed';
   else if (a.status === 'waiting' && f && f.attention === 'permission') cls += ' perm';
   else if (a.status === 'waiting' && f && f.attention === 'question') cls += ' question';
+  else if (bgTasks(f, a.status).length) cls += ' bg';
   return cls;
 }
 
@@ -80,9 +86,11 @@ function cardBody(a, col) {
     line = f.reason ? f.reason.replace(/^is /, '') : 'needs your input';
     lineCls += ' needs';
     if (f.attention === 'permission' && !f.failure) lineCls += ' perm';
-  } else if (col === 'working') line = f.compacting ? 'compacting context…' : f.nowDoing ? [f.nowDoing.tool, f.nowDoing.detail].filter(Boolean).join(' ') : 'thinking…';
+  } else if (col === 'working' && bgTasks(f, a.status).length) line = 'turn finished · ' + bgText(bgTasks(f, a.status));
+  else if (col === 'working') line = f.compacting ? 'compacting context…' : f.nowDoing ? [f.nowDoing.tool, f.nowDoing.detail].filter(Boolean).join(' ') : 'thinking…';
   else if (col === 'done') { line = firstLines(f.lastMessage, 2) || 'finished its turn'; lineCls += ' reply'; }
   body.append(el('div', lineCls, line));
+  if (col === 'done' && f && bgTasks(f, a.status).length) body.append(el('div', 'bc-hint', bgText(bgTasks(f, a.status))));
   if (col === 'needs' && f && f.attention === 'permission' && !f.failure) body.append(el('div', 'bc-hint', 'Approve or deny in the terminal — click to open it'));
 
   if (f) {

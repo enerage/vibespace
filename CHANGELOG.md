@@ -2,6 +2,33 @@
 
 Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 
+## [0.6.45] — 2026-10-06
+
+### Added
+- **A "background" state for agent tabs.** When Claude's turn has finished but
+  subagents or shell commands it started are still running, the tab now shows
+  a spinning blue ring instead of the solid green "done". The tooltip, the
+  status bar under the terminal and the agent board say what is running, for
+  example `2 in background: subagent: Research X, shell: npm test`. Claude
+  continues by itself when they finish, so this is "not waiting on you".
+- On the agent board a tab with a running background subagent stays in
+  **Working** ("turn finished · …"). A tab with only background shell commands
+  stays in **Done** with the list underneath, because a shell can be a test run
+  (Claude continues) or a dev server (it never ends and Claude is waiting for you).
+
+### Fixed
+- A background subagent's tool calls no longer flip a finished tab back to
+  amber "working", where it then stayed until the next turn ended. Only the
+  main thread's own events decide working / done.
+- A permission prompt from a background subagent, once answered, returns the
+  tab to its previous state instead of "working".
+
+- How it was verified: the events of a real Claude run (one background shell,
+  one background subagent) were captured and replayed through a running window.
+  The tab went working → background (subagent + shell) → background (shell) →
+  done, with Claude's two self-wake-ups in between. Before the change the same
+  run showed done, then working from the subagent's tool call. Smoke 99/99.
+
 ## [0.6.44] — 2026-10-06
 
 ### Fixed

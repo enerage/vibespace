@@ -66,11 +66,41 @@ export function wtText(wt) {
 
 const reasonText = (f) => (f && f.reason ? f.reason.replace(/^is /, '') : '');
 
+// ---------- background work (feed.background, from claude's Stop hook) ----------
+// The turn can end while subagents or shell commands it started are still
+// running. That is its own state: not working (the main thread is idle), not
+// done (it continues by itself when they finish), and not waiting on the user.
+export function bgTasks(f, baseStatus) {
+  if (!f || f.failure || baseStatus !== 'done' || !Array.isArray(f.background)) return [];
+  return f.background;
+}
+const bgOne = (t) => (t.type === 'shell'
+  ? `shell: ${t.command || t.description || '?'}`
+  : `${t.type === 'subagent' ? 'subagent' : t.type}: ${t.description || t.agentType || '?'}`);
+// "2 in background: subagent: Research X, shell: npm test"
+export function bgText(tasks, max = 2) {
+  if (!tasks.length) return '';
+  const shown = tasks.slice(0, max).map(bgOne).join(', ');
+  return `${tasks.length} in background: ${shown}${tasks.length > max ? `, +${tasks.length - max} more` : ''}`;
+}
+// only shells: could be a test run (claude continues) or a dev server (it never ends)
+export const bgOnlyShells = (tasks) => tasks.length > 0 && tasks.every(t => t.type === 'shell');
+function bgTitle(tasks) {
+  return 'Turn finished, still running in the background:\n'
+    + tasks.slice(0, 8).map(t => '• ' + bgOne(t)).join('\n')
+    + (bgOnlyShells(tasks)
+      ? '\nClaude continues by itself when a command ends. A server that never ends keeps this light on.'
+      : '\nClaude continues by itself when they finish. It is not waiting on you.');
+}
+
 // extra light class on top of the base status: failed regardless of base (a
-// StopFailure fires no Stop hook), perm/question only while base says waiting
+// StopFailure fires no Stop hook), perm/question only while base says waiting,
+// bg while the turn is done but background work is still running
 export function lightDetail(f, baseStatus) {
   if (!f) return { cls: '', title: '' };
   if (f.failure) return { cls: 'failed', title: reasonText(f) };
+  const bg = bgTasks(f, baseStatus);
+  if (bg.length) return { cls: 'bg', title: bgTitle(bg) };
   if (baseStatus === 'waiting') {
     if (f.attention === 'permission') return { cls: 'perm', title: reasonText(f) };
     if (f.attention === 'question') return { cls: 'question', title: reasonText(f) };
@@ -88,6 +118,11 @@ function stateLine(tab, f) {
   if (st !== 'done' && (st === 'working' || f.nowDoing)) {
     const doing = f.nowDoing ? [f.nowDoing.tool, f.nowDoing.detail].filter(Boolean).join(' ') : 'thinking…';
     return { cls: 'working', text: doing, time: f.turnStartedAt ? fmtElapsed(Date.now() - f.turnStartedAt) : '' };
+  }
+  const bg = bgTasks(f, st);
+  if (bg.length) {
+    const now = f.bgNow ? ' · ' + [f.bgNow.tool, f.bgNow.detail].filter(Boolean).join(' ') : '';
+    return { cls: 'bg', text: bgText(bg) + now, time: f.turnEndedAt ? fmtElapsed(Date.now() - f.turnEndedAt) : '' };
   }
   return { cls: 'done', text: f.turnEndedAt ? `done ${fmtAgo(f.turnEndedAt)}` : 'idle', time: '' };
 }
@@ -178,7 +213,8 @@ export function refresh() {
   const text = el('span', 'ts-text', line.text);
   stripEl.append(text);
   if (line.time) stripEl.append(el('span', 'ts-sep', '·'), el('span', 'ts-time', line.time));
-  if (line.cls === 'done' && f.lastMessage) {
+  if (line.cls === 'bg') text.title = lightDetail(f, tab.status).title;
+  if ((line.cls === 'done' || line.cls === 'bg') && f.lastMessage) {
     const reply = el('span', 'ts-reply', `“${firstLine(f.lastMessage)}”`);
     reply.title = 'Show the last reply';
     reply.onclick = (e) => { e.stopPropagation(); openPeek(id, { pinned: true }); };
@@ -206,8 +242,8 @@ export function refresh() {
     closeList();
   }
   if (f.subagents > 0) stripEl.append(el('span', 'ts-sub', `${f.subagents} subagent${f.subagents > 1 ? 's' : ''}`));
-  // timers tick here, not per feed tick: 1 s while working, 30 s otherwise
-  stripTimer = setTimeout(refresh, line.cls === 'working' ? 1000 : 30000);
+  // timers tick here, not per feed tick: 1 s while working (or background work runs), 30 s otherwise
+  stripTimer = setTimeout(refresh, line.cls === 'working' || line.cls === 'bg' ? 1000 : 30000);
 }
 
 // ---------- task checklist popover ----------
@@ -258,7 +294,12 @@ function renderPeek() {
   const pchip = cacheChip(f, line.cls === 'working' || line.cls === 'waiting');
   if (pchip) meta.append(pchip);
   if (meta.childNodes.length) peekEl.append(meta);
-  if (f.nowDoing && line.cls !== 'done') peekEl.append(el('div', 'fu-doing', 'Now: ' + [f.nowDoing.tool, f.nowDoing.detail].filter(Boolean).join(' ')));
+  if (f.nowDoing && line.cls !== 'done' && line.cls !== 'bg') peekEl.append(el('div', 'fu-doing', 'Now: ' + [f.nowDoing.tool, f.nowDoing.detail].filter(Boolean).join(' ')));
+  if (line.cls === 'bg') {
+    const box = el('div', 'fu-bg');
+    for (const t of bgTasks(f, tab.status).slice(0, 8)) box.append(el('div', '', '• ' + bgOne(t)));
+    peekEl.append(box);
+  }
   const items = taskItems(f);
   if (items.length) peekEl.append(taskList(items, 8));
   if (f.lastMessage) {

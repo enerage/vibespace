@@ -79,8 +79,32 @@ function emptyState() {
     sessionId: null, transcriptPath: null, sessionName: null, promptCache: null, rateLimits: null,
     nowDoing: null, attention: null, lastMessage: null, turnStartedAt: null, turnEndedAt: null,
     failure: null, subagents: 0, compacting: null, todos: null, tasks: [],
+    background: [], bgNow: null, turnOpen: false,
   };
 }
+
+// What is still RUNNING in the background, from the `background_tasks` list on
+// Stop / SubagentStop. Seen live (2.1.289): { id, type: 'subagent' | 'shell',
+// status: 'running', description, agent_type?, command? }. A turn can end with
+// these alive; claude then wakes itself with a <task-notification> prompt when
+// one finishes. null = the event carried no list (older claude).
+const BG_FINISHED = /complet|fail|stop|kill|cancel|done|exit/i;
+function bgRunning(list, exceptId = null) {
+  if (!Array.isArray(list)) return null;
+  return list
+    .filter(t => t && t.id != null && String(t.id) !== String(exceptId) && !BG_FINISHED.test(String(t.status || '')))
+    .slice(0, 20)
+    .map(t => ({
+      id: String(t.id),
+      type: typeof t.type === 'string' && t.type ? t.type : 'task',
+      description: clip(String(t.description || ''), 120),
+      command: typeof t.command === 'string' && t.command ? clip(t.command, 120) : null,
+      agentType: typeof t.agent_type === 'string' ? t.agent_type : null,
+    }));
+}
+// the main turn is over: a Stop arrived and no prompt since (turnOpen, not the
+// timestamps: a wake-up prompt can follow a Stop within the same millisecond)
+const turnEnded = (s) => !s.turnOpen && Boolean(s.turnEndedAt);
 
 // attention = a real ask: 'permission' | 'question' | 'input'. Notification types
 // map onto it; idle_prompt (finished agent idling) and the rest are NOT asks.
@@ -174,6 +198,14 @@ function reduceCore(state, kind, event, body, now) {
   }
   if (kind !== 'hook') return s;
   const lastMsg = typeof body.last_assistant_message === 'string' ? clip(body.last_assistant_message, 2000) : s.lastMessage;
+  // A background subagent keeps calling tools after the main turn ended (its
+  // events carry agent_id). That is background activity, not the tab's "now
+  // doing": it goes to bgNow and never touches the turn's own state.
+  if (body.agent_id && turnEnded(s) && (event === 'PreToolUse' || event === 'PostToolUse' || event === 'PostToolUseFailure')) {
+    const next = { ...s, bgNow: event === 'PreToolUse' ? { tool: body.tool_name || '?', detail: toolDetail(body.tool_input) } : null };
+    if (s.attention === 'permission' || s.attention === 'question') next.attention = null; // its dialog was answered
+    return next;
+  }
   switch (event) {
     case 'PreToolUse': {
       const next = { ...s, nowDoing: { tool: body.tool_name || '?', detail: toolDetail(body.tool_input) } };
@@ -223,19 +255,38 @@ function reduceCore(state, kind, event, body, now) {
       return a && s.attention !== a ? { ...s, attention: a } : s;
     }
     case 'UserPromptSubmit':
-      return { ...s, attention: null, failure: null, turnStartedAt: now };
+      return { ...s, attention: null, failure: null, turnStartedAt: now, turnOpen: true };
     case 'SubagentStart':
       return { ...s, subagents: (s.subagents || 0) + 1 };
-    case 'SubagentStop':
-      // also fires for internal agents that never had a SubagentStart: floor at 0
-      return s.subagents > 0 ? { ...s, subagents: s.subagents - 1 } : s;
-    case 'Stop':
-      return { ...s, nowDoing: null, attention: null, failure: null, subagents: 0, lastMessage: lastMsg, turnEndedAt: now };
-    case 'StopFailure':
+    case 'SubagentStop': {
+      // also fires for internal agents that never had a SubagentStart: floor at 0.
+      // Its background_tasks still lists the agent that is stopping: drop it.
+      const bg = bgRunning(body.background_tasks, body.agent_id)
+        || (s.background || []).filter(t => t.id !== String(body.agent_id));
+      const prev = s.background || [];
+      const sameBg = bg.length === prev.length && bg.every((t, i) => t.id === prev[i].id);
+      const subagents = Math.max(0, (s.subagents || 0) - 1);
+      const bgNow = turnEnded(s) ? null : s.bgNow;
+      // nothing changed (an internal agent's stop): same object, so no redraw
+      if (sameBg && subagents === (s.subagents || 0) && bgNow === s.bgNow) return s;
+      return { ...s, subagents, background: sameBg ? prev : bg, bgNow };
+    }
+    case 'Stop': {
+      // the turn is over, but background subagents / shells may still be running
+      const bg = bgRunning(body.background_tasks) || [];
       return {
-        ...s, nowDoing: null, attention: null, subagents: 0, lastMessage: lastMsg, turnEndedAt: now,
+        ...s, nowDoing: null, attention: null, failure: null, lastMessage: lastMsg, turnEndedAt: now, turnOpen: false,
+        background: bg, bgNow: null, subagents: bg.filter(t => t.type === 'subagent').length,
+      };
+    }
+    case 'StopFailure': {
+      const bg = bgRunning(body.background_tasks) || [];
+      return {
+        ...s, nowDoing: null, attention: null, lastMessage: lastMsg, turnEndedAt: now, turnOpen: false,
+        background: bg, bgNow: null, subagents: bg.filter(t => t.type === 'subagent').length,
         failure: failureOf(body, now),
       };
+    }
     case 'TaskCreated':
     case 'TaskCompleted': {
       if (body.task_id == null) return s;

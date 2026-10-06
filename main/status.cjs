@@ -57,8 +57,13 @@ function stop(wsId) {
 // mirroring the Git Bash hooks: prompt/tool → working, turn end → done, a
 // Notification → waiting unless it's the idle "waiting for your input" nudge
 // (finished agents stay green). null = event carries no status.
+// A SUBAGENT's tool call (its events carry agent_id) says nothing about the
+// main turn: a background subagent keeps calling tools after the turn's Stop,
+// and its `working` used to turn a finished tab amber until the next Stop.
+// The turn's own state comes from the main thread's events only.
 function wordForHook(event, body) {
-  if (event === 'UserPromptSubmit' || event === 'PreToolUse') return 'working';
+  if (event === 'UserPromptSubmit') return 'working';
+  if (event === 'PreToolUse') return body && body.agent_id ? null : 'working';
   if (event === 'Stop') return 'done';
   if (event === 'Notification') {
     let text = '';

@@ -391,6 +391,47 @@ async function runSmoke() {
     check('status word from HTTP hooks', w('UserPromptSubmit', {}) === 'working' && w('PreToolUse', { tool_name: 'Bash' }) === 'working'
       && w('Stop', {}) === 'done' && w('Notification', { message: 'Claude needs your permission to use Bash' }) === 'waiting'
       && w('Notification', { message: 'Claude is waiting for your input' }) === null && w('PostToolUse', {}) === null);
+    // background work: a turn that ends with subagents / shells still running.
+    // The event shapes are the ones captured from claude 2.1.289 (2026-10-06).
+    {
+      const cf = require('./claudefeed.cjs');
+      const at = require('./attention.cjs');
+      const sub = { id: 'a03c', type: 'subagent', status: 'running', description: 'Sleep 20 then reply', agent_type: 'general-purpose' };
+      const sh = { id: 'bdue', type: 'shell', status: 'running', description: 'Sleep in background', command: 'sleep 40' };
+      let s = cf.reduce(undefined, 'hook', 'UserPromptSubmit', {});
+      s = cf.reduce(s, 'hook', 'PreToolUse', { tool_name: 'Agent', tool_input: {} });
+      s = cf.reduce(s, 'hook', 'SubagentStart', { agent_id: 'a03c' });
+      const during = cf.reduce(s, 'hook', 'PreToolUse', { tool_name: 'Bash', tool_input: { command: 'x' }, agent_id: 'a03c' }); // foreground: still the turn's "now"
+      s = cf.reduce(s, 'hook', 'Stop', { last_assistant_message: 'started', background_tasks: [sub, sh] });
+      const ended = s;
+      s = cf.reduce(s, 'hook', 'PreToolUse', { tool_name: 'Bash', tool_input: { command: 'sleep 20' }, agent_id: 'a03c' });
+      const subTool = s;
+      s = cf.reduce(s, 'hook', 'SubagentStop', { agent_id: 'a03c', background_tasks: [sub, sh] }); // still lists itself
+      const subDone = s;
+      s = cf.reduce(s, 'hook', 'UserPromptSubmit', { prompt: '<task-notification>' });
+      const woke = s;
+      s = cf.reduce(s, 'hook', 'Stop', { background_tasks: [{ ...sh, status: 'completed' }] });
+      const old = cf.reduce(cf.reduce(undefined, 'hook', 'UserPromptSubmit', {}), 'hook', 'Stop', {}); // older claude: no list
+      // a background subagent asks for permission AFTER the turn ended: answered → back to done, not working
+      const t = at.newTerm();
+      at.fileStatus(t, 'done');
+      const ask = at.feedState(t, { attention: 'permission', turnEndedAt: 5 });
+      const back = at.feedState(t, { attention: null, turnEndedAt: 5 });
+      const t2 = at.newTerm();
+      at.fileStatus(t2, 'working');
+      at.feedState(t2, { attention: 'permission', turnEndedAt: null });
+      const back2 = at.feedState(t2, { attention: null, turnEndedAt: null });
+      check('background work: Stop keeps running tasks, subagent tools never flip the turn',
+        during.nowDoing && during.nowDoing.tool === 'Bash' && !during.bgNow
+        && ended.background.length === 2 && ended.background[1].command === 'sleep 40' && ended.subagents === 1 && !ended.nowDoing
+        && subTool.bgNow && subTool.bgNow.tool === 'Bash' && !subTool.nowDoing
+        && subDone.background.length === 1 && subDone.background[0].type === 'shell' && !subDone.bgNow
+        && woke.background.length === 1 && woke.turnOpen === true
+        && s.background.length === 0 && old.background.length === 0
+        && w('PreToolUse', { tool_name: 'Bash', agent_id: 'a03c' }) === null && w('PreToolUse', { tool_name: 'Bash' }) === 'working'
+        && ask.apply === 'waiting' && back.apply === 'done' && back2.apply === 'working',
+        JSON.stringify({ ended: ended.background.map(x => x.type), subDone: subDone.background.map(x => x.type), back: back.apply, back2: back2.apply }));
+    }
     const dir = path.join(U.dataRoot(), 'status-smoke');
     let got = null;
     statusMod.onData((wsId, termId, st) => { got = { wsId, termId, st }; });
