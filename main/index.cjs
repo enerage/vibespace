@@ -995,6 +995,13 @@ function initIpc() {
   ipcMain.handle('sessions:check', (e, wsId, sessionId, cwd) => sessions.sessionExists(wsId, sessionId, typeof cwd === 'string' ? cwd : null));
   // parking an agent with no feed: its last reply from the transcript tail
   ipcMain.handle('sessions:lastReply', (e, wsId, sessionId, cwd) => sessions.lastReply(wsId, String(sessionId || ''), typeof cwd === 'string' ? cwd : null));
+  // auto-name for a tab still called agent-N: claude's own session title (or its
+  // /rename name) from the transcript → { name, from } | null
+  ipcMain.handle('sessions:tabName', (e, wsId, sessionId, cwd, taken) => {
+    const ws = workspaces.get(wsId);
+    return sessions.tabNameFor(wsId, String(sessionId || ''), typeof cwd === 'string' ? cwd : null, ws ? ws.name : '',
+      Array.isArray(taken) ? taken.filter(n => typeof n === 'string').slice(0, 200) : []);
+  });
   // worktree tabs (main/worktrees.cjs): the repo always comes from the SENDER's
   // own workspace, never from the renderer
   const wtRepo = (e, wsId) => {

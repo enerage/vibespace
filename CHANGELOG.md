@@ -2,6 +2,25 @@
 
 Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 
+## [0.6.43] — 2026-10-06
+
+### Added
+- **Agent tabs name themselves.** A tab still called `agent-N` takes the
+  conversation's name shortly after your first message: Claude's own session
+  title (for example "Login page timeout"), shortened to 30 characters. A
+  conversation that already has a name from `/rename` uses that instead. The
+  new name is also sent to Claude as `/rename <workspace> · <name>` when the
+  agent is idle, so the phone and the resume list show the same thing.
+- Rules: it happens once per tab; a name you type yourself is never
+  overwritten (even if you type `agent-9`); worktree tabs, plain terminals and
+  already-named tabs are left alone; two tabs never get the same name.
+- Restored tabs that are still `agent-N` pick up their conversation's title a
+  few seconds after the window opens.
+- Verified live with a real Claude session: one message, and the tab went from
+  "agent-1" to "Login page timeout" 23 s after the session started, with the
+  `/rename` sent by itself. A hand-typed name survived a reload, and a restored
+  `agent-5` took its title on open. Smoke 98/98.
+
 ## [0.6.42] — 2026-10-05
 
 ### Changed

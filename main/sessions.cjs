@@ -164,6 +164,78 @@ function lastReply(wsId, sessionId, cwd = null) {
   return file ? lastReplyOf(file) : null;
 }
 
+// The session's names as Claude records them in its transcript:
+//   ai      Claude's own title ({"type":"ai-title","aiTitle":…}), written a few
+//           lines after the first message and never changed afterwards
+//   custom  the /rename name ({"type":"custom-title","customTitle":…}); ours
+//           arrive as "<workspace> · <tab>"
+// Both are re-appended as the file grows, so the tail usually has them; a short
+// or young file is covered by the head. → { ai, custom } (either may be null)
+function titlesOf(jsonlPath, { chunk = 256 * 1024 } = {}) {
+  let fd = null;
+  const out = { ai: null, custom: null };
+  const scan = (text) => {
+    for (const line of text.split('\n')) {
+      const isAi = line.includes('"type":"ai-title"');
+      if (!isAi && !line.includes('"type":"custom-title"')) continue;
+      let j;
+      try { j = JSON.parse(line); } catch { continue; } // a cut line at the chunk edge
+      if (j.type === 'ai-title' && typeof j.aiTitle === 'string' && j.aiTitle.trim()) out.ai = j.aiTitle.trim();
+      if (j.type === 'custom-title' && typeof j.customTitle === 'string' && j.customTitle.trim()) out.custom = j.customTitle.trim();
+    }
+  };
+  try {
+    fd = fs.openSync(jsonlPath, 'r');
+    const size = fs.fstatSync(fd).size;
+    const read = (pos, len) => { const b = Buffer.alloc(len); fs.readSync(fd, b, 0, len, pos); return b.toString('utf8'); };
+    if (size > chunk) scan(read(0, chunk)); // head first, so the tail's (newer) values win
+    scan(read(Math.max(0, size - chunk), Math.min(size, chunk)));
+    return out;
+  } catch {
+    return out;
+  } finally {
+    if (fd !== null) { try { fs.closeSync(fd); } catch {} }
+  }
+}
+
+// A tab name from those titles, for a tab still on its default "agent-N".
+// The /rename name wins (minus our "<workspace> · " prefix) unless it is just a
+// default name again; otherwise Claude's own title. Shortened at a word
+// boundary, made unique among `taken`. → { name, from: 'custom' | 'ai' } | null
+const DEFAULT_TAB_NAME = /^agent-\d+$/i;
+const TAB_NAME_MAX = 30;
+function tabNameFrom(titles, wsName = '', taken = []) {
+  const loose = (s) => String(s || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+  let base = '';
+  let from = null;
+  const custom = titles && titles.custom ? String(titles.custom) : '';
+  if (custom) {
+    let c = custom;
+    const i = c.indexOf(' · ');
+    if (i > 0 && loose(c.slice(0, i)) === loose(wsName)) c = c.slice(i + 3);
+    c = c.trim();
+    if (c && !DEFAULT_TAB_NAME.test(c)) { base = c; from = 'custom'; }
+  }
+  if (!base && titles && titles.ai) { base = String(titles.ai); from = 'ai'; }
+  // eslint-disable-next-line no-control-regex
+  base = base.replace(/[\x00-\x1f\x7f]/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!base) return null;
+  if (base.length > TAB_NAME_MAX) {
+    const cut = base.slice(0, TAB_NAME_MAX - 1);
+    const sp = cut.lastIndexOf(' ');
+    base = (sp >= 12 ? cut.slice(0, sp) : cut).trim() + '…';
+  }
+  const used = new Set((Array.isArray(taken) ? taken : []).map(n => String(n).toLowerCase()));
+  let name = base;
+  for (let n = 2; used.has(name.toLowerCase()); n++) name = `${base} ${n}`;
+  return { name, from };
+}
+
+function tabNameFor(wsId, sessionId, cwd = null, wsName = '', taken = []) {
+  const file = transcriptFile(wsId, sessionId, cwd);
+  return file ? tabNameFrom(titlesOf(file), wsName, taken) : null;
+}
+
 // main's state merge: the renderer snapshot + tracked session ids. `parked`
 // (stopped agents on the shelf) is carried as-is; a snapshot without the key
 // (a renderer that predates it) keeps the previous list instead of wiping it.
@@ -272,4 +344,4 @@ function sessionIdsFor(wsId) {
   return out;
 }
 
-module.exports = { start, stop, trackClaudeStart, pinSession, pinFromFeed, getSession, sessionExists, transcriptFile, lastReply, lastReplyOf, enrichState, sessionIdsFor, onData, _scan: scan, _pickResumed: pickResumed };
+module.exports = { start, stop, trackClaudeStart, pinSession, pinFromFeed, getSession, sessionExists, transcriptFile, lastReply, lastReplyOf, titlesOf, tabNameFrom, tabNameFor, enrichState, sessionIdsFor, onData, _scan: scan, _pickResumed: pickResumed };

@@ -36,6 +36,7 @@ contextBridge.exposeInMainWorld('vs', {
   sessionPinned: (wsId, termId, sessionId) => ipcRenderer.send('pty:sessionPinned', wsId, termId, sessionId),
   sessionCheck: (wsId, sessionId, cwd) => ipcRenderer.invoke('sessions:check', wsId, sessionId, cwd),
   sessionLastReply: (wsId, sessionId, cwd) => ipcRenderer.invoke('sessions:lastReply', wsId, sessionId, cwd),
+  sessionTabName: (wsId, sessionId, cwd, taken) => ipcRenderer.invoke('sessions:tabName', wsId, sessionId, cwd, taken),
   // worktree tabs (main/worktrees.cjs); main derives the repo from the window
   wtCreate: (wsId, name) => ipcRenderer.invoke('wt:create', wsId, name),
   wtList: (wsId) => ipcRenderer.invoke('wt:list', wsId),

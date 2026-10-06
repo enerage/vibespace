@@ -128,6 +128,7 @@ export function init(opts) {
     tab.sessionId = sessionId;
     renderTabBar();
     persist();
+    setTimeout(() => autoName(tab), 4000); // claude writes its title a few seconds after the first message
   });
 
   // agent status lights, fed by injected claude hooks via main (status.cjs)
@@ -136,6 +137,7 @@ export function init(opts) {
     if (!tab || tab.status === st) return;
     tab.status = st;
     if (st === 'done') { tab.doneAt = Date.now(); syncClaudeName(tab); }
+    autoName(tab);
     if ((st === 'waiting' || st === 'done') && activeId !== termId) tab.unread = true;
     renderTabBar();
   });
@@ -222,6 +224,7 @@ export function init(opts) {
   // (replaying their buffered output) instead of killing and re-spawning agents.
   // Parked agents are NOT restored as tabs: they stay on the shelf (🅿).
   const saved = parked.restorable(opts.savedTerminals, shelf);
+  for (const t of saved) if (t.termId && t.named) restoredNamed.set(t.termId, t.named);
   const firstRun = saved.length === 0 && shelf.length === 0; // everything parked = no fresh agent
   vs.ptyList().then(async live => {
     await accountsReady; // restored tabs check their saved account against the list
@@ -717,6 +720,7 @@ export function createTab({ name = 'agent', cwd = repoPath, claude = false, resu
     sessionId: savedSessionId || resumeId || null,
     term, fit, host, dead: false, search,
     worktree: worktree && worktree.path ? worktree : null, // { name, path, branch, base }
+    named: restoredNamed.get(id) || null, // 'user' | 'auto' | null (still on its default name)
     isClaude: savedIsClaude !== null ? Boolean(savedIsClaude) : Boolean(claude || resumeId || pickSession),
   };
   if (tab.isClaude) {
@@ -754,6 +758,7 @@ export function createTab({ name = 'agent', cwd = repoPath, claude = false, resu
     vs.ptyWrite(id, d);
   });
   wireClipboard(term, id);
+  if (tab.sessionId) setTimeout(() => autoName(tab), 6000); // a resumed conversation already has its title
   wireDrop(term, host);
   term.onResize(({ cols, rows }) => vs.ptyResize(id, cols, rows));
   host.addEventListener('mousedown', () => { inputsel.reset(term); activateTab(id); }, true);
@@ -1151,6 +1156,7 @@ function startRename(tabEl, labelEl, tab) {
   input.select();
   const commit = () => {
     const v = input.value.trim();
+    if (v && v !== tab.name) tab.named = 'user'; // a name you typed is never auto-renamed
     if (v && v !== tab.name && tab.isClaude) {
       tab.pendingRename = rcLabel(v); // phone + /resume list name: sent when the agent is idle
       tab.name = v;
@@ -1177,6 +1183,7 @@ export function snapshot() {
     claudeSessionId: t.sessionId || null,
     account: t.account || null,
     worktree: t.worktree || null,
+    named: t.named || null,
   }));
 }
 
@@ -1229,6 +1236,34 @@ export function attachBackground(bgId, name) {
 // sent at a safe moment: the turn is done and nothing was typed since, so it
 // never lands inside a half-typed prompt or a dialog. Otherwise it waits for the
 // next `done`.
+// A tab still called agent-N takes the conversation's name: claude's own title
+// (written to the transcript shortly after the first message) or its /rename
+// name. Once, and never over a name the user typed (`named`). Main builds the
+// name (sessions.tabNameFor). An auto name from claude's title is also sent
+// back as /rename, so the phone and the resume list show it too.
+const DEFAULT_AGENT_NAME = /^agent-\d+$/;
+const restoredNamed = new Map(); // termId -> 'user' | 'auto', from the saved state
+async function autoName(tab) {
+  const eligible = () => tabs.has(tab.id) && !tab.dead && tab.isClaude && !tab.named && tab.sessionId && DEFAULT_AGENT_NAME.test(tab.name)
+    && !document.querySelector('input.rename'); // not while a tab is being renamed by hand
+  if (!tab || tab.autoNaming || !eligible()) return;
+  tab.autoNaming = true;
+  try {
+    const taken = [...tabs.values()].filter(t => t !== tab).map(t => t.name);
+    const r = await vs.sessionTabName(wsId, tab.sessionId, tab.cwd, taken);
+    if (!r || !r.name || !eligible()) return;
+    tab.name = r.name;
+    tab.named = 'auto';
+    if (r.from === 'ai') { tab.pendingRename = rcLabel(r.name); syncClaudeName(tab); }
+    renderTabBar();
+    persist();
+  } catch (e) {
+    console.warn(`auto-name failed for ${tab.id}`, e && e.message);
+  } finally {
+    tab.autoNaming = false;
+  }
+}
+
 function syncClaudeName(tab) {
   if (!tab.pendingRename || tab.dead || tab.status !== 'done') return;
   if ((tab.lastInputAt || 0) > (tab.doneAt || 0)) return;

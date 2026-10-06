@@ -145,7 +145,7 @@ Key facts encoded in `main/sessions.cjs`:
 
 ## Developing VibeSpace
 
-- `npm run smoke` — 97 self-tests (as of 0.6.41) incl. pty echo and live session discovery. Run it after
+- `npm run smoke` — 98 self-tests (as of 0.6.43) incl. pty echo and live session discovery. Run it after
   touching main-process code, **from a normal shell**: inside a Claude pty the stripped
   PATH and nested ConPTY break the pty test (`powershell.exe` "File not found" /
   AttachConsole) — prepend System32 to PATH and give it its own console, or just use a
@@ -319,6 +319,22 @@ Key facts encoded in `main/sessions.cjs`:
   renderer only updates on a frame, so in an occluded test window read the DOM
   AFTER a CDP screenshot; and a CDP `char` event has no keydown, so the custom
   key handler never sees it (use `keyDown` with `text`).
+- **Tab auto-name** (0.6.43, `terms.js` `autoName` + `sessions.tabNameFor`):
+  a claude tab still matching `/^agent-\d+$/` with `named` unset takes the
+  session's name. Claude writes `{"type":"ai-title","aiTitle":…}` to the
+  transcript a few lines after the first message (never changed later, and
+  re-appended as the file grows) and `{"type":"custom-title"}` on `/rename`;
+  ours arrive as `<workspace> · <tab>`. `tabNameFrom` prefers the custom name
+  minus that prefix, unless it is itself a default name. Triggers: every
+  status change, 4 s after the session id is found, 6 s after a tab opens with
+  a session. `named` is saved in state.json and restored by termId
+  (`restoredNamed`); a manual rename sets `'user'` and locks the tab. Nothing
+  renames while a rename input is open. Testing: a VibeSpace started from
+  inside a Claude session inherits `CLAUDE_CODE_CHILD_SESSION`, and claude then
+  saves NO transcript ("Transcript saving is off"), so no title ever appears.
+  Clear the `CLAUDE*` variables before launching the test instance. The
+  throwaway home has `autoResume: false`, which restores agent tabs as plain
+  terminals: turn it on to test anything about restored conversations.
 - Keys: Ctrl+P file finder · Ctrl+F terminal search (active tab) · Ctrl+Shift+U
   jump-to-attention · Ctrl+Shift+B agent board · Ctrl+Shift+D diagnostics.
 - **Git** (0.6.14, sidebar since 0.6.15): `main/githistory.cjs` (log/commit/fileAt/branch,

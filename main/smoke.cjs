@@ -309,6 +309,36 @@ async function runSmoke() {
         JSON.stringify({ plan, norm: norm.map(e => e.name), names, len: entry.lastMessage.length }));
       try { fs.rmSync(d, { recursive: true, force: true }); } catch {}
     }
+    // tab auto-name: claude's title / the /rename name from a transcript →
+    // a short, unique tab name; a default-looking /rename name is ignored
+    {
+      const os = require('node:os');
+      const ss = require('./sessions.cjs');
+      const d = fs.mkdtempSync(path.join(os.tmpdir(), 'vibespace-title-'));
+      const f = path.join(d, 't.jsonl');
+      const line = (o) => JSON.stringify(o) + '\n';
+      fs.writeFileSync(f, line({ type: 'user', message: { content: 'hi' } })
+        + line({ type: 'ai-title', aiTitle: 'Tab rename focus loss', sessionId: 's' })
+        + line({ type: 'assistant', message: { content: 'x'.repeat(400) } })
+        + line({ type: 'ai-title', aiTitle: 'Tab rename focus loss', sessionId: 's' }));
+      const onlyAi = ss.titlesOf(f);
+      fs.appendFileSync(f, line({ type: 'custom-title', customTitle: 'My Repo · agent-3', sessionId: 's' }));
+      const defaultCustom = ss.tabNameFrom(ss.titlesOf(f), 'My Repo', []);
+      fs.appendFileSync(f, line({ type: 'custom-title', customTitle: 'My Repo · MULTISUB', sessionId: 's' }));
+      const custom = ss.tabNameFrom(ss.titlesOf(f), 'My Repo', []);
+      const long = ss.tabNameFrom({ ai: 'Click and add spacing availability issue in the calendar' }, '', []);
+      const dup = ss.tabNameFrom({ ai: 'Login page timeout' }, '', ['login page timeout', 'Login page timeout 2']);
+      const other = ss.tabNameFrom({ custom: 'Someone · Else' }, 'My Repo', []);
+      check('tab auto-name from transcript titles (ai, /rename, shorten, unique)',
+        onlyAi.ai === 'Tab rename focus loss' && onlyAi.custom === null
+        && defaultCustom.name === 'Tab rename focus loss' && defaultCustom.from === 'ai'
+        && custom.name === 'MULTISUB' && custom.from === 'custom'
+        && long.name.length <= 30 && long.name.endsWith('…') && long.name.startsWith('Click and add spacing')
+        && dup.name === 'Login page timeout 3' && other.name === 'Someone · Else'
+        && ss.tabNameFrom({ ai: null, custom: null }, 'x', []) === null && ss.tabNameFrom(ss.titlesOf(path.join(d, 'missing.jsonl')), 'x', []) === null,
+        JSON.stringify({ onlyAi, defaultCustom, custom, long, dup, other }));
+      try { fs.rmSync(d, { recursive: true, force: true }); } catch {}
+    }
     // logo picker scan (logoscan): ranks the logo first, never looks in
     // node_modules / build output / dot-folders, drops unreadable images
     {
