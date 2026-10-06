@@ -2,6 +2,23 @@
 
 Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 
+## [0.6.44] — 2026-10-06
+
+### Fixed
+- **The file tree no longer jumps to the top.** Every file change on disk
+  (agents write files all the time) and every window focus rebuilt the tree by
+  emptying it and filling it again. The folders load asynchronously, but the
+  scroll position was put back at once, while the tree was still empty, so the
+  browser clamped it to 0. The new tree is now built off-screen and swapped in
+  when it is complete, and the scroll position is read at the swap.
+- Side effects of the same fix: no more blank flash during a refresh, and the
+  selected file keeps its highlight after a refresh (it was lost for files
+  inside folders).
+- Verified live. Before: scrolled to 900, one file changed on disk, scroll 0.
+  After: scroll stayed put through a file change, a burst of 12 new files, a
+  delete, a focus refresh and a Files/Git switch, with the new rows showing up
+  and the highlight kept.
+
 ## [0.6.43] — 2026-10-06
 
 ### Added

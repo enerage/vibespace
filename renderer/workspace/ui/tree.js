@@ -8,6 +8,8 @@ let gitDirs = new Map(); // derived: dir path -> strongest status found under it
 const expanded = new Set(); // absolute dir paths currently expanded (persisted)
 let activeRel = null; // repo-relative path of the selected file (survives rebuilds)
 let rebuildQueued = false;
+let building = false; // a rebuild is loading folders off-screen
+let stale = false;    // something changed while it was: rebuild once more
 
 const GIT_RANK = { U: 1, A: 2, D: 2, M: 3 };
 
@@ -121,24 +123,41 @@ async function dropFiles(ev, destDir) {
 function queueRebuild() {
   if (rebuildQueued) return;
   rebuildQueued = true;
-  setTimeout(() => {
+  setTimeout(async () => {
     rebuildQueued = false;
-    const pane = $('#tree'); // the scroller since the Files|Git switcher landed
-    const scroll = pane ? pane.scrollTop : 0;
-    buildDom();
-    if (pane) pane.scrollTop = scroll;
+    if (building) { stale = true; return; } // one build at a time; redo it when this one lands
+    await buildDom();
     refreshGit();
+    if (stale) { stale = false; queueRebuild(); }
   }, 150);
 }
 
-function buildDom() {
-  $('#tree').innerHTML = '';
-  const host = el('div');
-  $('#tree').appendChild(host);
-  addDirNode(host, rootPath, rootPath.split(/[\\/]/).pop() || rootPath, expanded.has(rootPath));
-  if (activeRel) {
-    const row = document.querySelector(`#tree .tree-row[data-rel="${CSS.escape(activeRel)}"]`);
-    if (row) row.classList.add('active');
+// The new tree is built OFF-SCREEN and swapped in when it is complete. Folders
+// load asynchronously, so the old code (clear #tree, then fill it) put the
+// scroll position back while the tree was still empty: the browser clamped it
+// to 0 and every file change on disk threw the view to the top (2026-10-06).
+// Now the old tree stays on screen, scrollable, until the swap, and the scroll
+// position is read at the swap, so scrolling during the load is kept too.
+async function buildDom() {
+  building = true;
+  try {
+    const pane = $('#tree');
+    const host = el('div');
+    await addDirNode(host, rootPath, rootPath.split(/[\\/]/).pop() || rootPath, expanded.has(rootPath));
+    const top = pane.scrollTop;
+    const left = pane.scrollLeft;
+    pane.replaceChildren(host);
+    pane.scrollTop = top;
+    pane.scrollLeft = left;
+    if (activeRel) {
+      const row = pane.querySelector(`.tree-row[data-rel="${CSS.escape(activeRel)}"]`);
+      if (row) row.classList.add('active');
+    }
+    applyGitClasses(); // the rows were built outside the document, where the git pass can't see them
+  } catch (e) {
+    console.warn('tree rebuild failed', e && e.message); // keep the old tree rather than an empty pane
+  } finally {
+    building = false;
   }
 }
 
@@ -214,6 +233,7 @@ async function addDirNode(container, dirPath, name, expandedHere) {
 
   row.onclick = async (ev) => {
     ev.stopPropagation();
+    if (building) stale = true; // the tree being built off-screen has the old open/closed state
     if (!children.dataset.loaded) {
       await loadOnce();
       children.classList.remove('hidden');

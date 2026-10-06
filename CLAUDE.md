@@ -355,6 +355,16 @@ Key facts encoded in `main/sessions.cjs`:
   - `document.hidden` is true for OCCLUDED windows too, not just minimized
     ones. Pollers that skip when hidden must still run once on start and on
     `visibilitychange`.
+- **The file tree rebuilds off-screen** (0.6.44, `tree.js` `buildDom`).
+  `addDirNode` is async (one `fsList` per open folder), so "clear `#tree`,
+  fill it, restore `scrollTop`" restored the scroll on an EMPTY box and the
+  view jumped to the top on every `tree:changed`. Build into a detached
+  element, `await` it, then `replaceChildren` and set `scrollTop` (read at the
+  swap). One build at a time (`building`); a change or a folder click during
+  it sets `stale` and triggers one more. General rule: never restore a scroll
+  position before the content that makes it scrollable exists. Rows built
+  off-document are invisible to `document.querySelector`, so the git colours
+  and the active row are applied after the swap.
 - **Terminal widths must match Claude's.** Every xterm loads
   `@xterm/addon-unicode11` and sets `unicode.activeVersion = '11'`. The default
   Unicode 6 table counts emoji as 1 cell; Claude and ConPTY count 2, and the
