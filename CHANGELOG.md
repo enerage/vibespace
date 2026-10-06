@@ -2,6 +2,16 @@
 
 Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 
+## [0.6.48] — 2026-10-06
+
+### Fixed
+- **The last terminal line is no longer clipped at the bottom.** The terminal
+  box counted its own padding as usable height, so the terminal was fitted
+  about half a row too tall and Claude's bottom status line could be cut off.
+  (A fix another session left uncommitted in the working tree for days; every
+  restarted window was already running it. Checked before committing: 60 rows
+  × 15 px = 900 px inside 914 px of space.)
+
 ## [0.6.47] — 2026-10-06
 
 ### Added

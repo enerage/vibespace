@@ -388,7 +388,11 @@ body { margin: 0; background: var(--bg); color: var(--text); font: 13.5px/1.45 "
 }
 
 #term-hosts { flex: 1; position: relative; min-height: 0; }
-.term-host { position: absolute; inset: 0; padding: 4px 6px; }
+/* content-box, NOT the global border-box: xterm's FitAddon sizes rows from the
+   PARENT's computed `height`, which under border-box includes this padding, so
+   it fit ~8px (half a row) too many and the last line (Claude's status bar)
+   was clipped at the bottom. Absolute + inset:0 keeps the box in the pane. */
+.term-host { position: absolute; inset: 0; padding: 4px 6px; box-sizing: content-box; }
 
 /* ---------- update modal ---------- */
 
