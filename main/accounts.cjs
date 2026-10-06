@@ -64,7 +64,8 @@ function normalize(raw) {
   const exhausted = {};
   if (r.exhausted && typeof r.exhausted === 'object') {
     for (const [id, e] of Object.entries(r.exhausted)) {
-      if (accounts[id] && e && Number.isFinite(e.until)) exhausted[id] = { until: e.until, reason: e.reason ? String(e.reason).slice(0, 200) : null };
+      // at = when the evidence was seen (0 for entries written before 0.6.46)
+      if (accounts[id] && e && Number.isFinite(e.until)) exhausted[id] = { until: e.until, reason: e.reason ? String(e.reason).slice(0, 200) : null, at: Number(e.at) || 0 };
     }
   }
   const limits = {};
@@ -267,20 +268,54 @@ function clear(id) {
   return state();
 }
 
-// only ever EXTENDS an exhaustion window — a later, shorter guess never shortens it
+// only ever EXTENDS an exhaustion window — a later, shorter guess never shortens it.
+// `at` is when the evidence was seen: fresh evidence refreshes it (at most one
+// write per 10 s), so clearIfProven only trusts turns started after it.
 function markExhausted(id, untilMs, reason) {
   const until = Number(untilMs);
-  if (!Number.isFinite(until) || until <= Date.now()) return false;
-  const changed = update((d) => {
+  const now = Date.now();
+  if (!Number.isFinite(until) || until <= now) return false;
+  let extended = false;
+  update((d) => {
     if (!d.accounts[id]) return false;
     const prev = d.exhausted[id];
-    if (prev && prev.until >= until) return false;
-    d.exhausted[id] = { until, reason: reason ? String(reason).slice(0, 200) : null };
+    if (prev && prev.until >= until) {
+      if (now - (prev.at || 0) < 10000) return false;
+      d.exhausted[id] = { ...prev, at: now };
+      return true;
+    }
+    d.exhausted[id] = { until, reason: reason ? String(reason).slice(0, 200) : null, at: now };
+    extended = true;
     return true;
   });
-  if (changed) logger.info(`accounts: ${id} exhausted until ${new Date(until).toISOString()} (${reason || '?'})`);
-  return changed;
+  if (extended) logger.info(`accounts: ${id} exhausted until ${new Date(until).toISOString()} (${reason || '?'})`);
+  return extended;
 }
+
+// when the exhaustion evidence was seen (ms), or null when the account isn't out
+function exhaustedAt(id, now = Date.now()) {
+  const d = read();
+  return isExhausted(d, id, now) ? (d.exhausted[id].at || 0) : null;
+}
+
+// The account works again before its recorded reset (a plan change, or the
+// "reset limits" offer on claude.ai, 2026-10-06): a turn that STARTED after the
+// evidence and finished fine proves it. Older turns prove nothing — a response
+// already streaming can finish after another tab hit the limit.
+function clearIfProven(id, turnStartedMs) {
+  let cleared = false;
+  update((d) => {
+    const e = d.exhausted[id];
+    if (!e || !(Number(turnStartedMs) > (e.at || 0))) return false;
+    delete d.exhausted[id];
+    cleared = true;
+    return true;
+  });
+  if (cleared) logger.info(`accounts: ${id} works again (a turn started after the limit finished), exhaustion cleared`);
+  return cleared;
+}
+
+const hasFullWindow = (rl, now = Date.now()) => fullWindows(rl, now).length > 0;
 
 // raw statusLine rate_limits ({ five_hour, seven_day }) of a TOKEN account;
 // written only on change
@@ -446,6 +481,9 @@ module.exports = {
   move,
   clear,
   markExhausted,
+  exhaustedAt,
+  clearIfProven,
+  hasFullWindow,
   setLimits,
   onChange,
   unwatch,

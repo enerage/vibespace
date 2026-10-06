@@ -340,6 +340,14 @@ function scheduleEmit(termId) {
   t.timer = setTimeout(() => flushTerm(termId), wait);
 }
 
+// the statusLine windows that are full (>= 100 %) now and were not in this tab's
+// previous reading
+function becameFull(prevRaw, raw) {
+  const full = (w) => Boolean(w && num(w.used_percentage) !== null && w.used_percentage >= 100);
+  if (!raw || typeof raw !== 'object') return [];
+  return ['five_hour', 'seven_day'].filter(k => full(raw[k]) && !full(prevRaw && prevRaw[k])).map(k => raw[k]);
+}
+
 function ingest(termId, kind, event, body) {
   const wsId = resolveTerm(termId);
   if (!wsId) return false; // unknown term (stale claude, other process) — drop
@@ -360,12 +368,15 @@ function ingest(termId, kind, event, body) {
     let acct = 'login';
     try { acct = accountOf(termId) || 'login'; } catch {}
     const raw = body && body.rate_limits;
-    // a full window (>= 100 %) means this account is out until its reset
-    for (const w of raw && typeof raw === 'object' ? [raw.five_hour, raw.seven_day] : []) {
-      if (w && num(w.used_percentage) !== null && w.used_percentage >= 100) {
-        const until = num(w.resets_at) ? w.resets_at * 1000 : Date.now() + 60 * 60 * 1000;
-        try { accounts.markExhausted(acct, until, 'limit reached'); } catch (e) { logger.warn('markExhausted: ' + e.message); }
-      }
+    // a full window (>= 100 %) means this account is out until its reset. Only
+    // when this tab's reading just BECAME full: claude repeats its last reading
+    // on every tick until its next API response, and such a stale 100 % must not
+    // re-mark an account that was reset in the meantime (claude.ai "reset limits").
+    const prevRaw = t.rawLimits; // this tab's previous raw reading
+    if (raw && typeof raw === 'object') t.rawLimits = raw;
+    for (const w of becameFull(prevRaw, raw)) {
+      const until = num(w.resets_at) ? w.resets_at * 1000 : Date.now() + 60 * 60 * 1000;
+      try { accounts.markExhausted(acct, until, 'limit reached'); } catch (e) { logger.warn('markExhausted: ' + e.message); }
     }
     // token accounts keep their own limits (accounts.json); only the logged-in
     // account's ticks feed the shared chip + limits.json
@@ -514,6 +525,7 @@ function forget(termId) {
 function clearRateLimits(termId) {
   const t = terms.get(termId);
   if (t && t.state && t.state.rateLimits) t.state = { ...t.state, rateLimits: null };
+  if (t) t.rawLimits = null;
 }
 
 // every term state of a workspace + the account limits (renderer reload/re-attach)
@@ -529,6 +541,7 @@ module.exports = {
   stop,
   forget,
   clearRateLimits,
+  _becameFull: becameFull,
   snapshot,
   reduce,
   attentionText,

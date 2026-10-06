@@ -141,12 +141,14 @@ Build in this order. Verify the statusLine and HTTP hooks live in a pty before r
       several Max accounts + z.ai, switch a tab to another account when it hits its
       usage limit (`StopFailure rate_limit` → `--resume <id>` on the next profile).
       Decided: token profiles, Claude accounts only, auto-switch (DECISIONS.md).
-      **Built in 0.6.29 (smoke 82/82). Still open: the live test.** Add the
-      exhausted 20x as a token account, start an agent on it, send a prompt, and
-      expect a weekly-limit failure → toast → the tab resumes on the next account.
-      Then grep the log for `StopFailure` / `account switch` to confirm the feed
-      really sends StopFailure for usage limits. The PlacementFlow window that hit
-      the limit on 2026-10-01 had no feed, so this is unverified.
+      Built in 0.6.29. **Detection is verified live** (3 real hits, 2026-10-02 to
+      10-06): StopFailure fires with `error: "rate_limit"`, and the transcript
+      gave the exact reset each time. **Still open: a live SWITCH.** Every hit so
+      far logged "all accounts exhausted", because the second account (MAIN,
+      token) was only added on 2026-10-06. The next limit hit is the test: expect
+      a toast and the tab resuming on the other account; grep `account switch`.
+      Also open: a model-specific weekly limit (Fable has its own) marks the
+      WHOLE account out. Check `quotaLimits.rateLimitType` on such a hit first.
 - [x] **Phone / away mode via Remote Control** (0.6.21, RESEARCH-REMOTE.md) —
       per-tab `--remote-control` names, presence marker + 📱 toggle + lock/idle auto-away.
 - [x] **Live-verify phone control** (2026-10-01): question → push → answered on

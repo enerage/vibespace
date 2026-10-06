@@ -1145,6 +1145,7 @@ function initIpc() {
   // downstream (status.cjs → attention.fileStatus) as the Git Bash hooks they
   // replace; the idle "waiting for your input" nudge stays green like before
   claudefeed.onHook((wsId, termId, event, body) => {
+    noteTurnForAccount(termId, event, body);
     const st = status.wordForHook(event, body);
     const file = st && ptyhost.statusFileOf(termId);
     if (!file) return;
@@ -1237,6 +1238,27 @@ async function transcriptFallback(wsId, termId, feed) {
     if (tx && tx.timestamp && tx.timestamp >= since) return tx;
   }
   return null;
+}
+
+// An account marked "out until …" can come back early (a plan change, the
+// "reset limits" offer on claude.ai). Proof = a main-thread turn on that account
+// that started after the limit evidence and ended with Stop (a failed turn fires
+// StopFailure instead). The tab's own reading must not still show a full window.
+const promptAt = new Map(); // termId -> ms of its last UserPromptSubmit
+function noteTurnForAccount(termId, event, body) {
+  if (body && body.agent_id) return; // subagent events say nothing about the turn
+  if (event === 'UserPromptSubmit') { promptAt.set(termId, Date.now()); return; }
+  if (event !== 'Stop') return;
+  const started = promptAt.get(termId);
+  const acct = termAccount.get(termId) || accounts.LOGIN;
+  const at = started ? accounts.exhaustedAt(acct) : null;
+  if (at === null || !(started > at)) return;
+  // the statusLine tick with the new reading can land just after Stop
+  setTimeout(() => {
+    const feed = claudefeed.stateOf(termId);
+    if (feed && accounts.hasFullWindow(feed.rateLimits)) return;
+    try { accounts.clearIfProven(acct, started); } catch (e) { logger.warn('clearIfProven: ' + e.message); }
+  }, 3000);
 }
 
 async function handleFailure(wsId, termId, feed) {

@@ -1203,6 +1203,17 @@ async function runSmoke() {
       acc.clear(id2);
       st.cleared = acc.pick() === id2;
       acc.clear('login');
+      // early recovery (claude.ai "reset limits"): only a turn that STARTED after
+      // the limit evidence clears the mark
+      acc.markExhausted('login', t0 + 3600e3, 'weekly limit');
+      const eAt = acc.exhaustedAt('login');
+      st.proofOld = eAt >= t0 && acc.clearIfProven('login', eAt - 1) === false && acc.pick() === id2;
+      st.proofNew = acc.clearIfProven('login', eAt + 1) === true && acc.pick() === 'login' && acc.exhaustedAt('login') === null;
+      // a tab repeating its old 100 % reading must not re-mark the account
+      const bf = require('./claudefeed.cjs')._becameFull;
+      const w100 = { five_hour: { used_percentage: 40, resets_at: 1 }, seven_day: { used_percentage: 100, resets_at: 1791417600 } };
+      st.tickFresh = bf(null, w100).length === 1 && bf({ seven_day: { used_percentage: 97 } }, w100)[0].resets_at === 1791417600;
+      st.tickStale = bf(w100, w100).length === 0 && bf(w100, { seven_day: { used_percentage: 4 } }).length === 0;
       acc.move(id2, -1);
       st.moved = acc.state().accounts.map(a => a.id).join(',') === `${id2},login` && acc.pick() === id2;
       acc.move(id2, -1); // already first: no-op

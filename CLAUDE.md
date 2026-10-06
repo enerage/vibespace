@@ -145,7 +145,7 @@ Key facts encoded in `main/sessions.cjs`:
 
 ## Developing VibeSpace
 
-- `npm run smoke` — 99 self-tests (as of 0.6.45) incl. pty echo and live session discovery. Run it after
+- `npm run smoke` — 99 self-tests (as of 0.6.46) incl. pty echo and live session discovery. Run it after
   touching main-process code, **from a normal shell**: inside a Claude pty the stripped
   PATH and nested ConPTY break the pty test (`powershell.exe` "File not found" /
   AttachConsole) — prepend System32 to PATH and give it its own console, or just use a
@@ -303,6 +303,18 @@ Key facts encoded in `main/sessions.cjs`:
     `gone` or `killed`. Custom prompts (oh-my-posh) never match the prompt
     regex, so it also polls the process tree.
   - A bare "Rate limit reached" (short 429) is not a usage limit.
+  - Verified live (2026-10-02 to 10-06, 2.1.289): a usage limit DOES fire
+    StopFailure. Its body has `error: "rate_limit"` and `last_assistant_message`,
+    and no `error_type` / `error_details`; the reset only comes from the
+    transcript's `quotaLimits`.
+  - **A limit can end before its reset** (the "reset limits" offer on claude.ai,
+    2026-10-06). So an exhaustion mark carries `at`, and `clearIfProven` drops it
+    when a main-thread turn that STARTED after `at` ends with Stop
+    (`noteTurnForAccount`). A turn already streaming when another tab hit the
+    limit proves nothing.
+  - Claude repeats its last `rate_limits` reading on every statusLine tick until
+    its next API response. Only a reading that just became full marks an account
+    (`becameFull`), or an idle tab's stale 100 % re-marks it after a reset.
 - **Keyboard selection in claude's prompt** (0.6.39, `renderer/workspace/ui/inputsel.js`,
   RESEARCH-INPUT-SELECTION.md). Claude has no keyboard-started selection, so
   Shift(+Ctrl)+←/→ and Shift+Home/End are turned into: a synthetic two-cell SGR

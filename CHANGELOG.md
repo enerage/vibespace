@@ -2,6 +2,19 @@
 
 Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 
+## [0.6.46] — 2026-10-06
+
+### Fixed
+- **An account that came back early no longer stays "out until …".** A limit
+  can end before its recorded reset: the "reset limits" offer on claude.ai did
+  that on 2026-10-06, and ⚙ → Accounts still showed "out until Thu 02:00" for a
+  20x at 4 % used. Now the mark clears itself as soon as an agent on that
+  account finishes a turn that started after the limit was seen.
+  - A tab that only repeats its old 100 % reading no longer re-marks the
+    account. Only a reading that just became full counts.
+  - The "reset" button in Accounts still clears it by hand.
+  - Smoke 99/99. Takes effect in each window after ↻ Restart.
+
 ## [0.6.45] — 2026-10-06
 
 ### Added
