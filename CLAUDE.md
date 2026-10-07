@@ -145,7 +145,7 @@ Key facts encoded in `main/sessions.cjs`:
 
 ## Developing VibeSpace
 
-- `npm run smoke` — 111 self-tests (as of 0.6.49) incl. pty echo and live session discovery. Run it after
+- `npm run smoke` — 113 self-tests (as of 0.6.50) incl. pty echo and live session discovery. Run it after
   touching main-process code, **from a normal shell**: inside a Claude pty the stripped
   PATH and nested ConPTY break the pty test (`powershell.exe` "File not found" /
   AttachConsole) — prepend System32 to PATH and give it its own console, or just use a
@@ -376,6 +376,12 @@ Key facts encoded in `main/sessions.cjs`:
     that family left opens a plain tab (or keeps it parked), never another
     family. `setTermAccount` throws instead of falling back to login, and then
     nothing is typed.
+  - **Adding accounts is preset-first** (0.6.50): `accounts.PRESETS` (today:
+    `zai`, base URL + timeout + GLM model names + 1M auto-compact window, from
+    Valentin's working config) + `addPreset(id, label, key, { models })` share
+    the endpoint store path with `addEndpoint`. Users never see env variables
+    unless they pick "Other compatible API". When z.ai renames its models,
+    update the preset (existing accounts keep theirs; Advanced overrides them).
   - The login counts as available when `.credentials.json` exists (also under
     `CLAUDE_CONFIG_DIR`), or with `ANTHROPIC_API_KEY`, or with an `oauthAccount`
     in `~/.claude.json`. Only with none of them is it skipped (the z.ai-only PC).

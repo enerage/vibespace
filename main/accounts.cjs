@@ -297,6 +297,7 @@ function state(now = Date.now()) {
       row.host = hostOf(a.baseUrl);
       row.baseUrl = a.baseUrl;
       row.models = { ...a.models };
+      row.preset = presetOf(a.baseUrl); // 'zai' → the friendlier row hint
     }
     return row;
   });
@@ -632,7 +633,13 @@ async function addEndpoint(label, text) {
   if (!name) return { ok: false, error: 'Give the account a name.' };
   const p = parseEndpointEnv(text);
   if (!p.ok) return { ok: false, error: p.error };
-  const env = p.env;
+  const r = await storeEndpoint(name, p.env);
+  return r.ok ? { ok: true, state: r.state, notes: p.notes } : r;
+}
+
+// A validated endpoint env (ANTHROPIC_BASE_URL is an http(s) URL, a key is in
+// it) → DPAPI blob + entry. The one store path for pasted blocks and presets.
+async function storeEndpoint(name, env) {
   const u = new URL(env.ANTHROPIC_BASE_URL);
   const baseUrl = displayUrl(u);
   const models = {
@@ -657,7 +664,79 @@ async function addEndpoint(label, text) {
   }
   update((d) => { d.accounts[id] = { label: name, kind: 'endpoint', baseUrl, models }; d.order.push(id); });
   logger.info(`accounts: added endpoint ${id} ("${name}", ${u.host}, vars: ${Object.keys(env).join(',')})`);
-  return { ok: true, state: state(), notes: p.notes };
+  return { ok: true, state: state(), id, label: name };
+}
+
+// ---------- presets ----------
+// "Add account → pick a provider → paste the key": the env a provider needs,
+// minus the key. zai = the values from Valentin's own working z.ai config
+// (2026-10-07).
+const PRESETS = {
+  zai: {
+    name: 'z.ai (GLM)',
+    label: 'z.ai GLM',
+    keyHint: 'API key from z.ai → API Keys',
+    env: {
+      ANTHROPIC_BASE_URL: 'https://api.z.ai/api/anthropic',
+      API_TIMEOUT_MS: '3000000',
+      ANTHROPIC_DEFAULT_OPUS_MODEL: 'glm-5.3[1m]',
+      ANTHROPIC_DEFAULT_SONNET_MODEL: 'glm-5.3-flash[1m]',
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: 'glm-5.3-flash[1m]',
+      CLAUDE_CODE_AUTO_COMPACT_WINDOW: '900000',
+    },
+  },
+};
+const PRESET_MODEL_KEYS = { opus: 'ANTHROPIC_DEFAULT_OPUS_MODEL', sonnet: 'ANTHROPIC_DEFAULT_SONNET_MODEL', haiku: 'ANTHROPIC_DEFAULT_HAIKU_MODEL' };
+
+// for the UI: no secrets in a preset, but only the display fields go out
+function presets() {
+  return Object.entries(PRESETS).map(([id, p]) => ({
+    id,
+    name: p.name,
+    label: p.label,
+    keyHint: p.keyHint,
+    models: Object.fromEntries(Object.entries(PRESET_MODEL_KEYS).map(([m, k]) => [m, p.env[k] || null])),
+  }));
+}
+
+// the preset an endpoint account was made from (same base URL), or null
+function presetOf(baseUrl) {
+  const b = String(baseUrl || '').replace(/\/+$/, '');
+  for (const [id, p] of Object.entries(PRESETS)) if (p.env.ANTHROPIC_BASE_URL.replace(/\/+$/, '') === b) return id;
+  return null;
+}
+
+// "z.ai GLM", "z.ai GLM 2", … — never two accounts with the same label
+function uniqueLabel(d, base) {
+  const taken = new Set(Object.values(d.accounts).map(a => a.label));
+  if (!taken.has(base)) return base;
+  for (let n = 2; ; n++) {
+    const l = `${base.slice(0, 60 - String(n).length - 1)} ${n}`;
+    if (!taken.has(l)) return l;
+  }
+}
+
+// Error texts never contain the key.
+async function addPreset(presetId, label, apiKey, { models } = {}) {
+  const p = Object.prototype.hasOwnProperty.call(PRESETS, presetId) ? PRESETS[presetId] : null;
+  if (!p) return { ok: false, error: 'Unknown provider.' };
+  const key = String(apiKey || '').trim();
+  if (!key) return { ok: false, error: 'Paste the API key.' };
+  if (/^sk-ant-/i.test(key)) return { ok: false, error: "That's a Claude token: add it under Claude subscription" };
+  if (/\s/.test(key)) return { ok: false, error: 'The key must not contain spaces or line breaks.' };
+  if (key.length < 16) return { ok: false, error: 'That key is too short.' };
+  if (key.length > 400) return { ok: false, error: 'That key is too long.' };
+  const env = { ...p.env };
+  const m = models && typeof models === 'object' ? models : {};
+  for (const [which, envKey] of Object.entries(PRESET_MODEL_KEYS)) {
+    const v = typeof m[which] === 'string' ? m[which].trim() : '';
+    if (!v) continue;
+    if (/\s/.test(v) || v.length > 100) return { ok: false, error: `The ${which} model name must be one word of at most 100 characters.` };
+    env[envKey] = v;
+  }
+  env.ANTHROPIC_AUTH_TOKEN = key;
+  const name = uniqueLabel(read(), String(label || '').trim().slice(0, 60) || p.label);
+  return storeEndpoint(name, env);
 }
 
 // An endpoint's blob and its entry go; tabs running on it keep going (their
@@ -949,6 +1028,8 @@ module.exports = {
   labelOf,
   add,
   addEndpoint,
+  presets,
+  addPreset,
   kindOf,
   endpointEnv,
   forTerm,

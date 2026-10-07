@@ -1075,6 +1075,9 @@ function initIpc() {
   // an API endpoint's env block (secret included) → one DPAPI blob; only the
   // non-secret display info comes back
   ipcMain.handle('accounts:addEndpoint', (e, label, envText) => accounts.addEndpoint(label, envText));
+  // a provider preset (z.ai …) + just the key: same store path, key never logged
+  ipcMain.handle('accounts:presets', () => accounts.presets());
+  ipcMain.handle('accounts:addPreset', (e, presetId, label, apiKey, models) => accounts.addPreset(String(presetId || ''), label, apiKey, { models }));
   ipcMain.handle('accounts:remove', (e, id) => accounts.remove(String(id || '')));
   ipcMain.handle('accounts:rename', (e, id, label) => accounts.rename(String(id || ''), label));
   ipcMain.handle('accounts:move', (e, id, delta) => accounts.move(String(id || ''), delta));

@@ -54,6 +54,8 @@ contextBridge.exposeInMainWorld('vs', {
   accountsList: () => ipcRenderer.invoke('accounts:list'),
   accountsAdd: (label, token) => ipcRenderer.invoke('accounts:add', label, token),
   accountsAddEndpoint: (label, envText) => ipcRenderer.invoke('accounts:addEndpoint', label, envText),
+  accountsPresets: () => ipcRenderer.invoke('accounts:presets'),
+  accountsAddPreset: (presetId, label, apiKey, models) => ipcRenderer.invoke('accounts:addPreset', presetId, label, apiKey, models),
   accountsRemove: (id) => ipcRenderer.invoke('accounts:remove', id),
   accountsRename: (id, label) => ipcRenderer.invoke('accounts:rename', id, label),
   accountsMove: (id, delta) => ipcRenderer.invoke('accounts:move', id, delta),

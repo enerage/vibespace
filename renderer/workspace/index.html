@@ -127,25 +127,73 @@
       </div>
 
       <div class="prefs-label" style="margin-top: 14px;">Accounts</div>
-      <div class="prefs-hint">Log into the other Claude account in your browser, run <code>claude setup-token</code> in a terminal, paste the token here. New agents start on the first available account; when one runs out, its agents continue on the next.</div>
+      <div class="prefs-hint">New agents start on the first available account; when one runs out, its agents continue on the next.</div>
       <div id="acct-list"></div>
-      <div class="acct-add">
-        <input id="acct-label" type="text" placeholder="Label (e.g. Work)" maxlength="40" autocomplete="off" spellcheck="false" />
-        <input id="acct-token" type="password" placeholder="sk-ant-oat01-…" autocomplete="off" spellcheck="false" />
-        <button id="acct-add-btn" class="btn small">Add</button>
+      <div class="acct-tools"><button id="acct-open-add" class="btn small">+ Add account</button></div>
+      <!-- "+ Add account": pick a provider, then paste one key (prefs.js) -->
+      <div id="acct-panel" class="acct-panel hidden">
+        <div class="acct-step" data-step="choose">
+          <div class="prefs-label acct-sub">Which subscription?</div>
+          <div class="acct-choices">
+            <button type="button" class="acct-choice" data-choice="claude">
+              <span class="acct-choice-title">Claude subscription</span>
+              <span class="acct-choice-line">Pro or Max. Phone control only on the account you're logged into; extra accounts get no phone control and no claude.ai connectors.</span>
+            </button>
+            <button type="button" class="acct-choice" data-choice="zai">
+              <span class="acct-choice-title">z.ai (GLM)</span>
+              <span class="acct-choice-line">GLM Coding Plan. New conversations only: a conversation never moves between Claude and GLM.</span>
+            </button>
+            <button type="button" class="acct-choice" data-choice="other">
+              <span class="acct-choice-title">Other compatible API</span>
+              <span class="acct-choice-line">Advanced: paste the env block from your Claude settings.</span>
+            </button>
+          </div>
+          <div class="acct-step-foot"><button type="button" class="btn small ghost acct-cancel">Cancel</button></div>
+        </div>
+        <div class="acct-step hidden" data-step="claude">
+          <button type="button" class="acct-back">← Back</button>
+          <div class="prefs-label acct-sub">Claude subscription</div>
+          <ol class="acct-steps">
+            <li>Log into that account in your browser</li>
+            <li><button id="btn-setup-token" class="btn small ghost">Get a token</button> <span class="prefs-hint">opens a tab that runs <code>claude setup-token</code></span></li>
+            <li>Paste the token it prints (sk-ant-oat01-…)</li>
+          </ol>
+          <div class="acct-add">
+            <input id="acct-label" type="text" placeholder="e.g. Max 2" maxlength="40" autocomplete="off" spellcheck="false" />
+            <input id="acct-token" type="password" placeholder="sk-ant-oat01-…" autocomplete="off" spellcheck="false" />
+            <button id="acct-add-btn" class="btn small">Add</button>
+          </div>
+          <div id="acct-error" class="acct-error hidden"></div>
+        </div>
+        <div class="acct-step hidden" data-step="zai">
+          <button type="button" class="acct-back">← Back</button>
+          <div class="prefs-label acct-sub">z.ai (GLM)</div>
+          <div class="prefs-hint">Get the key at z.ai → API Keys.</div>
+          <div class="acct-add">
+            <input id="acct-zai-label" type="text" maxlength="40" autocomplete="off" spellcheck="false" />
+            <input id="acct-zai-key" type="password" placeholder="API key" autocomplete="off" spellcheck="false" />
+            <button id="acct-zai-add-btn" class="btn small">Add</button>
+          </div>
+          <details class="acct-models">
+            <summary>Advanced: models</summary>
+            <label>Opus <input id="acct-zai-opus" type="text" autocomplete="off" spellcheck="false" /></label>
+            <label>Sonnet <input id="acct-zai-sonnet" type="text" autocomplete="off" spellcheck="false" /></label>
+            <label>Haiku <input id="acct-zai-haiku" type="text" autocomplete="off" spellcheck="false" /></label>
+          </details>
+          <div id="acct-zai-error" class="acct-error hidden"></div>
+        </div>
+        <div class="acct-step hidden" data-step="other">
+          <button type="button" class="acct-back">← Back</button>
+          <div class="prefs-label acct-sub">Add an API endpoint (z.ai GLM, …)</div>
+          <div class="prefs-hint">Paste the <code>env</code> block you would put in Claude's settings. New conversations only: an agent never moves between Claude and this endpoint. No phone control, no claude.ai connectors. Move it up (↑) to make new agents start on it.</div>
+          <div class="acct-ep">
+            <input id="acct-ep-label" type="text" placeholder="Label (e.g. GLM)" maxlength="40" autocomplete="off" spellcheck="false" />
+            <textarea id="acct-ep-env" rows="6" autocomplete="off" spellcheck="false" placeholder="&quot;ANTHROPIC_BASE_URL&quot;: &quot;https://api.z.ai/api/anthropic&quot;,&#10;&quot;ANTHROPIC_AUTH_TOKEN&quot;: &quot;…&quot;,&#10;&quot;ANTHROPIC_DEFAULT_OPUS_MODEL&quot;: &quot;glm-5.3[1m]&quot;,&#10;&quot;ANTHROPIC_DEFAULT_SONNET_MODEL&quot;: &quot;glm-5.3-flash[1m]&quot;"></textarea>
+            <div class="acct-ep-actions"><button id="acct-ep-add-btn" class="btn small">Add endpoint</button></div>
+          </div>
+          <div id="acct-ep-error" class="acct-error hidden"></div>
+        </div>
       </div>
-      <div id="acct-error" class="acct-error hidden"></div>
-      <div class="acct-tools">
-        <button id="btn-setup-token" class="btn small ghost">Open a setup-token tab</button>
-      </div>
-      <div class="prefs-label acct-sub">Add an API endpoint (z.ai GLM, …)</div>
-      <div class="prefs-hint">Paste the <code>env</code> block you would put in Claude's settings. New conversations only: an agent never moves between Claude and this endpoint. No phone control, no claude.ai connectors. Move it up (↑) to make new agents start on it.</div>
-      <div class="acct-ep">
-        <input id="acct-ep-label" type="text" placeholder="Label (e.g. GLM)" maxlength="40" autocomplete="off" spellcheck="false" />
-        <textarea id="acct-ep-env" rows="6" autocomplete="off" spellcheck="false" placeholder="&quot;ANTHROPIC_BASE_URL&quot;: &quot;https://api.z.ai/api/anthropic&quot;,&#10;&quot;ANTHROPIC_AUTH_TOKEN&quot;: &quot;…&quot;,&#10;&quot;ANTHROPIC_DEFAULT_OPUS_MODEL&quot;: &quot;glm-5.3[1m]&quot;,&#10;&quot;ANTHROPIC_DEFAULT_SONNET_MODEL&quot;: &quot;glm-5.3-flash[1m]&quot;"></textarea>
-        <div class="acct-ep-actions"><button id="acct-ep-add-btn" class="btn small">Add endpoint</button></div>
-      </div>
-      <div id="acct-ep-error" class="acct-error hidden"></div>
       <div id="acct-ep-note" class="acct-note hidden"></div>
 
       <div class="prefs-label" style="margin-top: 14px;">Notifications</div>

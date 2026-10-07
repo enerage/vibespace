@@ -10,7 +10,7 @@ export function init(opts) {
   // opts: { wsId, onThemePicked(id), layoutLabel: () => string }
   const modal = $('#prefs-modal');
 
-  const close = () => modal.classList.add('hidden');
+  const close = () => { modal.classList.add('hidden'); clearSecrets(); };
   modal.tabIndex = -1; // so Esc works right after opening via the header button
   // notification switches: machine-wide (main/notifyprefs.cjs), so they are
   // re-read every time the modal opens — another workspace may have changed them
@@ -40,16 +40,56 @@ export function init(opts) {
   // accounts: machine-wide (main/accounts.cjs) — loaded on open, live while open
   const loadAccounts = () => vs.accountsList().then(renderAccounts).catch(() => {});
   vs.onAccountsChanged((st) => { if (!modal.classList.contains('hidden')) renderAccounts(st); });
-  const acctErr = (msg) => {
-    const e = $('#acct-error');
+  const msgIn = (sel, msg) => {
+    const e = $(sel);
     e.textContent = msg || '';
     e.classList.toggle('hidden', !msg);
   };
+  const acctErr = (msg) => msgIn('#acct-error', msg);
+
+  // "+ Add account" panel: step 1 picks the provider, step 2 asks for one key.
+  // Every secret field is emptied after each try, on Back, Cancel and close.
+  const SECRET_FIELDS = ['#acct-token', '#acct-zai-key', '#acct-ep-env'];
+  const clearSecrets = () => { for (const s of SECRET_FIELDS) $(s).value = ''; };
+  const panel = $('#acct-panel');
+  const showStep = (step) => {
+    for (const s of panel.querySelectorAll('.acct-step')) s.classList.toggle('hidden', s.dataset.step !== step);
+    for (const s of ['#acct-error', '#acct-zai-error', '#acct-ep-error']) msgIn(s, '');
+    const first = { claude: '#acct-label', zai: '#acct-zai-key', other: '#acct-ep-label' }[step];
+    if (first) $(first).focus();
+  };
+  const closePanel = () => {
+    clearSecrets();
+    panel.classList.add('hidden');
+    $('#acct-open-add').classList.remove('hidden');
+  };
+  $('#acct-open-add').onclick = () => {
+    msgIn('#acct-ep-note', '');
+    panel.classList.remove('hidden');
+    $('#acct-open-add').classList.add('hidden');
+    showStep('choose');
+  };
+  for (const b of panel.querySelectorAll('.acct-choice')) b.onclick = () => showStep(b.dataset.choice);
+  for (const b of panel.querySelectorAll('.acct-back')) b.onclick = () => { clearSecrets(); showStep('choose'); };
+  panel.querySelector('.acct-cancel').onclick = closePanel;
+  const added = (label, notes) => {
+    closePanel();
+    const fixed = Array.isArray(notes) && notes.length ? 'Fixed: ' + notes.join(' · ') : '';
+    toast(`Added ${label}` + (fixed ? ` · ${fixed}` : ''));
+    if (fixed) msgIn('#acct-ep-note', fixed);
+  };
+
+  // Claude subscription: a `claude setup-token` token
   const addAccount = async () => {
     const label = $('#acct-label').value.trim();
     const token = $('#acct-token').value.trim();
     if (!label) { acctErr('Give the account a label'); return; }
-    if (!token) { acctErr('Paste the token from claude setup-token'); return; }
+    if (!token) { acctErr('Paste the token from the setup-token tab'); return; }
+    if (!/^sk-ant-/.test(token)) {
+      acctErr("That doesn't look like a Claude token. Paste the line starting with sk-ant-oat01- from the setup-token tab (not the browser code).");
+      $('#acct-token').value = '';
+      return;
+    }
     acctErr('');
     $('#acct-add-btn').disabled = true;
     try {
@@ -58,6 +98,7 @@ export function init(opts) {
         $('#acct-label').value = '';
         $('#acct-token').value = '';
         renderAccounts(r.state);
+        added(label);
       } else acctErr((r && r.error) || 'Could not add the account');
     } catch (e) {
       acctErr(e.message || String(e));
@@ -70,31 +111,69 @@ export function init(opts) {
   for (const id of ['#acct-label', '#acct-token']) {
     $(id).addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); addAccount(); } });
   }
+  $('#btn-setup-token').onclick = () => { close(); openSetupTokenTab(); };
 
-  // API endpoint (z.ai GLM, …): label + the pasted env block, secret included.
-  // The block goes to main once and the textarea is emptied after EVERY try.
-  const epMsg = (sel, msg) => {
-    const e = $(sel);
-    e.textContent = msg || '';
-    e.classList.toggle('hidden', !msg);
+  // z.ai (GLM): a provider preset (main/accounts.cjs PRESETS) + just the key.
+  // The models are prefilled from the preset; only changed ones are sent.
+  let zai = null; // { id, label, keyHint, models } from main
+  const MODELS = ['opus', 'sonnet', 'haiku'];
+  vs.accountsPresets().then((list) => {
+    zai = (Array.isArray(list) && list.find(p => p.id === 'zai')) || null;
+    if (!zai) return;
+    $('#acct-zai-label').placeholder = zai.label;
+    $('#acct-zai-key').placeholder = zai.keyHint || 'API key';
+    for (const m of MODELS) $('#acct-zai-' + m).value = (zai.models && zai.models[m]) || '';
+  }).catch(() => {});
+  const addZai = async () => {
+    const key = $('#acct-zai-key').value.trim();
+    const errMsg = (m) => msgIn('#acct-zai-error', m);
+    if (!zai) { errMsg('The z.ai preset is not available'); return; }
+    if (!key) { errMsg('Paste the API key'); return; }
+    const models = {};
+    for (const m of MODELS) {
+      const v = $('#acct-zai-' + m).value.trim();
+      if (v && v !== ((zai.models && zai.models[m]) || '')) models[m] = v;
+    }
+    errMsg('');
+    $('#acct-zai-add-btn').disabled = true;
+    try {
+      const r = await vs.accountsAddPreset('zai', $('#acct-zai-label').value.trim(), key, models);
+      if (r && r.ok) {
+        $('#acct-zai-label').value = '';
+        renderAccounts(r.state);
+        added(r.label || zai.label);
+      } else errMsg((r && r.error) || 'Could not add the account');
+    } catch (e) {
+      errMsg(e.message || String(e));
+    } finally {
+      $('#acct-zai-key').value = ''; // it is the secret
+      $('#acct-zai-add-btn').disabled = false;
+    }
   };
+  $('#acct-zai-add-btn').onclick = addZai;
+  for (const id of ['#acct-zai-label', '#acct-zai-key']) {
+    $(id).addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); addZai(); } });
+  }
+
+  // Other compatible API (advanced): label + the pasted env block, secret
+  // included. The block goes to main once and the textarea is emptied after EVERY try.
   const addEndpoint = async () => {
     const label = $('#acct-ep-label').value.trim();
     const text = $('#acct-ep-env').value;
-    epMsg('#acct-ep-note', '');
-    if (!label) { epMsg('#acct-ep-error', 'Give the endpoint a label'); return; }
-    if (!text.trim()) { epMsg('#acct-ep-error', 'Paste the env block (ANTHROPIC_BASE_URL, ANTHROPIC_AUTH_TOKEN, …)'); return; }
-    epMsg('#acct-ep-error', '');
+    msgIn('#acct-ep-note', '');
+    if (!label) { msgIn('#acct-ep-error', 'Give the endpoint a label'); return; }
+    if (!text.trim()) { msgIn('#acct-ep-error', 'Paste the env block (ANTHROPIC_BASE_URL, ANTHROPIC_AUTH_TOKEN, …)'); return; }
+    msgIn('#acct-ep-error', '');
     $('#acct-ep-add-btn').disabled = true;
     try {
       const r = await vs.accountsAddEndpoint(label, text);
       if (r && r.ok) {
         $('#acct-ep-label').value = '';
         renderAccounts(r.state);
-        if (Array.isArray(r.notes) && r.notes.length) epMsg('#acct-ep-note', 'Fixed: ' + r.notes.join(' · '));
-      } else epMsg('#acct-ep-error', (r && r.error) || 'Could not add the endpoint');
+        added(label, r.notes);
+      } else msgIn('#acct-ep-error', (r && r.error) || 'Could not add the endpoint');
     } catch (e) {
-      epMsg('#acct-ep-error', e.message || String(e));
+      msgIn('#acct-ep-error', e.message || String(e));
     } finally {
       $('#acct-ep-env').value = ''; // it holds a secret
       $('#acct-ep-add-btn').disabled = false;
@@ -103,7 +182,6 @@ export function init(opts) {
   $('#acct-ep-add-btn').onclick = addEndpoint;
   $('#acct-ep-label').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); addEndpoint(); } });
   $('#acct-ep-env').addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.ctrlKey) { e.preventDefault(); addEndpoint(); } });
-  $('#btn-setup-token').onclick = () => { close(); openSetupTokenTab(); };
 
   // rows that moved out of the header
   $('#btn-logs').onclick = () => vs.openLogs();
@@ -180,6 +258,7 @@ export function init(opts) {
       const missing = !out && a.available === false && !a.exhaustedUntil;
       const hint = el('div', 'prefs-hint');
       const kindText = a.kind === 'login' ? 'logged in · phone control · connectors'
+        : a.kind === 'endpoint' && a.preset === 'zai' ? ['z.ai GLM', a.models && a.models.opus, 'new conversations only', 'no phone'].filter(Boolean).join(' · ')
         : a.kind === 'endpoint' ? ['endpoint', a.host || '?', a.models && a.models.opus, 'new conversations only'].filter(Boolean).join(' · ')
           : 'token · no phone control · no claude.ai connectors';
       if (a.kind === 'login' && missing) {

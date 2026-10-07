@@ -2,6 +2,20 @@
 
 Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 
+## [0.6.50] — 2026-10-07
+
+### Changed
+- **Adding an account: pick the provider, paste the key.** ⚙ Preferences →
+  Accounts → **+ Add account** asks "Which subscription?":
+  - **Claude subscription:** step by step. "Get a token" runs the login in a
+    tab, then you paste the `sk-ant-oat01-…` line. A browser code or a random
+    paste gets a clear hint instead.
+  - **z.ai (GLM):** just the API key. The URL, the GLM models (1M context) and
+    the timeout come from a preset, with the models editable under "Advanced".
+  - **Other compatible API:** the old paste-your-settings box, for power users.
+  - Secret fields are always emptied after an add, an error, Back or closing
+    Preferences. Smoke 113/113. Not yet clicked through in a live window.
+
 ## [0.6.49] — 2026-10-07
 
 ### Added

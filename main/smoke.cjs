@@ -1347,6 +1347,56 @@ async function runSmoke() {
       check('accounts endpoint add (DPAPI env blob round-trip, family, models, never the key in state/json/log)', Object.values(ep).every(Boolean),
         JSON.stringify({ ...ep, roundtrip: ep.roundtrip ? 'ok' : 'MISMATCH' }));
 
+      // provider presets: pick z.ai, paste only the key. Same store path as a
+      // pasted block; label de-duplicated; model overrides applied. Fake keys.
+      {
+        const list = acc.presets();
+        const z = list.find(x => x.id === 'zai') || {};
+        const pr = {
+          zai: z.name === 'z.ai (GLM)' && z.label === 'z.ai GLM' && typeof z.keyHint === 'string'
+            && Boolean(z.models && z.models.opus === 'glm-5.3[1m]' && z.models.sonnet === 'glm-5.3-flash[1m]' && z.models.haiku === 'glm-5.3-flash[1m]'),
+          noSecrets: !/AUTH_TOKEN|API_KEY|"env"|api\.z\.ai/.test(JSON.stringify(list)),
+        };
+        check('accounts presets() lists z.ai without env or secrets', Object.values(pr).every(Boolean), JSON.stringify(pr));
+
+        const zKey = 'fake-' + 'SmokePresetKey_' + U.randId(20);
+        const errOf = async (...args) => { const r = await acc.addPreset(...args); return r.ok ? null : r.error; };
+        const pa = {};
+        const sk = await errOf('zai', '', 'sk-ant-oat01-' + U.randId(30));
+        pa.claudeTokenRejected = sk === "That's a Claude token: add it under Claude subscription";
+        pa.emptyRejected = Boolean(await errOf('zai', '', '   '));
+        pa.shortRejected = Boolean(await errOf('zai', '', 'abc123'));
+        pa.spaceRejected = Boolean(await errOf('zai', '', zKey + ' x'));
+        pa.badModelRejected = Boolean(await errOf('zai', '', zKey, { models: { opus: 'glm 5' } }));
+        pa.unknownPreset = Boolean(await errOf('nope', '', zKey));
+        const a1 = await acc.addPreset('zai', '', '  ' + zKey + '\n');
+        const a2 = await acc.addPreset('zai', '  ', zKey, { models: { sonnet: 'glm-smoke-x', haiku: '' } });
+        const r1 = a1.ok ? (acc.state().accounts.find(x => x.id === a1.id) || {}) : {};
+        const r2 = a2.ok ? (acc.state().accounts.find(x => x.id === a2.id) || {}) : {};
+        pa.added = Boolean(a1.ok && a2.ok);
+        pa.labels = r1.label === 'z.ai GLM' && r2.label === 'z.ai GLM 2' && a2.label === 'z.ai GLM 2';
+        pa.row = r1.kind === 'endpoint' && r1.family === 'endpoint:api.z.ai' && r1.baseUrl === 'https://api.z.ai/api/anthropic' && r1.preset === 'zai'
+          && Boolean(r1.models && r1.models.opus === 'glm-5.3[1m]' && r1.models.sonnet === 'glm-5.3-flash[1m]' && r1.models.haiku === 'glm-5.3-flash[1m]');
+        pa.override = Boolean(r2.models && r2.models.sonnet === 'glm-smoke-x' && r2.models.opus === 'glm-5.3[1m]' && r2.models.haiku === 'glm-5.3-flash[1m]');
+        pa.pastedZaiIsPreset = (acc.state().accounts.find(x => x.id === epId) || {}).preset === 'zai'; // a pasted z.ai block is z.ai too
+        const b2 = a2.ok ? acc.blobPath(a2.id) : null;
+        const dec2 = b2 ? await decrypt(b2) : '';
+        pa.blob = dec2.includes(`ANTHROPIC_AUTH_TOKEN=${zKey}`) && dec2.includes('ANTHROPIC_DEFAULT_SONNET_MODEL=glm-smoke-x')
+          && dec2.includes('ANTHROPIC_BASE_URL=https://api.z.ai/api/anthropic') && dec2.includes('CLAUDE_CODE_AUTO_COMPACT_WINDOW=900000')
+          && dec2.includes('API_TIMEOUT_MS=3000000') && !fs.readFileSync(b2, 'utf8').includes(zKey);
+        const files = acc._files();
+        const logNow = (() => {
+          try { return fs.readdirSync(logger.logsDir()).map(f => fs.readFileSync(path.join(logger.logsDir(), f), 'utf8')).join('\n'); } catch { return ''; }
+        })();
+        pa.noKey = !JSON.stringify(acc.state()).includes(zKey) && !JSON.stringify([a1, a2]).includes(zKey)
+          && !fs.readFileSync(files.accounts, 'utf8').includes(zKey) && !fs.readFileSync(files.endpoints, 'utf8').includes(zKey) && !logNow.includes(zKey);
+        if (a1.ok) acc.remove(a1.id);
+        if (a2.ok) acc.remove(a2.id);
+        pa.removed = !(a1.ok && acc.has(a1.id)) && !(a2.ok && acc.has(a2.id));
+        check('accounts addPreset z.ai (key only, preset models + override, " 2" label, Claude/empty key rejected, key never stored in clear)',
+          Object.values(pa).every(Boolean), JSON.stringify(pa));
+      }
+
       if (tokId && epId) {
         const now = Date.now();
         const zai = 'endpoint:api.z.ai';
