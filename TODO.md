@@ -147,7 +147,8 @@ Build in this order. Verify the statusLine and HTTP hooks live in a pty before r
       far logged "all accounts exhausted", because the second account (MAIN,
       token) was only added on 2026-10-06. The next limit hit is the test: expect
       a toast and the tab resuming on the other account; grep `account switch`.
-      **z.ai endpoint (0.6.49) has not run against the real API**: add it via
+      z.ai verified live against the real API (2026-10-07, isolated test: add,
+      request, transcript family, resume). Still to click through in a window: add it via
       + Add account → z.ai (key only, 0.6.50), + ▾ → New agent on z.ai, check `/status` shows the z.ai base
       URL and the GLM model, one prompt, then restart the window and confirm
       it resumes on z.ai (not Claude). Also try "All conversations…" on a GLM

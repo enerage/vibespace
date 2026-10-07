@@ -344,6 +344,12 @@ function sessionFamily(sid) {
 // has no assistant message yet (a brand-new conversation). Reads at most the
 // first 1 MB; API error lines carry model "<synthetic>" and are skipped.
 function transcriptProvider(jsonlPath) {
+  const m = transcriptModel(jsonlPath);
+  return m === null ? null : (/^claude/i.test(m) ? 'anthropic' : 'endpoint');
+}
+
+// the model of a transcript's first real assistant message, or null
+function transcriptModel(jsonlPath) {
   let fd = null;
   try {
     fd = fs.openSync(jsonlPath, 'r');
@@ -354,7 +360,7 @@ function transcriptProvider(jsonlPath) {
       if (!line.includes('"type":"assistant"')) continue;
       const m = /"model":"([^"]+)"/.exec(line);
       if (!m || m[1] === '<synthetic>') continue;
-      return /^claude/i.test(m[1]) ? 'anthropic' : 'endpoint';
+      return m[1];
     }
     return null;
   } catch {
@@ -368,11 +374,21 @@ function transcriptProvider(jsonlPath) {
 // Its transcript decides when it has replies: an older Claude conversation
 // picked in a tab that runs on an endpoint stays Claude's (and the renderer
 // moves it). Only a conversation with no reply yet takes the tab's family.
+// A GLM conversation picked in a Claude tab (the tab's family says nothing):
+// the endpoint account whose models include the transcript's model (live
+// z.ai test 2026-10-07: "glm-5.3[1m]"), else the only endpoint family there
+// is, else 'endpoint:unknown' (the renderer then refuses to continue it).
 function familyForNewSession(transcriptPath, tabFamily) {
-  const prov = transcriptPath ? transcriptProvider(transcriptPath) : null;
-  if (prov === 'anthropic') return 'anthropic';
-  if (prov === 'endpoint') return tabFamily && tabFamily.startsWith('endpoint:') ? tabFamily : 'endpoint:unknown';
-  return tabFamily || 'anthropic';
+  const model = transcriptPath ? transcriptModel(transcriptPath) : null;
+  if (model === null) return tabFamily || 'anthropic';
+  if (/^claude/i.test(model)) return 'anthropic';
+  if (tabFamily && tabFamily.startsWith('endpoint:')) return tabFamily;
+  const d = read();
+  const eps = Object.keys(d.accounts).filter(id => d.accounts[id].kind === 'endpoint');
+  const strip = (s) => String(s || '').toLowerCase().replace(/\[[^\]]*\]$/, '');
+  const byModel = eps.filter(id => Object.values(d.accounts[id].models || {}).some(x => x && strip(x) === strip(model)));
+  const fams = [...new Set((byModel.length ? byModel : eps).map(id => familyIn(d, id)))];
+  return fams.length === 1 ? fams[0] : 'endpoint:unknown';
 }
 
 // sets it only if the conversation has no family yet; returns the family it has
@@ -1036,6 +1052,7 @@ module.exports = {
   sessionFamily,
   familyForNewSession,
   transcriptProvider,
+  transcriptModel,
   noteSessionFamily,
   remove,
   rename,

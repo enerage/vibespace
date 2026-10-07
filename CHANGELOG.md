@@ -2,6 +2,20 @@
 
 Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 
+## [0.6.51] — 2026-10-07
+
+### Fixed
+- A GLM conversation picked from "All conversations…" in a Claude tab is now
+  matched to your z.ai account by its model name, and moves there. Before, it
+  was known to be "not Claude" but not WHICH account, so it was refused.
+
+### Verified
+- **z.ai works end to end, live** (isolated test, your real accounts
+  untouched): add with the key only → the key stored only encrypted → a real
+  request answered by `glm-5.3[1m]` through the tab settings file → the
+  conversation recognized as GLM from its transcript → resumed on z.ai with its
+  memory intact → the key file deleted after.
+
 ## [0.6.50] — 2026-10-07
 
 ### Changed

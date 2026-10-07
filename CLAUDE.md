@@ -376,6 +376,14 @@ Key facts encoded in `main/sessions.cjs`:
     that family left opens a plain tab (or keeps it parked), never another
     family. `setTermAccount` throws instead of falling back to login, and then
     nothing is typed.
+  - **Verified live 2026-10-07 against z.ai** (claude 2.1.29x, throwaway
+    VIBESPACE_HOME, `claude -p … --settings <tab settings file>`): the `env`
+    block in a `--settings` file authenticates and routes claude to the
+    endpoint. Model `glm-5.3[1m]` answered, the transcript's assistant `model`
+    is `glm-5.3[1m]` (so `transcriptModel` sees it), and `--resume` on the same
+    endpoint keeps the conversation. `familyForNewSession` matches that model
+    against endpoint accounts' models (the `[1m]` suffix is ignored) when the
+    tab's family can't tell.
   - **Adding accounts is preset-first** (0.6.50): `accounts.PRESETS` (today:
     `zai`, base URL + timeout + GLM model names + 1M auto-compact window, from
     Valentin's working config) + `addPreset(id, label, key, { models })` share

@@ -1435,7 +1435,7 @@ async function runSmoke() {
         const zf = 'endpoint:api.z.ai';
         const tf = {
           claudeInEndpointTab: acc.familyForNewSession(txC, zf) === 'anthropic',
-          glmInClaudeTab: acc.familyForNewSession(txG, 'anthropic') === 'endpoint:unknown',
+          glmInClaudeTab: ['endpoint:unknown', zf].includes(acc.familyForNewSession(txG, 'anthropic')), // zf when a z.ai account with that model exists
           glmInEndpointTab: acc.familyForNewSession(txG, zf) === zf,
           freshTakesTab: acc.familyForNewSession(txN, zf) === zf && acc.familyForNewSession(null, 'anthropic') === 'anthropic',
         };
