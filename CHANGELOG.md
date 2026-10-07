@@ -4,6 +4,14 @@ Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 
 ## [0.6.51] — 2026-10-07
 
+### Added
+- **GETTING-STARTED.md**: a one-page setup guide for new users (Git for
+  Windows, Claude Code, the installer, the SmartScreen warning, first project,
+  adding a z.ai key, first agent). README's Install section points to it.
+- **A fresh installer**, `VibeSpace Setup 0.6.51.exe`. `package.json` had said
+  0.6.0 since 0.6.0, so it now carries the real version. Packaged smoke 113/113.
+
+
 ### Fixed
 - A GLM conversation picked from "All conversations…" in a Claude tab is now
   matched to your z.ai account by its model name, and moves there. Before, it
