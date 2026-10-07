@@ -34,8 +34,9 @@ claude --version
 
 ## 3. Install VibeSpace
 
-1. Download `VibeSpace Setup <version>.exe` from the
-   [Releases page](https://github.com/enerage/vibespace/releases/latest).
+1. Download the `VibeSpace.Setup.<version>.exe` file from the
+   [latest release](https://github.com/enerage/vibespace/releases/latest)
+   (under **Assets**).
 2. Run it. Windows may say "Windows protected your PC" because the installer
    isn't signed. Click **More info → Run anyway**.
 3. Start **VibeSpace Launcher** from the Start menu.
