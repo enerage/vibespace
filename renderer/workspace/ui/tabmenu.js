@@ -74,7 +74,7 @@ function accountItems(tab) {
     items.push({
       label: `Continue on ${a.label}` + (out ? ` (out until ${untilText(a.exhaustedUntil)})` : ''),
       disabled: out || Boolean(tab.switching),
-      hint: a.kind === 'token' ? 'Resume this conversation on that account (no phone control there)' : 'Resume this conversation on that account',
+      hint: a.kind === 'token' ? 'Resume this conversation on that account (there: no phone control, no claude.ai connectors like Sheets/Docs/Chrome)' : 'Resume this conversation on that account',
       run: () => moveTo(tab, a),
     });
   }

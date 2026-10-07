@@ -144,7 +144,7 @@ export function init(opts) {
       nameLine.append(name, edit);
       const out = a.exhaustedUntil && a.exhaustedUntil > Date.now();
       const hint = el('div', 'prefs-hint');
-      hint.append(el('span', '', a.kind === 'login' ? 'logged in · phone control' : 'token'), document.createTextNode(' · '));
+      hint.append(el('span', '', a.kind === 'login' ? 'logged in · phone control · connectors' : 'token · no phone control · no claude.ai connectors'), document.createTextNode(' · '));
       const status = el('span', out ? 'acct-out' : '', out ? `out until ${untilText(a.exhaustedUntil)}` : 'available');
       if (out && a.reason) status.title = a.reason;
       hint.append(status);

@@ -1167,7 +1167,7 @@ function acctChip(tab) {
     return p;
   }
   const c = el('span', 'acct-pill', name.length > 10 ? name.slice(0, 9) + '…' : name);
-  c.title = `Account: ${name}` + (a && a.kind === 'token' ? ' — no phone control' : '');
+  c.title = `Account: ${name}` + (a && a.kind === 'token' ? ' — token: no phone control, no claude.ai connectors (Sheets, Docs, Chrome)' : '');
   return c;
 }
 

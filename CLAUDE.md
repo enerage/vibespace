@@ -299,6 +299,14 @@ Key facts encoded in `main/sessions.cjs`:
     credential in one claude process, so phone control lives on whichever
     account is the `/login`. To move phone control to another account, make
     THAT account the `/login` and re-add the other one as a token.
+  - **Token accounts also lose the claude.ai connectors** (Google Sheets, Claude
+    Docs, Claude in Chrome): a setup-token can only make model requests. Seen
+    live 2026-10-07: every agent moved to a token account had them drop
+    mid-session. So put the account whose connectors and phone you need on
+    `/login`. Claude also hides `CLAUDE_CODE_OAUTH_TOKEN` from its tool shells,
+    so an agent asked "which account am I on" reads `~/.claude.json`
+    `oauthAccount` and wrongly reports the `/login` email. The truth is the
+    tab's `$VIBESPACE_ACCOUNT_FILE`; per-account statusLine limits prove it.
   - Usage-limit evidence: the transcript's last `isApiErrorMessage` line carries
     `error: "rate_limit"`, the "You've hit your weekly limit · resets …" text and
     `quotaLimits { status: "rejected", resetsAt }`. That is the exact reset;
