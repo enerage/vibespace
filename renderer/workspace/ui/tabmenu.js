@@ -1,5 +1,5 @@
 import { el, toast, showMenu, confirmBox } from './common.js';
-import { feedFor, accounts, relaunchOnAccount, sendToAgent, repoRoot } from './terms.js';
+import { feedFor, accounts, tabFamily, relaunchOnAccount, sendToAgent, repoRoot } from './terms.js';
 
 // Right-click menu for terminal tabs (was: right-click = rename) + the
 // "Agent info" panel. Kept out of terms.js: terms.js only hands us the tab
@@ -55,8 +55,9 @@ export async function openTabMenu(ev, tab, { rename, close, park, parkable }) {
   ]);
 }
 
-// "Continue on <account>": one item per OTHER account, for a claude tab with a
-// conversation, once there are >= 2 accounts. Same pty, `claude --resume`.
+// "Continue on <account>": one item per OTHER account of the same family, for
+// a claude tab with a conversation, once there are >= 2 accounts. Same pty,
+// `claude --resume`.
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 function untilText(ms) {
   const d = new Date(ms);
@@ -67,9 +68,11 @@ function accountItems(tab) {
   const st = accounts();
   if (!tab.isClaude || tab.dead || !tab.sessionId || !st || st.accounts.length < 2) return [];
   const cur = tab.account || 'login';
+  const fam = tabFamily(tab); // the conversation's provider, not the current account's
   const items = [];
   for (const a of st.accounts) {
-    if (a.id === cur) continue;
+    // a conversation never crosses providers: same-family accounts only
+    if (a.id === cur || (a.family || 'anthropic') !== fam) continue;
     const out = Boolean(a.exhaustedUntil && a.exhaustedUntil > Date.now());
     items.push({
       label: `Continue on ${a.label}` + (out ? ` (out until ${untilText(a.exhaustedUntil)})` : ''),

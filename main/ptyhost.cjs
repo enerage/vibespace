@@ -109,7 +109,11 @@ const CLAUDE_SUBCOMMANDS = ['agents', 'attach', 'auth', 'auto-mode', 'config', '
 // call via CLAUDE_CODE_OAUTH_TOKEN (restored afterwards); such agents get no
 // --remote-control (Remote Control refuses setup-tokens). The logged-in account
 // runs with any inherited CLAUDE_CODE_OAUTH_TOKEN removed for the call.
-// DRYRUN prints VSACCT[<id>|token|missing] or VSACCT[login], never the token.
+// An API endpoint account: main wrote <termId>.settings.json (hooks + env) next
+// to the account file and claude gets THAT as --settings; a claude typed with
+// its own --settings is refused (it would run without the endpoint's env).
+// The wrapper never decrypts endpoint settings (Defender, see accounts.cjs).
+// DRYRUN prints VSACCT[<id>|token|endpoint|missing] or VSACCT[login], never the token.
 const CLAUDE_WRAPPER = `
 function global:claude {
   $exe = Get-Command claude -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -118,19 +122,38 @@ function global:claude {
   $plain = ($a.Count -gt 0 -and $sub -contains $a[0]) -or @($a | Where-Object { $_ -in '-p','--print','-v','--version','-h','--help' }).Count -gt 0
   $acct = 'login'
   $blob = $null
+  $own = $false
   if (-not $plain) {
     if ($env:VIBESPACE_ACCOUNT_FILE -and (Test-Path -LiteralPath $env:VIBESPACE_ACCOUNT_FILE)) {
       $r = Get-Content -LiteralPath $env:VIBESPACE_ACCOUNT_FILE -Raw -ErrorAction SilentlyContinue
       if ($r) { $r = $r.Trim() }
       if ($r) { $acct = $r }
     }
-    if ($acct -ne 'login') { $blob = Join-Path "$env:VIBESPACE_ACCOUNT_DIR" "$acct.dpapi" }
+    # an API endpoint account: main wrote this tab's settings (hooks + env) next
+    # to the account file; claude gets that file INSTEAD of the hook settings
+    $eps = $null
+    if ($acct -ne 'login' -and $env:VIBESPACE_ACCOUNT_FILE) {
+      $f = [IO.Path]::ChangeExtension($env:VIBESPACE_ACCOUNT_FILE, '.settings.json')
+      if ([IO.File]::Exists($f)) { $eps = $f }
+    }
+    if ($acct -ne 'login' -and -not $eps) { $blob = Join-Path "$env:VIBESPACE_ACCOUNT_DIR" "$acct.dpapi" }
     if ($acct -eq 'login' -and $env:VIBESPACE_RC_LABEL -and @($a | Where-Object { $_ -in '--remote-control','--rc' }).Count -eq 0) { $a += '--remote-control', $env:VIBESPACE_RC_LABEL }
-    if ($env:VIBESPACE_CLAUDE_SETTINGS -and $a -notcontains '--settings') { $a += '--settings', $env:VIBESPACE_CLAUDE_SETTINGS }
+    if ($eps) {
+      # our hook settings are replaced by the tab's file; any OTHER --settings
+      # would be a claude without the endpoint's env, i.e. on the /login
+      $b = @()
+      for ($i = 0; $i -lt $a.Count; $i++) {
+        if ($a[$i] -eq '--settings' -and $i + 1 -lt $a.Count -and ($a[$i + 1] -eq $env:VIBESPACE_CLAUDE_SETTINGS -or $a[$i + 1] -eq $eps)) { $i++; continue }
+        if ($a[$i] -eq '--settings' -or $a[$i] -like '--settings=*') { $own = $true }
+        $b += $a[$i]
+      }
+      $a = $b + @('--settings', $eps)
+    } elseif ($env:VIBESPACE_CLAUDE_SETTINGS -and $a -notcontains '--settings') { $a += '--settings', $env:VIBESPACE_CLAUDE_SETTINGS }
   }
+  if ($own) { Write-Error "This tab runs on the endpoint account '$acct': start claude without --settings"; return }
   if ($env:VIBESPACE_CLAUDE_DRYRUN) {
     if (-not $plain) {
-      if ($acct -eq 'login') { $tag = 'login' } elseif (Test-Path -LiteralPath $blob) { $tag = $acct + '|token' } else { $tag = $acct + '|missing' }
+      if ($acct -eq 'login') { $tag = 'login' } elseif ($eps) { $tag = $acct + '|endpoint' } elseif (Test-Path -LiteralPath $blob) { $tag = $acct + '|token' } else { $tag = $acct + '|missing' }
       Write-Output ('VSACCT[' + $tag + ']')
     }
     Write-Output ('VSCLAUDE[' + ($a -join '|') + ']'); return
@@ -138,7 +161,7 @@ function global:claude {
   if (-not $exe) { Write-Error 'claude is not on PATH'; return }
   if ($plain) { & $exe.Source @a; return }
   $tok = $null
-  if ($acct -ne 'login') {
+  if ($acct -ne 'login' -and -not $eps) {
     try {
       if (-not (Test-Path -LiteralPath $blob)) { throw 'missing' }
       ${accounts.DECRYPT_PS}
@@ -189,6 +212,7 @@ function create(termId, cwd, cols = 120, rows = 30, wsId = null, { settingsPath 
   // stale account (the renderer sets it before every claude launch).
   const accountFile = accountFileFor(wsId, termId);
   try { fs.rmSync(accountFile, { force: true }); } catch {}
+  try { fs.rmSync(endpointSettingsFor(wsId, termId), { force: true }); } catch {}
   env.VIBESPACE_ACCOUNT_FILE = accountFile;
   env.VIBESPACE_ACCOUNT_DIR = accounts.blobDir();
   const proc = pty.spawn('powershell.exe', shellArgs(), {
@@ -215,6 +239,7 @@ function create(termId, cwd, cols = 120, rows = 30, wsId = null, { settingsPath 
     sessions.delete(termId);
     const meta = metas.get(termId);
     if (meta?.statusFile) { try { fs.rmSync(meta.statusFile, { force: true }); } catch {} }
+    try { fs.rmSync(endpointSettingsFor(meta?.wsId, termId), { force: true }); } catch {} // holds a key
     metas.delete(termId);
     buffers.delete(termId);
     lastActivity.delete(termId);
@@ -230,6 +255,43 @@ function create(termId, cwd, cols = 120, rows = 30, wsId = null, { settingsPath 
 // wrapper at every claude launch (so a change applies to the NEXT launch in the tab)
 function accountFileFor(wsId, termId) {
   return path.join(U.dataRoot(), 'instances', wsId || '_none', 'accounts', `${termId}.account`);
+}
+
+// an endpoint account's per-tab claude settings: the hook settings plus its env
+// (the key in plain text, like claude's own settings.json; deleted when the tab
+// leaves the account or its pty exits)
+function endpointSettingsFor(wsId, termId) {
+  return path.join(U.dataRoot(), 'instances', wsId || '_none', 'accounts', `${termId}.settings.json`);
+}
+
+function writeEndpointSettings(termId, wsId, baseSettingsPath, env) {
+  const file = endpointSettingsFor((metas.get(termId) || {}).wsId || wsId, termId);
+  let base = {};
+  try { if (baseSettingsPath) base = JSON.parse(fs.readFileSync(baseSettingsPath, 'utf8')) || {}; } catch {}
+  const settings = { ...base, env: { ...(base.env || {}), ...env } };
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const tmp = `${file}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(settings, null, 2));
+  fs.renameSync(tmp, file);
+  return file;
+}
+
+function clearEndpointSettings(termId, wsId = null) {
+  try { fs.rmSync(endpointSettingsFor((metas.get(termId) || {}).wsId || wsId, termId), { force: true }); } catch {}
+}
+
+// main start: no pty survives a main restart, so every tab settings file of
+// this instance (each may hold an endpoint key) is stale
+function clearInstanceEndpointSettings(wsId) {
+  const dir = path.join(U.dataRoot(), 'instances', wsId || '_none', 'accounts');
+  let names = [];
+  try { names = fs.readdirSync(dir); } catch { return 0; }
+  let n = 0;
+  for (const f of names) {
+    if (!/\.settings\.json(?:\.\d+\.tmp)?$/.test(f)) continue;
+    try { fs.rmSync(path.join(dir, f), { force: true }); n++; } catch {}
+  }
+  return n;
 }
 
 function setAccount(termId, id, wsId = null) {
@@ -362,6 +424,8 @@ function kill(termId) {
   if (s) {
     const meta = metas.get(termId);
     if (meta?.statusFile) { try { fs.rmSync(meta.statusFile, { force: true }); } catch {} }
+    // here, not only in onExit: the metas entry (its wsId) is gone by then
+    try { fs.rmSync(endpointSettingsFor(meta?.wsId, termId), { force: true }); } catch {} // holds a key
     sessions.delete(termId);
     metas.delete(termId);
     buffers.delete(termId);
@@ -438,6 +502,11 @@ module.exports = {
   waitClaudeExit,
   claudeRunning,
   _endsAtPrompt: endsAtPrompt,
+  writeEndpointSettings,
+  clearEndpointSettings,
+  clearInstanceEndpointSettings,
+  endpointSettingsFor,
+  _wrapper: CLAUDE_WRAPPER, // smoke parses it with Windows PowerShell's parser
   _withSinglePath: withSinglePath,
   onData: (fn) => { dataListener = fn; },
   onExit: (fn) => { exitListener = fn; },

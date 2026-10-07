@@ -497,6 +497,19 @@ body { margin: 0; background: var(--bg); color: var(--text); font: 13.5px/1.45 "
 .acct-add #acct-token { flex: 1 1 auto; min-width: 0; font-family: Consolas, "Cascadia Mono", monospace; }
 .acct-error { color: var(--danger); font-size: 11.5px; margin-top: 6px; }
 .acct-tools { margin-top: 8px; }
+/* API endpoint accounts (z.ai GLM, …): label + pasted env block */
+.prefs-label.acct-sub { margin-top: 14px; font-size: 12.5px; }
+.acct-ep { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.acct-ep #acct-ep-label { align-self: flex-start; width: 180px; max-width: 100%; }
+.acct-ep input, .acct-ep textarea {
+  padding: 4px 8px; font-size: 12.5px;
+  background: var(--bg); color: var(--text);
+  border: 1px solid var(--border); border-radius: 6px; outline: none;
+}
+.acct-ep textarea { resize: vertical; min-height: 6em; font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
+.acct-ep input:focus, .acct-ep textarea:focus { border-color: var(--accent); }
+.acct-ep-actions { display: flex; justify-content: flex-end; }
+.acct-note { color: var(--dim); font-size: 11.5px; margin-top: 6px; }
 
 #theme-grid {
   display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
@@ -667,6 +680,8 @@ body.dragging #split-v, body.dragging #split-h { background: color-mix(in srgb, 
   white-space: nowrap;
 }
 .acct-pill.switching { color: var(--yellow); background: color-mix(in srgb, var(--yellow) 14%, transparent); font-style: italic; }
+/* its conversation belongs to another provider than its account */
+.acct-pill.wrong { color: var(--danger); background: color-mix(in srgb, var(--danger) 16%, transparent); font-weight: 600; }
 /* activity strip: a status bar BELOW the active terminal (0.6.42; it sat between
    the tab bar and the terminal before). Claude's prompt and mode line are at the
    bottom, so that's where the eyes already are. */

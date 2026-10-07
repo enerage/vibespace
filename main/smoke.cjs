@@ -1281,6 +1281,290 @@ async function runSmoke() {
       check('accounts remove deletes the token blob', !acc.has(id2) && !fs.existsSync(blob));
     }
 
+    // 25b. API endpoint accounts (z.ai GLM, …): lenient env parser, the whole env
+    //      as one DPAPI blob, provider families + family-bound pick, no secret in
+    //      state/log, login unusable without credentials, and the wrapper setting
+    //      the vars for ONE call (a fake claude.cmd reports what it saw). Fake key.
+    {
+      const fakeKey = 'fake-' + 'SmokeEndpointKey_' + U.randId(16);
+      const block = '{\n'
+        + `  "ANTHROPIC_AUTH_TOKEN": "${fakeKey}",\r\n`
+        + '  "ANTHROPIC_BASE_URL": "https://api.z.ai/api/anthropic",\n'
+        + '  "ANCHROPIC_DEFAULT_HAIKU_MODEL": "glm-5.3-flash[1m]",\n'
+        + '  "ANTHROPIC_DEFAULT_SONNET_MODEL": "glm-5.3-flash[1m]",\n'
+        + '  "ANTHROPIC_DEFAULT_OPUS_MODEL": "glm-5.3[1m]",\n'
+        + '  "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "900000", // compact late\n'
+        + '  "API_TIMEOUT_MS": 3000000,\n'
+        + '  "CLAUDE_CODE_EFFORT_LEVEL": "max",\n'
+        + '}';
+      const p = acc._parseEndpointEnv(block);
+      const kv = acc._parseEndpointEnv(`ANTHROPIC_BASE_URL=https://open.bigmodel.cn/api/anthropic\r\nANTHROPIC_API_KEY=${fakeKey}=x\n# comment\nAPI_TIMEOUT_MS="5"`);
+      const noBase = acc._parseEndpointEnv(`{ "ANTHROPIC_AUTH_TOKEN": "${fakeKey}" }`);
+      const pathKey = acc._parseEndpointEnv('ANTHROPIC_BASE_URL=https://x.io\nANTHROPIC_AUTH_TOKEN=k\nPATH=C:\\evil');
+      const oauth = acc._parseEndpointEnv('"ANTHROPIC_BASE_URL": "https://x.io", "ANTHROPIC_AUTH_TOKEN": "k", "CLAUDE_CODE_OAUTH_TOKEN": "sk-ant-oat01-x"');
+      const pe = {
+        block: Boolean(p.ok && Object.keys(p.env).length === 8 && p.env.ANTHROPIC_DEFAULT_HAIKU_MODEL === 'glm-5.3-flash[1m]'
+          && !('ANCHROPIC_DEFAULT_HAIKU_MODEL' in p.env) && p.env.API_TIMEOUT_MS === '3000000' && p.env.ANTHROPIC_AUTH_TOKEN === fakeKey),
+        typoNote: Boolean(p.ok && p.notes.length === 1 && p.notes[0] === 'ANCHROPIC_DEFAULT_HAIKU_MODEL → ANTHROPIC_DEFAULT_HAIKU_MODEL'),
+        keyValue: Boolean(kv.ok && kv.env.ANTHROPIC_API_KEY === fakeKey + '=x' && kv.env.API_TIMEOUT_MS === '5' && Object.keys(kv.env).length === 3),
+        noBase: !noBase.ok && /ANTHROPIC_BASE_URL is missing/.test(noBase.error) && !noBase.error.includes(fakeKey),
+        pathRejected: !pathKey.ok && /^PATH is not allowed/.test(pathKey.error),
+        oauthRejected: !oauth.ok && /^CLAUDE_CODE_OAUTH_TOKEN is not allowed/.test(oauth.error),
+      };
+      check('accounts endpoint env parser (settings block + typo + trailing comma, KEY=VALUE, errors)', Object.values(pe).every(Boolean), JSON.stringify(pe));
+
+      const decrypt = (blobFile) => new Promise((resolve) => {
+        const ps = `$blob = $env:VS_SMOKE_BLOB; ${acc.DECRYPT_PS}; [Console]::Out.Write($tok)`;
+        require('node:child_process').execFile(acc._psExe(), ['-NoProfile', '-NonInteractive', '-Command', ps],
+          { windowsHide: true, timeout: 20000, env: acc._psEnv({ VS_SMOKE_BLOB: blobFile }) }, (err, out) => resolve(String(out || '')));
+      });
+      const tokAdd = await acc.add('Smoke Max', 'sk-ant-oat01-' + 'SmokeFakeToken_' + U.randId(24) + '-y');
+      const epAdd = await acc.addEndpoint('Smoke GLM', block);
+      const tokId = tokAdd.ok ? (tokAdd.state.accounts.find(a => a.label === 'Smoke Max') || {}).id : null;
+      const epId = epAdd.ok ? (epAdd.state.accounts.find(a => a.kind === 'endpoint') || {}).id : null;
+      const epBlob = epId ? acc.blobPath(epId) : null;
+      const epText = epBlob && fs.existsSync(epBlob) ? fs.readFileSync(epBlob, 'utf8') : '';
+      const dec = epBlob ? await decrypt(epBlob) : '';
+      const logger = require('./logger.cjs');
+      const logText = (() => {
+        try { return fs.readdirSync(logger.logsDir()).map(f => fs.readFileSync(path.join(logger.logsDir(), f), 'utf8')).join('\n'); } catch { return ''; }
+      })();
+      const row = (acc.state().accounts.find(a => a.id === epId)) || {};
+      const nz = acc._normalize({ accounts: { e1: { label: 'E', kind: 'endpoint', baseUrl: 'https://api.z.ai/api/anthropic', models: { opus: 'glm-5.3' } }, t1: { label: 'T', kind: 'odd' } } });
+      const ep = {
+        added: Boolean(tokId && epId && epAdd.notes && epAdd.notes.length === 1),
+        roundtrip: dec === acc._envText(p.env) && dec.includes('ANTHROPIC_BASE_URL=https://api.z.ai/api/anthropic\n'),
+        blobOpaque: epText.length > 100 && !epText.includes(fakeKey),
+        noSecret: !JSON.stringify(acc.state()).includes(fakeKey) && !JSON.stringify(epAdd).includes(fakeKey)
+          && !fs.readFileSync(path.join(U.dataRoot(), 'accounts.json'), 'utf8').includes(fakeKey) && !logText.includes(fakeKey),
+        row: row.kind === 'endpoint' && row.family === 'endpoint:api.z.ai' && row.host === 'api.z.ai'
+          && Boolean(row.models && row.models.opus === 'glm-5.3[1m]' && row.models.haiku === 'glm-5.3-flash[1m]') && row.available === true,
+        families: acc.familyOf('login') === 'anthropic' && acc.familyOf(tokId) === 'anthropic' && acc.familyOf('ghost-zz99') === 'anthropic'
+          && acc.familyOf(epId) === 'endpoint:api.z.ai',
+        normalize: nz.accounts.e1.kind === 'endpoint' && nz.accounts.e1.baseUrl === 'https://api.z.ai/api/anthropic'
+          && nz.accounts.e1.models.opus === 'glm-5.3' && nz.accounts.t1.kind === 'token',
+      };
+      check('accounts endpoint add (DPAPI env blob round-trip, family, models, never the key in state/json/log)', Object.values(ep).every(Boolean),
+        JSON.stringify({ ...ep, roundtrip: ep.roundtrip ? 'ok' : 'MISMATCH' }));
+
+      if (tokId && epId) {
+        const now = Date.now();
+        const zai = 'endpoint:api.z.ai';
+        const fp = {};
+        fp.order = acc.state().accounts.map(a => a.id).join(',') === `login,${tokId},${epId}`;
+        fp.anyFamily = acc.pick() === 'login' && acc.pick('login') === tokId;
+        fp.endpointOnly = acc.pick(null, now, { family: zai }) === epId && acc.pick(epId, now, { family: zai }) === null;
+        acc.markExhausted(tokId, now + 3600e3, 'weekly limit');
+        // a Claude conversation never lands on the endpoint, even with every Claude account out
+        fp.claudeOnly = acc.pick('login', Date.now(), { family: 'anthropic' }) === null && acc.pick('login') === epId;
+        acc.clear(tokId);
+        // only an endpoint, no Claude login on this PC: new agents start on the endpoint
+        acc._setCredentialsPath(path.join(U.dataRoot(), 'no-such-home', '.credentials.json'));
+        const sNo = acc.state();
+        const loginRow = sNo.accounts.find(a => a.id === 'login');
+        fp.notLoggedIn = loginRow.available === false && loginRow.note === 'not logged in' && acc.pick() === tokId;
+        acc.markExhausted(tokId, Date.now() + 3600e3, 'weekly limit');
+        fp.friendCase = acc.pick() === epId && acc.state().pick === epId;
+        let refused = false;
+        try { acc.switchAll('login'); } catch { refused = true; }
+        fp.switchAllRefused = refused;
+        acc.clear(tokId);
+        acc._setCredentialsPath(null);
+        fp.loggedInAgain = acc.pick() === 'login' && acc.state().accounts.find(a => a.id === 'login').available === true;
+        check('accounts provider families (family-bound pick, no /login without credentials)', Object.values(fp).every(Boolean), JSON.stringify(fp));
+        // a conversation's provider comes from its transcript's model when it has
+        // replies: an old Claude conversation picked in an endpoint tab stays Claude's
+        const tdir2 = path.join(U.dataRoot(), 'fam-tx');
+        fs.mkdirSync(tdir2, { recursive: true });
+        const txC = path.join(tdir2, 'c.jsonl');
+        const txG = path.join(tdir2, 'g.jsonl');
+        const txN = path.join(tdir2, 'n.jsonl');
+        fs.writeFileSync(txC, ['{"type":"user","message":{}}', '{"type":"assistant","message":{"model":"<synthetic>"}}', '{"type":"assistant","message":{"model":"claude-opus-5-5"}}'].join('\n'));
+        fs.writeFileSync(txG, ['{"type":"user"}', '{"type":"assistant","message":{"model":"glm-5.3"}}'].join('\n'));
+        fs.writeFileSync(txN, '{"type":"user"}\n');
+        const zf = 'endpoint:api.z.ai';
+        const tf = {
+          claudeInEndpointTab: acc.familyForNewSession(txC, zf) === 'anthropic',
+          glmInClaudeTab: acc.familyForNewSession(txG, 'anthropic') === 'endpoint:unknown',
+          glmInEndpointTab: acc.familyForNewSession(txG, zf) === zf,
+          freshTakesTab: acc.familyForNewSession(txN, zf) === zf && acc.familyForNewSession(null, 'anthropic') === 'anthropic',
+        };
+        // the registry survives a damaged file (.bak)
+        acc.noteSessionFamily('famsmoke-1', zf);
+        acc.noteSessionFamily('famsmoke-2', 'anthropic');
+        fs.writeFileSync(acc._files().families, '\0\0\0');
+        tf.registryBak = acc.sessionFamily('famsmoke-1') === zf || acc.sessionFamily('famsmoke-2') === 'anthropic';
+        check('conversation provider from the transcript model; registry restored from .bak', Object.values(tf).every(Boolean), JSON.stringify(tf));
+        try { fs.rmSync(tdir2, { recursive: true, force: true }); } catch {}
+
+        // endpoint accounts live in their own file + blob name: a window on OLDER
+        // main code (every non-login account → kind 'token', blob <id>.dpapi
+        // read as an OAuth token) never sees one. An entry left in accounts.json
+        // by the first 0.6.49 build is moved on read.
+        {
+          const files = acc._files();
+          const oldNormalize = (raw) => { // the pre-0.6.49 rule, copied
+            const out = {};
+            for (const [id, a] of Object.entries((raw && raw.accounts) || {})) {
+              if (!a || typeof a !== 'object' || id === 'login') continue;
+              out[id] = { label: String(a.label || id), kind: 'token' };
+            }
+            return out;
+          };
+          const rawAcc = JSON.parse(fs.readFileSync(files.accounts, 'utf8'));
+          const rawEps = JSON.parse(fs.readFileSync(files.endpoints, 'utf8'));
+          const old = oldNormalize(rawAcc);
+          const own = {
+            notInAccountsJson: !(epId in rawAcc.accounts) && rawAcc.order.includes(epId),
+            oldCodeBlind: !(epId in old) && (tokId in old),
+            ownFile: Boolean(rawEps[epId] && rawEps[epId].baseUrl === 'https://api.z.ai/api/anthropic' && rawEps[epId].models.opus === 'glm-5.3[1m]')
+              && !JSON.stringify(rawEps).includes(fakeKey) && !(tokId in rawEps),
+            blobName: epBlob === files.endpointBlob(epId) && fs.existsSync(epBlob) && !fs.existsSync(files.tokenBlob(epId)),
+          };
+          const legacy = JSON.parse(fs.readFileSync(files.accounts, 'utf8'));
+          legacy.accounts.mig1 = { label: 'Mig', kind: 'endpoint', baseUrl: 'https://mig.example/api', models: { opus: 'm1' } };
+          legacy.order.push('mig1');
+          fs.writeFileSync(files.accounts, JSON.stringify(legacy, null, 2) + '\n');
+          fs.writeFileSync(files.tokenBlob('mig1'), 'ab'.repeat(60));
+          const migRow = acc.state().accounts.find(a => a.id === 'mig1') || {};
+          const afterAcc = JSON.parse(fs.readFileSync(files.accounts, 'utf8'));
+          const afterEps = JSON.parse(fs.readFileSync(files.endpoints, 'utf8'));
+          own.migrated = migRow.kind === 'endpoint' && migRow.family === 'endpoint:mig.example' && migRow.available === true
+            && !('mig1' in afterAcc.accounts) && afterAcc.order.includes('mig1') && Boolean(afterEps.mig1) && Boolean(afterEps[epId])
+            && fs.existsSync(files.endpointBlob('mig1')) && !fs.existsSync(files.tokenBlob('mig1'));
+          acc.remove('mig1');
+          own.migRemoved = !acc.has('mig1') && !fs.existsSync(files.endpointBlob('mig1')) && !('mig1' in JSON.parse(fs.readFileSync(files.endpoints, 'utf8')));
+          check('endpoint accounts in their own file + blob name, invisible to older main code (+ migration)', Object.values(own).every(Boolean), JSON.stringify(own));
+        }
+
+        // the endpoint path: MAIN decrypts the env (endpointEnv) and writes the
+        // tab's own claude settings (hooks + env); the wrapper only swaps its
+        // --settings for that file and adds no --remote-control. It never
+        // decrypts endpoint settings itself (Defender flagged that, 2026-10-07).
+        const env2 = await acc.endpointEnv(epId).catch(() => null);
+        const baseS = path.join(U.dataRoot(), 'smoke-hooks.json');
+        fs.writeFileSync(baseS, JSON.stringify({ hooks: { Stop: [] }, statusLine: { type: 'command', command: 'x' } }));
+        const epsFile = ptyhost.endpointSettingsFor('smoke-acct', 'smokeendpoint');
+        let keptAtKill = null; // was the tab's settings file there just before kill()?
+        const refuse = 'start claude without --settings';
+        const r = await new Promise((resolve) => {
+          let buf = '';
+          const termId = 'smokeendpoint';
+          const done = (ok, detail) => { clearTimeout(timer); ptyhost.onData(() => {}); keptAtKill = fs.existsSync(epsFile); ptyhost.kill(termId); resolve({ ok, detail }); };
+          const timer = setTimeout(() => done(false, 'timeout: ' + buf.slice(-300).split(fakeKey).join('<key>')), 25000);
+          if (!env2 || env2.ANTHROPIC_AUTH_TOKEN !== fakeKey) { done(false, 'endpointEnv did not decrypt'); return; }
+          try { ptyhost.create(termId, U.BIN_ROOT, 400, 30, 'smoke-acct', { settingsPath: baseS, rcLabel: 'WS · t1' }); } catch (err) { done(false, 'spawn: ' + err.message); return; }
+          ptyhost.setAccount(termId, epId);
+          const eps = ptyhost.writeEndpointSettings(termId, 'smoke-acct', baseS, env2);
+          let written = null;
+          try { written = JSON.parse(fs.readFileSync(eps, 'utf8')); } catch {}
+          const fileOk = Boolean(written && written.env && written.env.ANTHROPIC_BASE_URL === 'https://api.z.ai/api/anthropic'
+            && written.env.ANTHROPIC_AUTH_TOKEN === fakeKey && written.hooks && written.statusLine);
+          const want = [`VSACCT[${epId}|endpoint]`, `VSCLAUDE[--settings|${eps}]`, `VSACCT[${epId}|endpoint]`, `VSCLAUDE[--resume|abc|--settings|${eps}]`];
+          ptyhost.onData((id, chunk) => {
+            if (id !== termId) return;
+            buf += chunk;
+            const flat = buf.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '').replace(/\r?\n/g, '');
+            const got = [...flat.matchAll(/VS(?:ACCT|CLAUDE)\[[^\]]*\]/g)].map(m => m[0]);
+            if (got.length < want.length || !flat.includes(refuse)) return;
+            // the third claude brought its own --settings: refused, nothing run
+            const refused = flat.includes(`endpoint account '${epId}': ${refuse}`) && got.length === want.length;
+            const ok = fileOk && refused && want.every((w, i) => got[i] === w) && !flat.includes(fakeKey);
+            done(ok, ok ? `${got.length} lines + refusal` : 'fileOk=' + fileOk + ' refused=' + refused + ' got=' + JSON.stringify(got).split(fakeKey).join('<key>'));
+          });
+          // plain `claude`, the way claudeCommand types it (explicit hook
+          // --settings), then one with someone else's --settings
+          setTimeout(() => ptyhost.write(termId, `$env:VIBESPACE_CLAUDE_DRYRUN=1; claude; claude --resume abc --settings '${baseS}'; claude --settings 'C:\\other.json'\r`), 900);
+        });
+        check('endpoint account: main writes the tab settings, wrapper swaps --settings, refuses a foreign --settings, no RC, no key in output', r.ok, r.detail);
+        // kill() itself deletes the tab's settings file (it holds the key); its
+        // onExit no longer knows the workspace. Main start clears an instance's
+        // leftovers (no pty survives a restart), account files stay.
+        const cdir = path.join(U.dataRoot(), 'instances', 'smoke-clean', 'accounts');
+        fs.mkdirSync(cdir, { recursive: true });
+        for (const f of ['t1.settings.json', 't2.settings.json.123.tmp', 't1.account']) fs.writeFileSync(path.join(cdir, f), 'x');
+        const cleared = ptyhost.clearInstanceEndpointSettings('smoke-clean');
+        const left = fs.readdirSync(cdir).join(',');
+        check('pty kill removes the endpoint settings file; main start clears stale ones',
+          keptAtKill === true && !fs.existsSync(epsFile) && cleared === 2 && left === 't1.account', JSON.stringify({ keptAtKill, gone: !fs.existsSync(epsFile), cleared, left }));
+        // leaving the account deletes the file (it holds the key)
+        const epsPath = ptyhost.endpointSettingsFor('smoke-acct', 'smokeendpoint');
+        ptyhost.writeEndpointSettings('smokeendpoint', 'smoke-acct', null, { ANTHROPIC_BASE_URL: 'x' });
+        ptyhost.clearEndpointSettings('smokeendpoint', 'smoke-acct');
+        check('endpoint settings file removed when the tab leaves the account', !fs.existsSync(epsPath));
+        try { fs.rmSync(baseS, { force: true }); } catch {}
+
+        // accounts:setTerm's helper: never a silent /login fallback. Unknown ids
+        // and endpoints whose settings can't be decrypted THROW; concurrent
+        // callers share one decrypt.
+        {
+          const ft = {};
+          const lg = await acc.forTerm('login');
+          ft.login = lg.id === 'login' && lg.env === null && (await acc.forTerm(null)).id === 'login';
+          ft.token = (await acc.forTerm(tokId)).env === null;
+          let unk = null;
+          try { await acc.forTerm('ghost-zz99'); } catch (e) { unk = e.message; }
+          ft.unknownThrows = unk === 'that account no longer exists';
+          acc._forgetEnv(epId);
+          const sp0 = acc._decryptSpawns();
+          const all = await Promise.all([acc.forTerm(epId), acc.forTerm(epId), acc.endpointEnv(epId)]).catch(() => null);
+          ft.oneDecrypt = Boolean(all) && acc._decryptSpawns() - sp0 === 1 && all[0].env.ANTHROPIC_AUTH_TOKEN === fakeKey
+            && all[2].ANTHROPIC_AUTH_TOKEN === fakeKey && all[0].env !== all[1].env;
+          const goodBlob = fs.readFileSync(epBlob, 'utf8');
+          fs.writeFileSync(epBlob, 'ab'.repeat(64)); // damaged blob
+          acc._forgetEnv(epId);
+          let bad = null;
+          try { await acc.forTerm(epId); } catch (e) { bad = e.message; }
+          ft.undecryptableThrows = Boolean(bad && bad.startsWith('Smoke GLM: ') && /could not be decrypted/.test(bad));
+          const sp1 = acc._decryptSpawns();
+          try { await acc.forTerm(epId); } catch {}
+          ft.failureNotCached = acc._decryptSpawns() - sp1 === 1;
+          fs.rmSync(epBlob, { force: true });
+          let gone = null;
+          try { await acc.forTerm(epId); } catch (e) { gone = e.message; }
+          ft.missingThrows = Boolean(gone && /missing/.test(gone));
+          fs.writeFileSync(epBlob, goodBlob); // the remove check below needs it back
+          check('accounts.forTerm (setTerm): unknown or undecryptable endpoint throws, one decrypt per id', Object.values(ft).every(Boolean),
+            JSON.stringify(ft).split(fakeKey).join('<key>'));
+        }
+      }
+
+      // conversation families: the first family a conversation ran on wins;
+      // the file keeps the newest N
+      {
+        const files = acc._files();
+        const sidA = 'aaaaaaaa-0000-4000-8000-000000000001';
+        const reg = {};
+        reg.firstWins = acc.noteSessionFamily(sidA, 'endpoint:api.z.ai') === 'endpoint:api.z.ai'
+          && acc.noteSessionFamily(sidA, 'anthropic') === 'endpoint:api.z.ai' && acc.sessionFamily(sidA) === 'endpoint:api.z.ai';
+        reg.unknown = acc.sessionFamily('bbbbbbbb-0000') === null && acc.sessionFamily('..\\x') === null
+          && acc.sessionFamily('__proto__') === null && acc.noteSessionFamily('', 'anthropic') === null;
+        acc._setFamiliesMax(5);
+        for (let i = 0; i < 6; i++) acc.noteSessionFamily(`s-${i}`, 'anthropic');
+        acc._setFamiliesMax(null);
+        let onDisk = {};
+        try { onDisk = JSON.parse(fs.readFileSync(files.families, 'utf8')); } catch {}
+        reg.pruned = Object.keys(onDisk).join(',') === 's-1,s-2,s-3,s-4,s-5' && acc.sessionFamily(sidA) === null && acc.sessionFamily('s-5') === 'anthropic';
+        check('conversation family registry (first family wins, oldest pruned)', Object.values(reg).every(Boolean), JSON.stringify(reg));
+      }
+
+      // the expanded wrapper must stay valid Windows PowerShell 5.1
+      const wf = path.join(U.dataRoot(), 'wrapper-smoke.ps1');
+      fs.writeFileSync(wf, ptyhost._wrapper);
+      const parsed = await new Promise((resolve) => {
+        const ps = '$t = [IO.File]::ReadAllText($env:VS_SMOKE_PS); $e = $null; [void][System.Management.Automation.Language.Parser]::ParseInput($t, [ref]$null, [ref]$e); '
+          + "[Console]::Out.Write([string]$e.Count + '|' + (($e | ForEach-Object { $_.Message }) -join '; '))";
+        require('node:child_process').execFile(acc._psExe(), ['-NoProfile', '-NonInteractive', '-Command', ps],
+          { windowsHide: true, timeout: 20000, env: acc._psEnv({ VS_SMOKE_PS: wf }) }, (err, out) => resolve(String(out || (err && err.message) || '').trim()));
+      });
+      check('pty `claude` wrapper parses in Windows PowerShell 5.1', parsed === '0|', parsed);
+      try { fs.rmSync(wf, { force: true }); } catch {}
+
+      if (tokId) acc.remove(tokId);
+      if (epId) acc.remove(epId);
+      check('accounts remove deletes the endpoint blob', !acc.has(epId) && !(epBlob && fs.existsSync(epBlob)));
+    }
+
     // transcript fallback: the LAST api-error line, read from the tail only
     {
       const tdir = path.join(U.dataRoot(), 'tx-smoke');

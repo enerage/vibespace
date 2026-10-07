@@ -2,6 +2,31 @@
 
 Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 
+## [0.6.49] — 2026-10-07
+
+### Added
+- **z.ai GLM (and other Anthropic-compatible APIs) as an account.** ⚙ Preferences
+  → Accounts → "Add an API endpoint". Paste the same `env` block you use in
+  Claude's settings (base URL, auth token, model names).
+  - It's stored encrypted (Windows DPAPI). The key never goes into a log, the
+    state files or the repo.
+  - Known typos are fixed for you, with a note (`ANCHROPIC_…` → `ANTHROPIC_…`).
+    Only Claude-related variables are accepted.
+  - **New conversations only.** A conversation never moves between Claude and
+    GLM (it doesn't work there): not by auto-switch, Move all here, Continue on,
+    restore or unpark. VibeSpace remembers which provider each conversation
+    started on. It reads that from the model in the transcript, so even an old
+    Claude conversation picked in a GLM tab is recognized and moved back to
+    Claude.
+  - **+ ▾ → New agent on <account>** starts one agent on the account you choose.
+  - **Without a Claude login on the PC** (someone who only has z.ai), the
+    login account is skipped and new agents start on the endpoint.
+  - Endpoint agents have no phone control and no claude.ai connectors.
+  - Removing an endpoint whose conversations are still saved leaves them parked
+    or as plain tabs with a note. Nothing is ever resumed on the wrong provider.
+  - Smoke 111/111, two independent reviews (all findings fixed). Not yet run
+    against the real z.ai API: that's the first live test.
+
 ## [0.6.48] — 2026-10-06
 
 ### Fixed

@@ -70,6 +70,39 @@ export function init(opts) {
   for (const id of ['#acct-label', '#acct-token']) {
     $(id).addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); addAccount(); } });
   }
+
+  // API endpoint (z.ai GLM, …): label + the pasted env block, secret included.
+  // The block goes to main once and the textarea is emptied after EVERY try.
+  const epMsg = (sel, msg) => {
+    const e = $(sel);
+    e.textContent = msg || '';
+    e.classList.toggle('hidden', !msg);
+  };
+  const addEndpoint = async () => {
+    const label = $('#acct-ep-label').value.trim();
+    const text = $('#acct-ep-env').value;
+    epMsg('#acct-ep-note', '');
+    if (!label) { epMsg('#acct-ep-error', 'Give the endpoint a label'); return; }
+    if (!text.trim()) { epMsg('#acct-ep-error', 'Paste the env block (ANTHROPIC_BASE_URL, ANTHROPIC_AUTH_TOKEN, …)'); return; }
+    epMsg('#acct-ep-error', '');
+    $('#acct-ep-add-btn').disabled = true;
+    try {
+      const r = await vs.accountsAddEndpoint(label, text);
+      if (r && r.ok) {
+        $('#acct-ep-label').value = '';
+        renderAccounts(r.state);
+        if (Array.isArray(r.notes) && r.notes.length) epMsg('#acct-ep-note', 'Fixed: ' + r.notes.join(' · '));
+      } else epMsg('#acct-ep-error', (r && r.error) || 'Could not add the endpoint');
+    } catch (e) {
+      epMsg('#acct-ep-error', e.message || String(e));
+    } finally {
+      $('#acct-ep-env').value = ''; // it holds a secret
+      $('#acct-ep-add-btn').disabled = false;
+    }
+  };
+  $('#acct-ep-add-btn').onclick = addEndpoint;
+  $('#acct-ep-label').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); addEndpoint(); } });
+  $('#acct-ep-env').addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.ctrlKey) { e.preventDefault(); addEndpoint(); } });
   $('#btn-setup-token').onclick = () => { close(); openSetupTokenTab(); };
 
   // rows that moved out of the header
@@ -143,11 +176,20 @@ export function init(opts) {
       edit.onclick = rename;
       nameLine.append(name, edit);
       const out = a.exhaustedUntil && a.exhaustedUntil > Date.now();
+      // not logged in (the /login of someone with only an endpoint), no blob…
+      const missing = !out && a.available === false && !a.exhaustedUntil;
       const hint = el('div', 'prefs-hint');
-      hint.append(el('span', '', a.kind === 'login' ? 'logged in · phone control · connectors' : 'token · no phone control · no claude.ai connectors'), document.createTextNode(' · '));
-      const status = el('span', out ? 'acct-out' : '', out ? `out until ${untilText(a.exhaustedUntil)}` : 'available');
-      if (out && a.reason) status.title = a.reason;
-      hint.append(status);
+      const kindText = a.kind === 'login' ? 'logged in · phone control · connectors'
+        : a.kind === 'endpoint' ? ['endpoint', a.host || '?', a.models && a.models.opus, 'new conversations only'].filter(Boolean).join(' · ')
+          : 'token · no phone control · no claude.ai connectors';
+      if (a.kind === 'login' && missing) {
+        hint.append(el('span', 'acct-out', a.note === 'not logged in' ? 'not logged in on this PC' : 'unavailable'));
+      } else {
+        hint.append(el('span', '', kindText), document.createTextNode(' · '));
+        const status = el('span', out || missing ? 'acct-out' : '', out ? `out until ${untilText(a.exhaustedUntil)}` : missing ? 'unavailable' : 'available');
+        if (out && a.reason) status.title = a.reason;
+        hint.append(status);
+      }
       info.append(nameLine, hint);
 
       const actions = el('div', 'acct-actions');
@@ -161,8 +203,10 @@ export function init(opts) {
         const all = el('button', 'btn small ghost', 'Move all here');
         all.title = out
           ? 'This account is out of usage right now'
-          : 'Make this the first choice and move every open agent to it, in all workspaces.\nIdle agents move now, one at a time. Busy ones move when their turn ends. Nothing is interrupted.';
-        all.disabled = Boolean(out);
+          : missing ? 'This account is unavailable on this PC'
+            : 'Make this the first choice and move every open agent to it, in all workspaces.\nIdle agents move now, one at a time. Busy ones move when their turn ends. Nothing is interrupted.'
+              + '\nOnly agents of the same provider move: a conversation never moves between Claude and an API endpoint.';
+        all.disabled = Boolean(out || missing);
         all.onclick = () => act(vs.accountsSwitchAll(a.id));
         actions.append(all);
       }
@@ -175,11 +219,12 @@ export function init(opts) {
       down.disabled = i === st.accounts.length - 1;
       down.onclick = () => act(vs.accountsMove(a.id, +1));
       actions.append(up, down);
-      if (a.kind === 'token') {
+      if (a.kind === 'token' || a.kind === 'endpoint') {
         const rm = el('button', 'btn small ghost', '✕');
         rm.title = 'Remove this account';
         rm.onclick = async () => {
-          if (!(await confirmBox(`Remove the account "${a.label}"?\nIts stored token is deleted from this PC.`, { ok: 'Remove', danger: true }))) return;
+          const what = a.kind === 'endpoint' ? 'Its stored settings (with the key) are' : 'Its stored token is';
+          if (!(await confirmBox(`Remove the account "${a.label}"?\n${what} deleted from this PC; agents running on it keep going until they close.`, { ok: 'Remove', danger: true }))) return;
           act(vs.accountsRemove(a.id));
         };
         actions.append(rm);

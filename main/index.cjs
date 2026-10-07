@@ -209,8 +209,40 @@ async function ensureOverlayIcons() {
 const termStatus = new Map(); // termId -> last hook-reported status (working|waiting|done)
 const termAccount = new Map(); // termId -> account id its claude runs on (renderer sets it before launch)
 const switchLog = new Map(); // termId -> [ms] of automatic account switches (loop guard)
+const termFamily = new Map(); // termId -> family of its account when it was set
 const accountSince = new Map(); // termId -> ms its current account was set (older evidence belongs to the previous one)
 const attnTerms = new Map(); // termId -> attention.cjs arbitration state (file vs instant feed)
+
+// What the tab's `claude` wrapper reads at its next launch: the account file
+// and, for an API endpoint, the tab's own claude settings (hooks + env).
+function applyTermAccount(termId, wsId, id, env) {
+  if (env) ptyhost.writeEndpointSettings(termId, wsId || null, wsId ? ensureHookSettings(wsId) : null, env);
+  else ptyhost.clearEndpointSettings(termId, wsId || null);
+  ptyhost.setAccount(termId, id, wsId || null);
+  if (termAccount.get(termId) !== id) {
+    // older limit windows / transcript errors belong to the previous account
+    claudefeed.clearRateLimits(termId);
+    accountSince.set(termId, Date.now());
+  }
+  termAccount.set(termId, id);
+  termFamily.set(termId, accounts.familyOf(id));
+}
+
+// A fresh pty has no account file, which means the /login. On a PC whose first
+// choice is an API endpoint (someone with only z.ai, no Claude login) a claude
+// typed into a plain shell would start on a login that isn't there: give the
+// shell the endpoint. The renderer's own setTermAccount always wins, so this
+// only applies when none arrived while the env was being decrypted.
+function defaultTermAccount(termId, wsId) {
+  if (termAccount.has(termId)) return;
+  const pick = accounts.pick();
+  if (!pick || accounts.kindOf(pick) !== 'endpoint') return;
+  accounts.forTerm(pick).then((r) => {
+    if (termAccount.has(termId) || !ptyhost.alive(termId)) return;
+    applyTermAccount(termId, wsId, r.id, r.env);
+    logger.info(`account: term=${termId} -> ${r.id} (plain shell default)`);
+  }).catch((err) => logger.warn(`account: term=${termId} default ${pick} unusable (${err.message})`));
+}
 
 function termName(wsId, termId) {
   const terms = rendererState.get(wsId)?.terminals;
@@ -943,6 +975,7 @@ function initIpc() {
   ipcMain.handle('pty:create', (e, { termId, wsId, cwd, cols, rows, rcLabel }) => {
     const settingsPath = ensureHookSettings(wsId);
     ptyhost.create(termId, cwd, cols, rows, wsId, { settingsPath, rcLabel: typeof rcLabel === 'string' ? rcLabel : null });
+    defaultTermAccount(String(termId), wsId);
     return { settingsPath };
   });
   // live ptys + buffered output — a freshly loaded renderer uses this to re-attach
@@ -1039,26 +1072,35 @@ function initIpc() {
   // here → DPAPI on stdin; it is never logged and never sent back.
   ipcMain.handle('accounts:list', () => accounts.state());
   ipcMain.handle('accounts:add', (e, label, token) => accounts.add(label, token));
+  // an API endpoint's env block (secret included) → one DPAPI blob; only the
+  // non-secret display info comes back
+  ipcMain.handle('accounts:addEndpoint', (e, label, envText) => accounts.addEndpoint(label, envText));
   ipcMain.handle('accounts:remove', (e, id) => accounts.remove(String(id || '')));
   ipcMain.handle('accounts:rename', (e, id, label) => accounts.rename(String(id || ''), label));
   ipcMain.handle('accounts:move', (e, id, delta) => accounts.move(String(id || ''), delta));
   ipcMain.handle('accounts:switchAll', (e, id) => accounts.switchAll(String(id || '')));
   ipcMain.handle('accounts:clear', (e, id) => accounts.clear(String(id || '')));
-  ipcMain.handle('accounts:setTerm', (e, termId, accountId) => {
+  // never a fallback to the /login: an unknown account, or an API endpoint whose
+  // settings can't be decrypted, REJECTS (the renderer then types no claude).
+  // An endpoint's env goes into this tab's own claude settings file (the
+  // wrapper only points claude at it); every other account: no such file.
+  ipcMain.handle('accounts:setTerm', async (e, termId, accountId) => {
     const win = BrowserWindow.fromWebContents(e.sender);
     const wsId = win && winInfo.get(win.id)?.wsId;
-    const id = accounts.has(accountId) ? String(accountId) : accounts.LOGIN;
-    if (id !== accountId) logger.warn(`account: term=${termId} asked for unknown account ${accountId}, using login`);
-    ptyhost.setAccount(String(termId), id, wsId || null);
-    if (termAccount.get(String(termId)) !== id) {
-      // older limit windows / transcript errors belong to the previous account
-      claudefeed.clearRateLimits(String(termId));
-      accountSince.set(String(termId), Date.now());
+    const tid = String(termId);
+    let r;
+    try {
+      r = await accounts.forTerm(accountId);
+    } catch (err) {
+      logger.warn(`account: term=${tid} can't use account ${accountId} (${err.message})`);
+      throw err;
     }
-    termAccount.set(String(termId), id);
-    logger.info(`account: term=${termId} -> ${id}`);
-    return id; // the account actually used (unknown/removed ids fall back to login)
+    applyTermAccount(tid, wsId, r.id, r.env);
+    logger.info(`account: term=${tid} -> ${r.id}`);
+    return r.id;
   });
+  // the provider a conversation belongs to (accounts.sessionFamily), or null
+  ipcMain.handle('accounts:sessionFamily', (e, sid) => accounts.sessionFamily(String(sid || '')));
   ipcMain.handle('pty:waitClaudeExit', (e, termId, timeoutMs, noKill) => ptyhost.waitClaudeExit(String(termId), Number(timeoutMs) || 15000, { kill: !noKill }));
   ipcMain.handle('pty:claudeRunning', (e, termId) => ptyhost.claudeRunning(String(termId)));
 
@@ -1114,8 +1156,10 @@ function initIpc() {
   });
   sessions.onData((wsId, termId, sessionId) => {
     logger.info(`session captured: ws=${wsId} term=${termId} session=${sessionId}`);
+    // timing heuristic (no feed): the conversation's family only if already known
+    const family = accounts.sessionFamily(sessionId);
     for (const win of workspaceWindowsFor(wsId)) {
-      if (!win.isDestroyed()) win.webContents.send('session:found', termId, sessionId);
+      if (!win.isDestroyed()) win.webContents.send('session:found', termId, sessionId, family);
     }
   });
   // ONE path for base-status changes — status files and the feed's instant
@@ -1163,9 +1207,18 @@ function initIpc() {
     if (r.apply) applyStatus(wsId, termId, r.apply, r.notify, 'feed');
     // exact session tracking: the feed's session_id IS this tab's conversation
     if (feed.sessionId && sessions.pinFromFeed(wsId, termId, feed.sessionId, feed.transcriptPath)) {
-      logger.info(`session via feed: term=${termId} session=${feed.sessionId}`);
+      // the conversation runs here, on this tab's account: that account's family
+      // becomes its provider unless it already has one (the first one wins, so a
+      // GLM conversation picked in a Claude tab stays GLM's; the renderer moves it)
+      // a new conversation takes the family the tab had when its account was
+      // set (termFamily), never one recomputed from a list an account may have
+      // left; one with replies already is judged by its transcript's model
+      const tabFam = termFamily.get(termId) || accounts.familyOf(termAccount.get(termId) || accounts.LOGIN);
+      const family = accounts.sessionFamily(feed.sessionId)
+        || accounts.noteSessionFamily(feed.sessionId, accounts.familyForNewSession(feed.transcriptPath, tabFam));
+      logger.info(`session via feed: term=${termId} session=${feed.sessionId} family=${family}`);
       for (const win of workspaceWindowsFor(wsId)) {
-        if (!win.isDestroyed()) win.webContents.send('session:found', termId, feed.sessionId);
+        if (!win.isDestroyed()) win.webContents.send('session:found', termId, feed.sessionId, family);
       }
     }
     // a failed turn (StopFailure) toasts + badges like a waiting agent — once.
@@ -1297,15 +1350,18 @@ async function handleFailure(wsId, termId, feed) {
     notifyAttention(wsId, termId, 'failed');
     return;
   }
-  const to = accounts.pick(acct);
+  // a conversation never crosses providers: only an account of the same family
+  // (Claude ↔ Claude, the same endpoint host) can continue it
+  const family = accounts.familyOf(acct);
+  const to = accounts.pick(acct, Date.now(), { family });
   if (!to) {
-    logger.warn(`account switch: all accounts exhausted (term=${termId} from=${acct} until=${new Date(c.until).toISOString()})`);
+    logger.warn(`account switch: all accounts exhausted (term=${termId} from=${acct} family=${family} until=${new Date(c.until).toISOString()})`);
     notifyAttention(wsId, termId, 'failed');
     return;
   }
   log.push(now);
   const msg = { termId, from: acct, to, toLabel: accounts.labelOf(to), until: c.until, reason: c.reason };
-  logger.info(`account switch: term=${termId} from=${acct} to=${to} until=${new Date(c.until).toISOString()} (${c.reason})`);
+  logger.info(`account switch: term=${termId} from=${acct} to=${to} family=${family} until=${new Date(c.until).toISOString()} (${c.reason})`);
   for (const win of workspaceWindowsFor(wsId)) {
     if (!win.isDestroyed()) win.webContents.send('account:switch', msg);
   }
@@ -1390,6 +1446,9 @@ app.whenReady().then(async () => {
       app.exit(1);
       return;
     }
+    // no pty survives a main restart: per-tab endpoint settings (keys) are stale
+    const staleSettings = ptyhost.clearInstanceEndpointSettings(ws.id);
+    if (staleSettings) logger.info(`account: removed ${staleSettings} stale tab settings file(s)`);
     if (screenshotPath) {
       // Docs mode: seed a demo state, stage terminal content + status lights,
       // capture the window to PNG, exit. Used for README/screenshots:

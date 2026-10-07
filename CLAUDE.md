@@ -145,7 +145,7 @@ Key facts encoded in `main/sessions.cjs`:
 
 ## Developing VibeSpace
 
-- `npm run smoke` — 99 self-tests (as of 0.6.47) incl. pty echo and live session discovery. Run it after
+- `npm run smoke` — 111 self-tests (as of 0.6.49) incl. pty echo and live session discovery. Run it after
   touching main-process code, **from a normal shell**: inside a Claude pty the stripped
   PATH and nested ConPTY break the pty test (`powershell.exe` "File not found" /
   AttachConsole) — prepend System32 to PATH and give it its own console, or just use a
@@ -348,6 +348,37 @@ Key facts encoded in `main/sessions.cjs`:
     the shell = the user left it, so the shell may run anything: only the
     account file is written. The bulk path waits with `noKill` and never kills
     a claude that didn't leave; the kill-on-timeout is for the limit switch only.
+  - **API endpoint accounts** (0.6.49, z.ai GLM…): kind `endpoint`, stored in
+    their OWN `<dataRoot>/accounts-endpoints.json`, blob
+    `accounts/<id>.endpoint.dpapi` = the whole env as `KEY=VALUE` lines. Windows
+    on older main code then never see them: they rewrite accounts.json turning
+    every non-login account into a token, which would have fed the env text in
+    as `CLAUDE_CODE_OAUTH_TOKEN`.
+  - **Never decrypt or set endpoint env inside the pty wrapper.** Microsoft
+    Defender flagged that `-EncodedCommand` as `Exploit:Win32/Tikupom` and
+    blocked EVERY terminal from starting (2026-10-07; only the command lines
+    were blocked, nothing was quarantined). Instead main decrypts
+    (`accounts.endpointEnv`, one PowerShell spawn per account, cached) and
+    `accounts:setTerm` writes `<instance>/accounts/<termId>.settings.json` =
+    hook settings + `env`. The wrapper only swaps `--settings` for that file
+    (string logic). That file holds the key in plain text, like claude's own
+    settings.json: it is deleted on account change, `kill()` (capture wsId
+    BEFORE `metas` is cleared), pty exit and main start. After any wrapper
+    change, check `Get-MpThreatDetection` doesn't grow during smoke.
+  - **A conversation never crosses families** (`anthropic` | `endpoint:<host>`).
+    `<dataRoot>/session-families.json` keeps each conversation's family; the
+    first one wins. A new entry is judged by the transcript's first real
+    assistant `model` (`claude…` = anthropic; `<synthetic>` error lines
+    skipped) and, only with no replies yet, by the family the tab had when its
+    account was SET (`termFamily`, never recomputed: a removed account would
+    read as anthropic). Renderer: `tab.family` = the conversation's family.
+    Every move/resume compares with it, and restore/unpark with no account of
+    that family left opens a plain tab (or keeps it parked), never another
+    family. `setTermAccount` throws instead of falling back to login, and then
+    nothing is typed.
+  - The login counts as available when `.credentials.json` exists (also under
+    `CLAUDE_CONFIG_DIR`), or with `ANTHROPIC_API_KEY`, or with an `oauthAccount`
+    in `~/.claude.json`. Only with none of them is it skipped (the z.ai-only PC).
   - Claude repeats its last `rate_limits` reading on every statusLine tick until
     its next API response. Only a reading that just became full marks an account
     (`becameFull`), or an idle tab's stale 100 % re-marks it after a reset.

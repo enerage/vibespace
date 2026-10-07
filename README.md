@@ -63,7 +63,7 @@ VibeSpace is that place, built for people who live in agents all day.
 | 📱 **Phone control + Away** | every agent shows up in the Claude phone app (Claude Code Remote Control, named "workspace · tab"): read, answer questions, approve, send follow-ups. The 📱 At PC / Away button decides when your phone buzzes: away = screen locked, 10 min idle or set by hand. Opt out per workspace |
 | ⌨️ **Ctrl+Shift+U** | jump to the next tab that needs you |
 | 📈 **Plan usage chip** | top bar: your Claude plan's 5-hour and 7-day usage with the reset countdown; turns red at 90 % |
-| 👥 **Several Claude accounts** | ⚙ Preferences → Accounts: add extra Max/Pro subscriptions (tokens encrypted with Windows DPAPI). When an agent hits a usage limit, the same conversation continues on the next account in the same tab. *Move all here* moves every open agent to one account without interrupting anyone |
+| 👥 **Several Claude accounts** | ⚙ Preferences → Accounts: add extra Max/Pro subscriptions (tokens encrypted with Windows DPAPI). When an agent hits a usage limit, the same conversation continues on the next account in the same tab. *Move all here* moves every open agent to one account without interrupting anyone · **z.ai GLM / any Anthropic-compatible API**: paste your `env` block as an endpoint account, for new conversations (a conversation never moves between Claude and GLM) |
 
 ### Files, editor and git
 
@@ -143,7 +143,7 @@ npm start         # launcher; or: npm run dev (adds opt-in hot reload)
 ## Developing
 
 ```powershell
-npm run smoke    # 99 self-tests; run after touching main-process code
+npm run smoke    # 111 self-tests; run after touching main-process code
 npm run dist     # NSIS installer (electron-builder)
 ```
 

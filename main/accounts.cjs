@@ -3,15 +3,29 @@
 //   login — the stored `/login` (always present, keeps Remote Control / phone)
 //   token — a `claude setup-token` OAuth token, handed to claude through
 //           CLAUDE_CODE_OAUTH_TOKEN by the pty's `claude` wrapper (ptyhost)
+//   endpoint — an Anthropic-compatible API (z.ai GLM, …): a pasted env block
+//           (ANTHROPIC_BASE_URL + ANTHROPIC_AUTH_TOKEN/API_KEY + models …) the
+//           wrapper sets for that one claude call
 // All accounts share one ~/.claude, so transcripts and session tracking are
 // untouched. When a turn fails on a usage limit, the account is marked exhausted
-// until its reset and the tab continues on the next available one.
+// until its reset and the tab continues on the next available one OF THE SAME
+// FAMILY: a conversation never crosses providers (a Claude conversation does not
+// work when resumed on GLM). Family = 'anthropic' for login/token accounts,
+// 'endpoint:<host of ANTHROPIC_BASE_URL>' for endpoint accounts.
 //
 // Machine-wide: <dataRoot>/accounts.json (order, labels, exhaustion, per-account
 // limits), re-read when its mtime changes — every workspace is its own process.
-// Token blobs: <dataRoot>/accounts/<id>.dpapi, Windows DPAPI (CurrentUser).
-// A token is NEVER logged, never put on a command line, never sent to a renderer.
+// Endpoint accounts live in their OWN file, <dataRoot>/accounts-endpoints.json
+// ({ <id>: { label, baseUrl, models } }), merged in on read: a window still on
+// older main code rewrites accounts.json and turns every non-login account into
+// a 'token' (and would hand the endpoint's blob to claude as an OAuth token), so
+// it must never see one.
+// Secret blobs, Windows DPAPI (CurrentUser): <dataRoot>/accounts/<id>.dpapi = a
+// token; <id>.endpoint.dpapi = an endpoint's whole env as KEY=VALUE lines (older
+// code looks for <id>.dpapi only, finds nothing and skips the account).
+// A secret is NEVER logged, never put on a command line, never sent to a renderer.
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 const U = require('./util.cjs');
@@ -26,8 +40,12 @@ const NOT_USAGE_RE = /usage credits/i; // "out of usage credits" is a billing se
 const DEFAULT_BACKOFF_MS = 60 * 60 * 1000;
 
 const file = () => path.join(U.dataRoot(), 'accounts.json');
+const endpointsFile = () => path.join(U.dataRoot(), 'accounts-endpoints.json');
 const blobDir = () => path.join(U.dataRoot(), 'accounts');
-const blobPath = (id) => path.join(blobDir(), `${id}.dpapi`);
+const tokenBlobPath = (id) => path.join(blobDir(), `${id}.dpapi`);
+const endpointBlobPath = (id) => path.join(blobDir(), `${id}.endpoint.dpapi`);
+const blobIn = (d, id) => ((d.accounts[id] || {}).kind === 'endpoint' ? endpointBlobPath(id) : tokenBlobPath(id));
+const blobPath = (id) => blobIn(read(), id);
 
 // System32's powershell by absolute path: under a stripped PATH a bare name fails
 function psExe() {
@@ -51,7 +69,14 @@ function normalize(raw) {
   if (r.accounts && typeof r.accounts === 'object') {
     for (const [id, a] of Object.entries(r.accounts)) {
       if (!a || typeof a !== 'object' || id === LOGIN) continue;
-      accounts[id] = { label: String(a.label || id).slice(0, 60), kind: 'token' };
+      const label = String(a.label || id).slice(0, 60);
+      if (a.kind === 'endpoint') {
+        const m = a.models && typeof a.models === 'object' ? a.models : {};
+        const model = (v) => (typeof v === 'string' && v ? v.slice(0, 80) : null);
+        accounts[id] = { label, kind: 'endpoint', baseUrl: String(a.baseUrl || '').slice(0, 300), models: { opus: model(m.opus), sonnet: model(m.sonnet), haiku: model(m.haiku) } };
+      } else {
+        accounts[id] = { label, kind: 'token' };
+      }
     }
   }
   accounts[LOGIN] = { label: (r.accounts && r.accounts[LOGIN] && String(r.accounts[LOGIN].label || '').slice(0, 60)) || LOGIN_LABEL, kind: 'login' };
@@ -78,30 +103,70 @@ function normalize(raw) {
 }
 
 let cache = null; // { key, data }
-function statKey() {
-  try { const st = fs.statSync(file()); return `${st.mtimeMs}:${st.size}`; } catch { return ''; }
-}
+const fileKey = (f) => {
+  try { const st = fs.statSync(f); return `${st.mtimeMs}:${st.size}`; } catch { return ''; }
+};
+const statKey = () => `${fileKey(file())}|${fileKey(endpointsFile())}`;
 
+// accounts.json + accounts-endpoints.json → one normalized store. An endpoint
+// entry still inside accounts.json (written by the first 0.6.49 build) moves
+// to its own file, its blob to the new name.
 function read() {
   const key = statKey();
   if (cache && cache.key === key) return cache.data;
-  const data = normalize(key ? U.readJson(file(), null) : null);
-  cache = { key, data };
+  const raw = fileKey(file()) ? U.readJson(file(), null) : null;
+  const eps = fileKey(endpointsFile()) || fs.existsSync(endpointsFile() + '.bak') ? U.readJson(endpointsFile(), null) : null;
+  const merged = { ...(raw && typeof raw === 'object' ? raw : {}) };
+  merged.accounts = { ...(raw && raw.accounts && typeof raw.accounts === 'object' ? raw.accounts : {}) };
+  let migrate = false;
+  for (const [id, a] of Object.entries(merged.accounts)) {
+    if (!a || a.kind !== 'endpoint' || id === LOGIN) continue;
+    migrate = true;
+    try {
+      if (!fs.existsSync(endpointBlobPath(id)) && fs.existsSync(tokenBlobPath(id))) fs.renameSync(tokenBlobPath(id), endpointBlobPath(id));
+    } catch (e) { logger.warn(`accounts: endpoint ${id} blob rename failed (${e.message})`); }
+  }
+  if (eps && typeof eps === 'object') {
+    for (const [id, e] of Object.entries(eps)) {
+      if (id !== LOGIN && e && typeof e === 'object') merged.accounts[id] = { ...e, kind: 'endpoint' };
+    }
+  }
+  const data = normalize(merged);
+  if (migrate) {
+    write(data);
+    logger.info('accounts: endpoint accounts moved to accounts-endpoints.json');
+  }
+  cache = { key: statKey(), data };
   return data;
 }
 
-function write(data) {
-  const f = file();
-  // pid in the tmp name: several workspace processes may write at once
-  const tmp = `${f}.${process.pid}.tmp`;
+// one JSON file, atomically (pid in the tmp name: several workspace processes
+// may write at once); unchanged content is not rewritten
+function writeFile(f, obj) {
+  const text = JSON.stringify(obj, null, 2);
+  try { if (fs.readFileSync(f, 'utf8') === text) return; } catch {}
+  // crash-safe (fsync, last good copy as .bak — CLAUDE.md "JSON files are
+  // crash-safe"): these files hold endpoint accounts and conversation families,
+  // and a read that falls back to {} would make the next write erase them
   try {
     U.ensureDir(path.dirname(f));
-    fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
-    fs.renameSync(tmp, f);
+    U.writeJsonAtomic(f, obj);
   } catch (e) {
-    logger.warn('accounts.json write failed: ' + e.message);
-    try { fs.rmSync(tmp, { force: true }); } catch {}
+    logger.warn(`${path.basename(f)} write failed: ${e.message}`);
   }
+}
+
+// endpoint accounts → accounts-endpoints.json; everything else (and every id in
+// `order`, exhaustion, limits) → accounts.json
+function write(data) {
+  const eps = {};
+  const rest = {};
+  for (const [id, a] of Object.entries(data.accounts)) {
+    if (a.kind === 'endpoint') eps[id] = { label: a.label, baseUrl: a.baseUrl, models: a.models };
+    else rest[id] = a;
+  }
+  writeFile(endpointsFile(), eps);
+  writeFile(file(), { ...data, accounts: rest });
   cache = null;
 }
 
@@ -159,16 +224,56 @@ function loginLimits(now) {
   return Object.keys(out).length ? out : null;
 }
 
+// The stored `/login` exists only while claude's credentials file does. Someone
+// with ONLY an API endpoint (no Claude login) must not get new agents on it.
+let credentialsOverride = null; // smoke
+const credentialsPath = () => credentialsOverride
+  || path.join(process.env.USERPROFILE || os.homedir(), '.claude', '.credentials.json');
+// The stored /login. Its credentials file is the usual proof; CLAUDE_CONFIG_DIR
+// moves it, and an ANTHROPIC_API_KEY or an oauthAccount in ~/.claude.json also
+// mean claude has Anthropic auth. Only with NONE of them (a PC that runs claude
+// on an endpoint only) is the login account skipped.
+const loggedIn = () => {
+  if (fs.existsSync(credentialsPath())) return true;
+  if (credentialsOverride) return false; // smoke pins the answer
+  if (process.env.ANTHROPIC_API_KEY) return true;
+  if (process.env.CLAUDE_CONFIG_DIR && fs.existsSync(path.join(process.env.CLAUDE_CONFIG_DIR, '.credentials.json'))) return true;
+  try {
+    const j = JSON.parse(fs.readFileSync(path.join(process.env.USERPROFILE || os.homedir(), '.claude.json'), 'utf8'));
+    return Boolean(j && j.oauthAccount && j.oauthAccount.emailAddress);
+  } catch { return false; }
+};
+
 function usable(d, id, now) {
   if (!d.accounts[id] || isExhausted(d, id, now)) return false;
-  // a token account whose blob is gone could never start: skip it
-  return id === LOGIN || fs.existsSync(blobPath(id));
+  if (id === LOGIN) return loggedIn();
+  // a token/endpoint account whose blob is gone could never start: skip it
+  return fs.existsSync(blobIn(d, id));
 }
 
-// first account (in preference order) usable now, other than excludeId
-function pick(excludeId = null, now = Date.now()) {
+// lower-cased host of an endpoint's base URL ('' when unreadable)
+function hostOf(baseUrl) {
+  try { return new URL(String(baseUrl || '')).host.toLowerCase(); } catch { return ''; }
+}
+
+// which provider a conversation on this account lives with; unknown/removed
+// ids count as 'anthropic' (login and token accounts)
+function familyIn(d, id) {
+  const a = d.accounts[id];
+  if (!a || a.kind !== 'endpoint') return 'anthropic';
+  return `endpoint:${hostOf(a.baseUrl) || id}`;
+}
+const familyOf = (id) => familyIn(read(), id);
+
+// first account (in preference order) usable now, other than excludeId;
+// { family } keeps it to accounts of that family (a conversation never
+// crosses providers)
+function pick(excludeId = null, now = Date.now(), { family = null } = {}) {
   const d = read();
-  for (const id of d.order) if (id !== excludeId && usable(d, id, now)) return id;
+  for (const id of d.order) {
+    if (id === excludeId || (family && familyIn(d, id) !== family)) continue;
+    if (usable(d, id, now)) return id;
+  }
   return null;
 }
 
@@ -177,25 +282,118 @@ function state(now = Date.now()) {
   const accounts = d.order.map((id) => {
     const a = d.accounts[id];
     const ex = isExhausted(d, id, now) ? d.exhausted[id] : null; // expired entries drop out
-    return {
+    const row = {
       id,
       label: a.label,
       kind: a.kind,
+      family: familyIn(d, id),
+      available: usable(d, id, now),
       exhaustedUntil: ex ? ex.until : null,
       reason: ex ? ex.reason : null,
       limits: id === LOGIN ? loginLimits(now) : ((d.limits[id] && d.limits[id].limits) || null),
     };
+    if (id === LOGIN && !loggedIn()) row.note = 'not logged in';
+    if (a.kind === 'endpoint') {
+      row.host = hostOf(a.baseUrl);
+      row.baseUrl = a.baseUrl;
+      row.models = { ...a.models };
+    }
+    return row;
   });
   return { accounts, pick: pick(null, now), switchAll: readSwitch(now) };
 }
 
 const has = (id) => Boolean(read().accounts[id]);
+const kindOf = (id) => (read().accounts[id] || {}).kind || null;
 const labelOf = (id) => (read().accounts[id] || {}).label || id;
+
+// ---------- conversation families ----------
+// Which provider each conversation belongs to: <dataRoot>/session-families.json
+// { <sessionId>: family }, machine-wide. Noted when the feed shows a
+// conversation running on a tab (index.cjs); the FIRST family wins, so picking
+// a GLM conversation in a Claude tab's resume picker can't relabel it. Restore,
+// unpark and the picker check it: a conversation never moves to another family.
+// Conversations not in it (older ones) are Claude's.
+const familiesFile = () => path.join(U.dataRoot(), 'session-families.json');
+const SID_RE = /^[A-Za-z0-9_-]{1,100}$/;
+let familiesMax = 2000; // oldest entries pruned beyond this
+let famCache = null; // { key, data }
+function readFamilies() {
+  const key = fileKey(familiesFile());
+  if (famCache && famCache.key === key) return famCache.data;
+  const data = Object.create(null);
+  let j = null;
+  if (key || fs.existsSync(familiesFile() + '.bak')) j = U.readJson(familiesFile(), null); // .bak on a damaged file
+  if (j && typeof j === 'object' && !Array.isArray(j)) {
+    for (const [sid, f] of Object.entries(j)) if (SID_RE.test(sid) && typeof f === 'string' && f) data[sid] = f.slice(0, 300);
+  }
+  famCache = { key, data };
+  return data;
+}
+
+function sessionFamily(sid) {
+  const s = String(sid || '');
+  if (!SID_RE.test(s)) return null;
+  const d = readFamilies();
+  return Object.prototype.hasOwnProperty.call(d, s) ? d[s] : null;
+}
+
+// Which provider wrote a transcript: the model of its first real assistant
+// message ("claude-…" = anthropic; anything else = an endpoint). null when it
+// has no assistant message yet (a brand-new conversation). Reads at most the
+// first 1 MB; API error lines carry model "<synthetic>" and are skipped.
+function transcriptProvider(jsonlPath) {
+  let fd = null;
+  try {
+    fd = fs.openSync(jsonlPath, 'r');
+    const len = Math.min(fs.fstatSync(fd).size, 1024 * 1024);
+    const buf = Buffer.alloc(len);
+    fs.readSync(fd, buf, 0, len, 0);
+    for (const line of buf.toString('utf8').split('\n')) {
+      if (!line.includes('"type":"assistant"')) continue;
+      const m = /"model":"([^"]+)"/.exec(line);
+      if (!m || m[1] === '<synthetic>') continue;
+      return /^claude/i.test(m[1]) ? 'anthropic' : 'endpoint';
+    }
+    return null;
+  } catch {
+    return null;
+  } finally {
+    if (fd !== null) { try { fs.closeSync(fd); } catch {} }
+  }
+}
+
+// The family to record for a conversation seen running for the first time.
+// Its transcript decides when it has replies: an older Claude conversation
+// picked in a tab that runs on an endpoint stays Claude's (and the renderer
+// moves it). Only a conversation with no reply yet takes the tab's family.
+function familyForNewSession(transcriptPath, tabFamily) {
+  const prov = transcriptPath ? transcriptProvider(transcriptPath) : null;
+  if (prov === 'anthropic') return 'anthropic';
+  if (prov === 'endpoint') return tabFamily && tabFamily.startsWith('endpoint:') ? tabFamily : 'endpoint:unknown';
+  return tabFamily || 'anthropic';
+}
+
+// sets it only if the conversation has no family yet; returns the family it has
+function noteSessionFamily(sid, family) {
+  const s = String(sid || '');
+  if (!SID_RE.test(s) || typeof family !== 'string' || !family) return null;
+  const cur = readFamilies();
+  if (Object.prototype.hasOwnProperty.call(cur, s)) return cur[s];
+  const next = Object.assign(Object.create(null), cur);
+  next[s] = family.slice(0, 300);
+  const keys = Object.keys(next); // insertion order = oldest first
+  for (const k of keys.slice(0, Math.max(0, keys.length - familiesMax))) delete next[k];
+  writeFile(familiesFile(), next);
+  famCache = null;
+  return next[s];
+}
 
 // ---------- DPAPI ----------
 // .NET DPAPI directly, no ConvertTo-SecureString: that cmdlet's module fails to
 // load in Windows PowerShell 5.1 when PSModulePath came from a PowerShell 7 parent.
-// Blob = hex of ProtectedData.Protect(UTF-8 token, CurrentUser).
+// Blob = hex of ProtectedData.Protect(UTF-8 secret, CurrentUser); the secret is
+// the token, or an endpoint's KEY=VALUE lines.
 const DPAPI_LOAD = "[void][Reflection.Assembly]::LoadWithPartialName('System.Security')";
 const ENCRYPT_PS = `${DPAPI_LOAD}; $t = [Console]::In.ReadToEnd().Trim(); `
   + `$b = [Security.Cryptography.ProtectedData]::Protect([Text.Encoding]::UTF8.GetBytes($t), $null, 'CurrentUser'); `
@@ -244,7 +442,7 @@ async function add(label, token) {
   }
   try {
     U.ensureDir(blobDir());
-    fs.writeFileSync(blobPath(id), blob);
+    fs.writeFileSync(tokenBlobPath(id), blob);
   } catch (e) {
     return { ok: false, error: 'Could not save the token: ' + e.message };
   }
@@ -253,15 +451,229 @@ async function add(label, token) {
   return { ok: true, state: state() };
 }
 
+// ---------- endpoint accounts ----------
+// The env block a user pastes (the `env` of a Claude settings file, or KEY=VALUE
+// lines). Only claude's own knobs may be injected: never PATH and the like.
+const ENDPOINT_KEY_RE = /^(ANTHROPIC_[A-Z0-9_]+|CLAUDE_CODE_[A-Z0-9_]+|API_TIMEOUT_MS|DISABLE_[A-Z0-9_]+|MAX_THINKING_TOKENS|MAX_MCP_OUTPUT_TOKENS|BASH_[A-Z0-9_]+)$/;
+const ENDPOINT_KEYS_TEXT = 'ANTHROPIC_*, CLAUDE_CODE_*, API_TIMEOUT_MS, DISABLE_*, MAX_THINKING_TOKENS, MAX_MCP_OUTPUT_TOKENS, BASH_*';
+const ENDPOINT_FORBIDDEN = {
+  CLAUDE_CODE_OAUTH_TOKEN: 'CLAUDE_CODE_OAUTH_TOKEN is not allowed here: an endpoint account brings its own ANTHROPIC_AUTH_TOKEN or ANTHROPIC_API_KEY.',
+  CLAUDE_CONFIG_DIR: 'CLAUDE_CONFIG_DIR is not allowed here: every account shares one ~/.claude.',
+};
+
+// JSON with // line comments and trailing commas: both removed outside strings
+function looseJson(text) {
+  const pass = (src, onChar) => {
+    let out = '';
+    let inStr = false;
+    for (let i = 0; i < src.length; i++) {
+      const c = src[i];
+      if (inStr) {
+        out += c;
+        if (c === '\\' && i + 1 < src.length) out += src[++i];
+        else if (c === '"') inStr = false;
+        continue;
+      }
+      if (c === '"') { inStr = true; out += c; continue; }
+      const skip = onChar(src, i);
+      if (skip === null) out += c; else i = skip;
+    }
+    return out;
+  };
+  // comments: jump to the end of the line (the newline itself is kept)
+  const noComments = pass(text, (s, i) => {
+    if (s[i] !== '/' || s[i + 1] !== '/') return null;
+    let j = i;
+    while (j + 1 < s.length && s[j + 1] !== '\n') j++;
+    return j;
+  });
+  // a comma followed only by whitespace and a closing bracket (or the end)
+  return pass(noComments, (s, i) => {
+    if (s[i] !== ',') return null;
+    let j = i + 1;
+    while (j < s.length && /\s/.test(s[j])) j++;
+    return j >= s.length || s[j] === '}' || s[j] === ']' ? i : null;
+  });
+}
+
+// → { ok: true, env: { KEY: 'value' }, notes: [] } | { ok: false, error }.
+// Error texts name keys, never values (a value may be the secret).
+function parseEndpointEnv(text) {
+  const src = String(text || '').replace(/\r\n?/g, '\n');
+  if (!src.trim()) return { ok: false, error: 'Paste the env block (ANTHROPIC_BASE_URL, ANTHROPIC_AUTH_TOKEN, …).' };
+  if (src.length > 20000) return { ok: false, error: 'That block is too long.' };
+  const pairs = []; // [key, raw value]
+  if (/^\s*\{/.test(src) || /"[^"\n]*"\s*:/.test(src)) {
+    let s = looseJson(src).trim();
+    if (!s.startsWith('{')) s = `{${s}}`;
+    let obj;
+    try { obj = JSON.parse(s); } catch {
+      return { ok: false, error: 'Could not read the block: paste JSON ("KEY": "value" lines) or KEY=VALUE lines.' };
+    }
+    // a whole `"env": { … }` pasted from a settings file
+    if (obj && typeof obj === 'object' && !Array.isArray(obj) && Object.keys(obj).length === 1
+      && obj.env && typeof obj.env === 'object' && !Array.isArray(obj.env)) obj = obj.env;
+    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return { ok: false, error: 'Could not read the block: expected "KEY": "value" pairs.' };
+    for (const [k, v] of Object.entries(obj)) pairs.push([k, v]);
+  } else {
+    const lines = src.split('\n');
+    for (let n = 0; n < lines.length; n++) {
+      const line = lines[n].trim();
+      if (!line || line.startsWith('#') || line.startsWith('//')) continue;
+      const m = /^([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$/.exec(line);
+      if (!m) return { ok: false, error: `Line ${n + 1} is not KEY=VALUE.` };
+      let v = m[2].trim();
+      if (v.length >= 2 && (v[0] === '"' || v[0] === "'") && v[v.length - 1] === v[0]) v = v.slice(1, -1);
+      pairs.push([m[1], v]);
+    }
+  }
+  const env = {};
+  const notes = [];
+  const literal = new Set(pairs.map(([k]) => String(k).trim()));
+  for (const [rawKey, rawVal] of pairs) {
+    let key = String(rawKey).trim();
+    if (/^ANCHROPIC_/.test(key)) { // a typo seen in a real config
+      const good = 'ANTHROPIC_' + key.slice('ANCHROPIC_'.length);
+      if (literal.has(good)) { notes.push(`${key} ignored: ${good} is set too`); continue; }
+      notes.push(`${key} → ${good}`);
+      key = good;
+    }
+    if (ENDPOINT_FORBIDDEN[key]) return { ok: false, error: ENDPOINT_FORBIDDEN[key] };
+    if (!ENDPOINT_KEY_RE.test(key)) return { ok: false, error: `${key || '(empty name)'} is not allowed here. Allowed: ${ENDPOINT_KEYS_TEXT}.` };
+    let val;
+    if (typeof rawVal === 'string') val = rawVal.trim();
+    else if (typeof rawVal === 'number' && Number.isFinite(rawVal)) val = String(rawVal);
+    else return { ok: false, error: `${key}: the value must be text or a number.` };
+    if (/[\r\n\0]/.test(val)) return { ok: false, error: `${key}: the value must be on one line.` };
+    env[key] = val;
+  }
+  const base = env.ANTHROPIC_BASE_URL;
+  if (!base) return { ok: false, error: 'ANTHROPIC_BASE_URL is missing (the endpoint, e.g. https://api.z.ai/api/anthropic).' };
+  let u = null;
+  try { u = new URL(base); } catch {}
+  if (!u || !/^https?:$/.test(u.protocol) || !u.host) return { ok: false, error: 'ANTHROPIC_BASE_URL must be an http(s) URL.' };
+  if (!env.ANTHROPIC_AUTH_TOKEN && !env.ANTHROPIC_API_KEY) return { ok: false, error: 'ANTHROPIC_AUTH_TOKEN (or ANTHROPIC_API_KEY) is missing: the key for that endpoint.' };
+  return { ok: true, env, notes };
+}
+
+// the blob's plaintext: KEY=VALUE lines (the wrapper splits on the first '=')
+const envText = (env) => Object.entries(env).map(([k, v]) => `${k}=${v}`).join('\n');
+
+// base URL without credentials or query (only display/family info is stored)
+function displayUrl(u) {
+  const p = u.pathname && u.pathname !== '/' ? u.pathname.replace(/\/+$/, '') : '';
+  return `${u.protocol}//${u.host}${p}`;
+}
+
+// An endpoint account's env, decrypted in MAIN (one PowerShell spawn, the token
+// never on a command line), cached per account until it is removed. The pty
+// wrapper never decrypts endpoint settings: Defender flagged a wrapper that did
+// (Exploit:Win32/Tikupom on the -EncodedCommand, 2026-10-07) and blocked every
+// terminal. Main writes them into a per-tab claude settings file instead
+// (ptyhost.writeEndpointSettings).
+const envCache = new Map(); // id -> { KEY: value }
+const envInflight = new Map(); // id -> Promise of the one decrypt running for it
+let decryptSpawns = 0; // smoke: concurrent callers must share one spawn
+function endpointEnv(id) {
+  if (envCache.has(id)) return Promise.resolve({ ...envCache.get(id) });
+  let p = envInflight.get(id);
+  if (!p) {
+    // a failed decrypt is not cached: the next call tries again
+    p = decryptEnv(id).finally(() => { if (envInflight.get(id) === p) envInflight.delete(id); });
+    envInflight.set(id, p);
+  }
+  return p.then((env) => ({ ...env }));
+}
+
+function decryptEnv(id) {
+  const blob = endpointBlobPath(id);
+  if (!fs.existsSync(blob)) return Promise.reject(new Error('its settings file is missing: remove the account and add it again'));
+  decryptSpawns++;
+  return new Promise((resolve, reject) => {
+    let out = '';
+    const child = spawn(psExe(), ['-NoProfile', '-NonInteractive', '-Command', `$blob = $env:VS_BLOB; ${DECRYPT_PS}; [Console]::Out.Write($tok)`],
+      { windowsHide: true, env: psEnv({ VS_BLOB: blob }) });
+    const timer = setTimeout(() => { try { child.kill(); } catch {} reject(new Error('decrypting its settings timed out')); }, 20000);
+    child.stdout.on('data', (c) => { out += c; });
+    child.on('error', (e) => { clearTimeout(timer); reject(e); });
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      const env = {};
+      for (const line of out.split(/\r?\n/)) {
+        const i = line.indexOf('=');
+        if (i > 0 && ENDPOINT_KEY_RE.test(line.slice(0, i))) env[line.slice(0, i)] = line.slice(i + 1);
+      }
+      if (code !== 0 || !env.ANTHROPIC_BASE_URL) { reject(new Error(`its settings could not be decrypted (exit ${code})`)); return; }
+      if (has(id)) envCache.set(id, env); // removed meanwhile: nothing to keep
+      resolve(env);
+    });
+  });
+}
+
+// What a tab's claude starts on: { id, env } (env = an endpoint's vars, which
+// main writes into the tab's own settings file, else null). Never a silent
+// fallback: an unknown id, or an endpoint whose settings can't be decrypted,
+// THROWS, so no claude is typed at all. Falling back to the /login would run a
+// GLM conversation on Claude (or the friend with only z.ai on nothing).
+async function forTerm(accountId) {
+  const id = accountId == null || accountId === '' ? LOGIN : String(accountId);
+  const a = read().accounts[id];
+  if (!a) throw new Error('that account no longer exists');
+  if (a.kind !== 'endpoint') return { id, env: null };
+  try {
+    return { id, env: await endpointEnv(id) };
+  } catch (e) {
+    throw new Error(`${a.label}: ${e.message}`);
+  }
+}
+
+async function addEndpoint(label, text) {
+  const name = String(label || '').trim().slice(0, 60);
+  if (!name) return { ok: false, error: 'Give the account a name.' };
+  const p = parseEndpointEnv(text);
+  if (!p.ok) return { ok: false, error: p.error };
+  const env = p.env;
+  const u = new URL(env.ANTHROPIC_BASE_URL);
+  const baseUrl = displayUrl(u);
+  const models = {
+    opus: env.ANTHROPIC_DEFAULT_OPUS_MODEL || env.ANTHROPIC_MODEL || null,
+    sonnet: env.ANTHROPIC_DEFAULT_SONNET_MODEL || null,
+    haiku: env.ANTHROPIC_DEFAULT_HAIKU_MODEL || null,
+  };
+  let id;
+  do { id = `${U.slugify(name).slice(0, 24)}-${U.randId(4)}`; } while (id === LOGIN || has(id));
+  let blob;
+  try {
+    blob = await encrypt(envText(env));
+  } catch (e) {
+    logger.warn(`accounts: add endpoint failed (${e.message})`); // never a value
+    return { ok: false, error: 'Could not encrypt the settings: ' + e.message };
+  }
+  try {
+    U.ensureDir(blobDir());
+    fs.writeFileSync(endpointBlobPath(id), blob);
+  } catch (e) {
+    return { ok: false, error: 'Could not save the settings: ' + e.message };
+  }
+  update((d) => { d.accounts[id] = { label: name, kind: 'endpoint', baseUrl, models }; d.order.push(id); });
+  logger.info(`accounts: added endpoint ${id} ("${name}", ${u.host}, vars: ${Object.keys(env).join(',')})`);
+  return { ok: true, state: state(), notes: p.notes };
+}
+
+// An endpoint's blob and its entry go; tabs running on it keep going (their
+// settings file is deleted when their pty exits) and its conversations keep
+// their family, so they are never resumed on another provider.
 function remove(id) {
+  envCache.delete(id);
   if (id === LOGIN || !has(id)) return state();
+  const blob = blobPath(id);
   update((d) => {
     delete d.accounts[id];
     delete d.exhausted[id];
     delete d.limits[id];
     d.order = d.order.filter(x => x !== id);
   });
-  try { fs.rmSync(blobPath(id), { force: true }); } catch {}
+  try { fs.rmSync(blob, { force: true }); } catch {}
   logger.info(`accounts: removed ${id}`);
   return state();
 }
@@ -295,7 +707,9 @@ function switchAll(id) {
   if (!d0.accounts[id]) throw new Error('Unknown account');
   if (isExhausted(d0, id, Date.now())) throw new Error(`${d0.accounts[id].label} is out of usage right now`);
   // a token account whose token file is gone would stop every agent at a shell
-  if (!usable(d0, id, Date.now())) throw new Error(`${d0.accounts[id].label} has no stored token: remove it and add it again`);
+  if (!usable(d0, id, Date.now())) {
+    throw new Error(id === LOGIN ? `${d0.accounts[id].label}: not logged in on this PC` : `${d0.accounts[id].label} has no stored token: remove it and add it again`);
+  }
   update((d) => {
     if (d.order[0] === id) return false;
     d.order = [id, ...d.order.filter(x => x !== id)];
@@ -391,11 +805,7 @@ function setLimits(id, rateLimits) {
 const listeners = [];
 let watching = false;
 let lastKey = null;
-const watchKey = () => {
-  let sw = '';
-  try { const st = fs.statSync(switchFile()); sw = `${st.mtimeMs}:${st.size}`; } catch {}
-  return `${statKey()}|${sw}`;
-};
+const watchKey = () => `${statKey()}|${fileKey(switchFile())}`;
 function onFileChange() {
   const key = watchKey();
   if (key === lastKey) return;
@@ -410,6 +820,7 @@ function onChange(fn) {
   watching = true;
   lastKey = watchKey();
   fs.watchFile(file(), { interval: 1000 }, onFileChange);
+  fs.watchFile(endpointsFile(), { interval: 1000 }, onFileChange); // an endpoint rename touches only this one
   fs.watchFile(switchFile(), { interval: 1000 }, onFileChange);
 }
 
@@ -417,6 +828,7 @@ function unwatch() {
   if (!watching) return;
   watching = false;
   try { fs.unwatchFile(file(), onFileChange); } catch {}
+  try { fs.unwatchFile(endpointsFile(), onFileChange); } catch {}
   try { fs.unwatchFile(switchFile(), onFileChange); } catch {}
 }
 
@@ -532,9 +944,18 @@ module.exports = {
   DECRYPT_PS,
   state,
   pick,
+  familyOf,
   has,
   labelOf,
   add,
+  addEndpoint,
+  kindOf,
+  endpointEnv,
+  forTerm,
+  sessionFamily,
+  familyForNewSession,
+  transcriptProvider,
+  noteSessionFamily,
   remove,
   rename,
   move,
@@ -553,6 +974,13 @@ module.exports = {
   classifyFailure,
   lastApiErrorText,
   _normalize: normalize,
+  _parseEndpointEnv: parseEndpointEnv,
+  _envText: envText,
+  _setCredentialsPath: (p) => { credentialsOverride = p || null; },
+  _setFamiliesMax: (n) => { familiesMax = Number(n) > 0 ? Number(n) : 2000; },
+  _forgetEnv: (id) => { envCache.delete(id); },
+  _decryptSpawns: () => decryptSpawns,
+  _files: () => ({ accounts: file(), endpoints: endpointsFile(), families: familiesFile(), tokenBlob: tokenBlobPath, endpointBlob: endpointBlobPath }),
   _psExe: psExe,
   _psEnv: psEnv,
 };

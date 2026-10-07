@@ -138,6 +138,15 @@
       <div class="acct-tools">
         <button id="btn-setup-token" class="btn small ghost">Open a setup-token tab</button>
       </div>
+      <div class="prefs-label acct-sub">Add an API endpoint (z.ai GLM, …)</div>
+      <div class="prefs-hint">Paste the <code>env</code> block you would put in Claude's settings. New conversations only: an agent never moves between Claude and this endpoint. No phone control, no claude.ai connectors. Move it up (↑) to make new agents start on it.</div>
+      <div class="acct-ep">
+        <input id="acct-ep-label" type="text" placeholder="Label (e.g. GLM)" maxlength="40" autocomplete="off" spellcheck="false" />
+        <textarea id="acct-ep-env" rows="6" autocomplete="off" spellcheck="false" placeholder="&quot;ANTHROPIC_BASE_URL&quot;: &quot;https://api.z.ai/api/anthropic&quot;,&#10;&quot;ANTHROPIC_AUTH_TOKEN&quot;: &quot;…&quot;,&#10;&quot;ANTHROPIC_DEFAULT_OPUS_MODEL&quot;: &quot;glm-5.3[1m]&quot;,&#10;&quot;ANTHROPIC_DEFAULT_SONNET_MODEL&quot;: &quot;glm-5.3-flash[1m]&quot;"></textarea>
+        <div class="acct-ep-actions"><button id="acct-ep-add-btn" class="btn small">Add endpoint</button></div>
+      </div>
+      <div id="acct-ep-error" class="acct-error hidden"></div>
+      <div id="acct-ep-note" class="acct-note hidden"></div>
 
       <div class="prefs-label" style="margin-top: 14px;">Notifications</div>
       <div class="prefs-hint">Windows pop-ups — one choice for all workspaces. Tab lights and the taskbar badge always show every state.</div>

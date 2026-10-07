@@ -27,9 +27,12 @@ let persistNow = async () => persist();
 
 // ---- accounts (main/accounts.cjs) --------------------------------------------
 // Each claude tab runs on an ACCOUNT: 'login' = the stored /login, others are
-// `claude setup-token` tokens the shell wrapper hands to claude via env. The
-// list is machine-wide; main pushes every change (any process).
-let accountsState = null; // { accounts: [{ id, label, kind, exhaustedUntil, reason, limits }], pick }
+// `claude setup-token` tokens or API endpoints (z.ai GLM, …) the shell wrapper
+// hands to claude via env. The list is machine-wide; main pushes every change.
+// A conversation never crosses providers: a tab WITH a conversation only ever
+// moves/resumes onto an account of the same `family` ('anthropic' for login and
+// token accounts, 'endpoint:<host>' per endpoint).
+let accountsState = null; // { accounts: [{ id, label, kind, family, available, exhaustedUntil, reason, limits, host?, models?, note? }], pick }
 let accountsReady = Promise.resolve();
 
 export function accounts() { return accountsState; }
@@ -38,6 +41,31 @@ export function accountById(id) {
 }
 const isExhausted = (a) => Boolean(a && a.exhaustedUntil && a.exhaustedUntil > Date.now());
 const multiAccount = () => Boolean(accountsState && accountsState.accounts.length >= 2);
+// unknown/removed ids are Claude accounts
+export function familyOf(id) {
+  const a = accountById(id || 'login');
+  return (a && a.family) || 'anthropic';
+}
+// usable right now: main's `available` (logged in, blob present, not out), but
+// an exhaustion that expired since main's last push counts as over
+export function accountUsable(a) {
+  if (!a || isExhausted(a)) return false;
+  return a.available !== false || Boolean(a.exhaustedUntil);
+}
+// The provider a tab's CONVERSATION belongs to (tab.family: main's registry,
+// the family it first ran on), else, with no conversation yet, its account's.
+// Every move/resume compares a target account's family with THIS, never with
+// the family of the tab's current account (a picked conversation can belong
+// to another provider than the tab's account, and a removed account is unknown).
+export function tabFamily(tab) {
+  return (tab && tab.family) || familyOf(tab && tab.account);
+}
+export function familyLabel(f) {
+  return !f || f === 'anthropic' ? 'Claude' : String(f).replace(/^endpoint:/, '');
+}
+const accountLabel = (id) => (accountById(id) || {}).label || id || 'login';
+// an IPC rejection's own text (Electron prefixes "Error invoking remote method …")
+const ipcMsg = (e) => String((e && e.message) || e || 'unknown error').replace(/^Error invoking remote method '[^']*': (?:Error: )?/, '');
 
 function setAccounts(st) {
   if (!st || !Array.isArray(st.accounts)) return;
@@ -59,36 +87,76 @@ function setAccounts(st) {
 
 // The account a "move all agents here" (Preferences → Accounts, machine-wide)
 // asks for, when that request is newer than the tab's own account choice
-// (accountAt) and the account still has room.
+// (accountAt) and the account still has room. family: only a target of that
+// family counts (a conversation never crosses providers).
 const SWITCH_TTL_MS = 12 * 3600 * 1000; // same as main/accounts.cjs
-function switchTarget(accountAt) {
+function switchTarget(accountAt, family = null) {
   const sw = accountsState && accountsState.switchAll;
   if (!sw || !(sw.at > (accountAt || 0)) || Date.now() - sw.at > SWITCH_TTL_MS) return null;
   const a = accountById(sw.to);
-  return a && !isExhausted(a) ? a.id : null;
+  if (!a || isExhausted(a)) return null;
+  return !family || familyOf(a.id) === family ? a.id : null;
 }
 
 // new agent → the first available account; a restored one keeps its saved
 // account while it still exists and isn't out of usage, unless a newer
-// "move all" asks for another one
-function resolveAccount(saved, savedAt = 0) {
+// "move all" asks for another one. family = the tab resumes a conversation of
+// that family: only an account of it will do — the saved one if usable, else
+// the first usable one, else (all out) the saved one or any of that family.
+// null = no account of that family exists at all (its endpoint was removed):
+// the caller must not resume it.
+function resolveAccount(saved, savedAt = 0, family = null) {
   if (saved) {
-    const to = switchTarget(savedAt);
+    const to = switchTarget(savedAt, family);
     if (to) return to;
   }
   const a = saved ? accountById(saved) : null;
-  if (a && !isExhausted(a)) return a.id;
-  return (accountsState && accountsState.pick) || 'login';
+  if (!family) return accountUsable(a) ? a.id : ((accountsState && accountsState.pick) || 'login');
+  const ofFamily = (x) => Boolean(x) && familyOf(x.id) === family;
+  if (ofFamily(a) && accountUsable(a)) return a.id;
+  const list = (accountsState && accountsState.accounts) || [];
+  const same = list.find(x => ofFamily(x) && accountUsable(x));
+  if (same) return same.id;
+  if (ofFamily(a)) return a.id;
+  const any = list.find(ofFamily);
+  if (any) return any.id;
+  return family === 'anthropic' ? 'login' : null;
+}
+
+// The provider of a saved/parked conversation: main's registry, else what the
+// tab saved, else its saved account's (a tab saved before the registry
+// existed), else Claude.
+async function conversationFamily(sessionId, saved = {}) {
+  let f = null;
+  try { f = await vs.sessionFamily(sessionId); } catch {}
+  if (f) return f;
+  if (saved.family) return saved.family;
+  return saved.account && accountById(saved.account) ? familyOf(saved.account) : 'anthropic';
+}
+
+// Restore/unpark of a conversation: it resumes only on an account of ITS
+// family. With none left (its endpoint account was removed) the tab opens as a
+// plain terminal that keeps the session id, so a restart after the endpoint
+// is added again resumes it.
+async function resumeConversation({ termId = null, name, cwd, sessionId, account = null, accountAt = 0, worktree = null, family = null, activate = true }) {
+  const fam = await conversationFamily(sessionId, { family, account });
+  if (resolveAccount(account, accountAt, fam) === null) {
+    toast(`${name}: its conversation ran on ${familyLabel(fam)}; add that endpoint again to resume it`, 'err');
+    return createTab({ termId, name, cwd, savedSessionId: sessionId, worktree, family: fam, activate });
+  }
+  return createTab({ termId, name, cwd, resumeId: sessionId, account, accountAt, worktree, family: fam, activate });
 }
 
 // ---- "move all agents here" ----------------------------------------------------
 // A tab still owes a move when the request is newer than its account choice.
 // Only tabs with a known conversation move: without a session id there is
 // nothing to resume, and a relaunch could strand an untracked conversation.
+// A target of another family never moves it (nor shows the "→ X" chip).
 function pendingMove(tab) {
   if (!tab || !tab.isClaude || tab.dead || !tab.sessionId) return null;
-  const to = switchTarget(tab.accountAt);
-  return to && to !== (tab.account || 'login') ? to : null;
+  const cur = tab.account || 'login';
+  const to = switchTarget(tab.accountAt, tabFamily(tab));
+  return to && to !== cur ? to : null;
 }
 
 // Never interrupt, never guess. A tab moves only on positive evidence that it is
@@ -139,13 +207,18 @@ async function moveOne(tab) {
   to = pendingMove(tab);
   if (!to || !tabs.has(id) || busyForMove(tab)) return; // typed or started meanwhile
   if (running === false) {
-    const used = await vs.setTermAccount(id, to); // the next `claude` typed here uses it
-    tab.account = typeof used === 'string' ? used : to;
-    tab.accountAt = Date.now();
-    console.warn(`account move: ${id} has no claude running, account set to ${tab.account} without a relaunch`);
-    renderTabBar();
-    persist();
-    return;
+    try {
+      const used = await vs.setTermAccount(id, to); // the next `claude` typed here uses it
+      tab.account = typeof used === 'string' ? used : to;
+      tab.accountAt = Date.now();
+      console.warn(`account move: ${id} has no claude running, account set to ${tab.account} without a relaunch`);
+      renderTabBar();
+      persist();
+      return;
+    } catch (e) {
+      // the tab keeps its account; counted as a failed move below
+      toast(`Couldn't move ${tab.name} to ${accountLabel(to)}: ${ipcMsg(e)}`, 'err');
+    }
   }
   if (running === true) await relaunchOnAccount(tab, to, { prompt: null, gentle: true });
   if ((tab.account || 'login') !== to) {
@@ -224,13 +297,19 @@ export function init(opts) {
     removeTab(termId, false);
   });
 
-  vs.onSessionFound((termId, sessionId) => {
+  // family = the conversation's provider from main's registry (null = unknown:
+  // then it is the provider of the account the tab runs on)
+  vs.onSessionFound((termId, sessionId, family) => {
     const tab = tabs.get(termId);
-    if (!tab || !sessionId || tab.sessionId === sessionId) return;
+    if (!tab || !sessionId) return;
+    const fresh = tab.sessionId !== sessionId;
+    if (!fresh && (!family || family === tab.family)) return;
     tab.sessionId = sessionId;
+    tab.family = family || (fresh ? familyOf(tab.account) : tab.family);
     renderTabBar();
     persist();
-    setTimeout(() => autoName(tab), 4000); // claude writes its title a few seconds after the first message
+    if (fresh) setTimeout(() => autoName(tab), 4000); // claude writes its title a few seconds after the first message
+    if (tab.isClaude) fixProvider(tab);
   });
 
   // agent status lights, fed by injected claude hooks via main (status.cjs)
@@ -353,6 +432,7 @@ export function init(opts) {
           account: t.account || null,
           accountAt: t.accountAt || 0,
           worktree: t.worktree || null,
+          family: t.claudeSessionId ? await conversationFamily(t.claudeSessionId, t) : null,
         });
       } else if (t.worktree && !(await worktreeAlive(t.worktree))) {
         // the worktree folder is gone: a plain terminal at the repo root, never
@@ -364,13 +444,15 @@ export function init(opts) {
         // typing a resume id that would silently error out
         deadSessions.push(t.name);
         createTab({ termId: t.termId || null, name: t.name, cwd: t.cwd || repoPath, pickSession: true, account: t.account || null, accountAt: t.accountAt || 0, worktree: t.worktree || null });
+      } else if (opts.autoResume && t.claudeSessionId) {
+        // keep stable ids across restarts (sessions pin by termId)
+        await resumeConversation({ termId: t.termId || null, name: t.name, cwd: t.cwd || repoPath, sessionId: t.claudeSessionId, account: t.account || null, accountAt: t.accountAt || 0, worktree: t.worktree || null, family: t.family || null, activate: true });
       } else {
         createTab({
           termId: t.termId || null, // keep stable ids across restarts (sessions pin by termId)
           name: t.name,
           cwd: t.cwd || repoPath,
-          claude: opts.autoResume && isClaude && !t.claudeSessionId,
-          resumeId: opts.autoResume ? (t.claudeSessionId || null) : null,
+          claude: opts.autoResume && isClaude,
           account: t.account || null,
           accountAt: t.accountAt || 0,
           worktree: t.worktree || null,
@@ -390,17 +472,21 @@ export function init(opts) {
       else if (saved.length && opts.autoResume) toast(`Restored ${saved.length} agent terminal${saved.length > 1 ? 's' : ''} — conversations resumed`, 'ok');
       else if (saved.length) toast(`Restored ${saved.length} terminals (auto-resume off)`, '');
     }
-  }).catch(() => {
+  }).catch(async () => {
     // pty:list failed — fall back to the classic spawn/resume path
+    await accountsReady;
     if (firstRun) { createTab({ name: 'agent-1', cwd: repoPath, claude: true }); return; }
     for (const t of saved) {
       const isClaude = t.isClaude === undefined ? true : Boolean(t.isClaude);
+      if (opts.autoResume && t.claudeSessionId) {
+        await resumeConversation({ termId: t.termId || null, name: t.name, cwd: t.cwd || repoPath, sessionId: t.claudeSessionId, account: t.account || null, accountAt: t.accountAt || 0, worktree: t.worktree || null, family: t.family || null, activate: true });
+        continue;
+      }
       createTab({
         termId: t.termId || null,
         name: t.name,
         cwd: t.cwd || repoPath,
-        claude: opts.autoResume && isClaude && !t.claudeSessionId,
-        resumeId: opts.autoResume ? (t.claudeSessionId || null) : null,
+        claude: opts.autoResume && isClaude,
         account: t.account || null,
         accountAt: t.accountAt || 0,
         worktree: t.worktree || null,
@@ -462,6 +548,7 @@ async function openClaudeMenu() {
     { label: 'New agent', run: () => createTab({ name: nextName('agent'), cwd: repoPath, claude: true }) },
     { label: 'New agent in a worktree', hint: "Its own git worktree and branch vs/<name>: parallel agents never touch each other's files", run: () => newWorktreeAgent() },
     { label: 'New terminal', hint: 'A plain PowerShell terminal', run: () => createTab({ name: nextName('term'), cwd: repoPath }) },
+    ...newAgentOnItems(),
     { sep: true },
     { section: 'Resume' },
     ...parked.menuItems(list, { max: parked.MENU_MAX, more: () => parked.openList(r) }),
@@ -469,6 +556,26 @@ async function openClaudeMenu() {
   ];
   if (kept.length) items.push({ label: `Kept worktrees (${kept.length}) ▸`, hint: 'Worktrees kept after their tab closed, or held by a parked agent', run: () => worktreesMenu(r, kept) });
   showMenu(r.left, r.bottom + 4, items);
+}
+
+// "New agent on <account>": a fresh claude on THAT account, once there is a
+// choice. accountAt = now, so no older "move all" overrides the pick.
+function newAgentOnItems() {
+  if (!multiAccount()) return [];
+  const items = [{ sep: true }, { section: 'New agent on' }];
+  for (const a of accountsState.accounts) {
+    const ok = accountUsable(a);
+    const kind = a.kind === 'endpoint' ? (a.host || 'endpoint') : a.kind === 'token' ? 'token' : 'logged in';
+    const why = ok ? '' : isExhausted(a) ? ' · out of usage' : a.note ? ` · ${a.note}` : ' · unavailable';
+    items.push({
+      label: a.label,
+      meta: kind + why,
+      disabled: !ok,
+      hint: a.kind === 'endpoint' ? 'A new conversation on this endpoint (it never moves to a Claude account)' : 'A new conversation on this account',
+      run: () => createTab({ name: nextName('agent'), cwd: repoPath, claude: true, account: a.id, accountAt: Date.now() }),
+    });
+  }
+  return items;
 }
 
 function worktreesMenu(r, kept) {
@@ -598,7 +705,14 @@ export async function unparkAgent(id) {
       tab = createTab({ name, cwd, pickSession: true, account: e.account || null, accountAt: e.accountAt || 0, worktree: e.worktree || null });
       toast(`${name}: saved session gone — resume picker opened in tab`, 'err');
     } else {
-      tab = createTab({ name, cwd, resumeId: e.claudeSessionId, account: e.account || null, accountAt: e.accountAt || 0, worktree: e.worktree || null, activate: true });
+      // no account of its family left (its endpoint was removed): it stays
+      // parked — a plain tab would auto-resume it on the next restart
+      const fam = await conversationFamily(e.claudeSessionId, { family: e.family || null, account: e.account || null });
+      if (resolveAccount(e.account || null, e.accountAt || 0, fam) === null) {
+        toast(`${name}: its conversation ran on ${familyLabel(fam)}; add that endpoint again to unpark it`, 'err');
+        return null;
+      }
+      tab = await resumeConversation({ name, cwd, sessionId: e.claudeSessionId, account: e.account || null, accountAt: e.accountAt || 0, worktree: e.worktree || null, family: fam, activate: true });
     }
     shelf = shelf.filter(x => x.id !== id);
     parked.paintChip();
@@ -796,7 +910,7 @@ function registerFileLinks(term, tab) {
   } catch {} // xterm without link-provider support — links simply don't light up
 }
 
-export function createTab({ name = 'agent', cwd = repoPath, claude = false, resumeId = null, activate = true, termId = null, attachBuffer = null, savedIsClaude = null, savedSessionId = null, pickSession = false, run = null, account = null, accountAt = 0, worktree = null } = {}) {
+export function createTab({ name = 'agent', cwd = repoPath, claude = false, resumeId = null, activate = true, termId = null, attachBuffer = null, savedIsClaude = null, savedSessionId = null, pickSession = false, run = null, account = null, accountAt = 0, worktree = null, family = null } = {}) {
   const id = termId || newTermId();
   const host = el('div', 'term-host');
   host.style.display = 'none';
@@ -834,8 +948,15 @@ export function createTab({ name = 'agent', cwd = repoPath, claude = false, resu
   };
   if (tab.isClaude) {
     // a live (re-attached) agent keeps whatever account it is running on;
-    // main relearns it so the feed files its limits under the right account
-    tab.account = attachBuffer !== null ? (account || 'login') : resolveAccount(account, accountAt);
+    // main relearns it so the feed files its limits under the right account.
+    // A resume continues a conversation: only an account of ITS family
+    // (resumeConversation checked one exists; null = none, nothing is typed).
+    // A fresh agent or a picker tab (its conversation isn't known yet) takes
+    // the explicit choice ("New agent on", passed with accountAt = now so no
+    // older "move all" overrides it), its saved account, or the pick.
+    if (attachBuffer !== null) tab.account = account || 'login';
+    else if (resumeId) tab.account = resolveAccount(account, accountAt, family || familyOf(account));
+    else tab.account = resolveAccount(account, accountAt);
     // when this tab's account was chosen: a newer "move all" outranks it
     tab.accountAt = attachBuffer !== null || tab.account === account ? (accountAt || 0) : Date.now();
     // draft = something typed since the last Enter may sit in the prompt. A
@@ -844,9 +965,11 @@ export function createTab({ name = 'agent', cwd = repoPath, claude = false, resu
     if (attachBuffer !== null) {
       vs.setTermAccount(id, tab.account)
         .then((used) => { if (typeof used === 'string' && used !== tab.account) { tab.account = used; renderTabBar(); } })
-        .catch((e) => console.warn(`account: set failed for ${id}`, e && e.message));
+        .catch((e) => console.warn(`account: set failed for ${id}`, e && e.message)); // keeps its saved account
     }
   }
+  // the provider of the tab's conversation (tabFamily); no conversation = null
+  tab.family = tab.sessionId ? (family || (tab.isClaude ? familyOf(tab.account) : null)) : null;
   tabs.set(id, tab);
   registerFileLinks(term, tab);
   renderTabBar();
@@ -884,14 +1007,35 @@ export function createTab({ name = 'agent', cwd = repoPath, claude = false, resu
   if (attachBuffer === null && (claude || resumeId || pickSession)) {
     setTimeout(async () => {
       if (!tabs.has(id)) return;
-      // the shell's claude wrapper reads the account file at launch: write it first
-      if (tab.account) {
-        try {
-          const used = await vs.setTermAccount(id, tab.account);
-          if (typeof used === 'string') tab.account = used; // removed account → login
-        } catch (e) { console.warn(`account: set failed for ${id}`, e && e.message); }
-        if (!tabs.has(id)) return;
+      // the shell's claude wrapper reads the account file at launch: write it
+      // first. If main can't (account gone, endpoint settings unreadable) no
+      // claude is typed at all: the tab stays a plain shell.
+      if (!tab.account) { toast(`Couldn't start ${tab.name}: no account for its conversation`, 'err'); return; }
+      try {
+        const used = await vs.setTermAccount(id, tab.account);
+        if (typeof used === 'string') tab.account = used;
+      } catch (e) {
+        // a FRESH agent (no conversation yet) may use any account: one retry on
+        // the default pick (e.g. its account was just removed in another window)
+        let ok = false;
+        if (!resumeId && !pickSession && tabs.has(id)) {
+          try { await setAccounts(await vs.accountsList()); } catch {}
+          const alt = (accountsState && accountsState.pick) || null;
+          if (alt && alt !== tab.account) {
+            try {
+              const used = await vs.setTermAccount(id, alt);
+              tab.account = typeof used === 'string' ? used : alt;
+              tab.family = familyOf(tab.account);
+              ok = true;
+            } catch {}
+          }
+        }
+        if (!ok) {
+          if (tabs.has(id)) toast(`Couldn't start ${tab.name} on ${accountLabel(tab.account)}: ${ipcMsg(e)}`, 'err');
+          return;
+        }
       }
+      if (!tabs.has(id)) return;
       const cmd = claudeCommand(tab, pickSession ? '' : resumeId); // '' = picker: saved id is dead
       vs.ptyWrite(id, cmd + '\r');
       tab.launchedAt = Date.now();
@@ -916,8 +1060,9 @@ function launchOpts(tab, picker) {
 //   claude [--resume [<id>]] [--remote-control "<label>"] [--settings "<path>"] ["<prompt>"]
 // resumeId: null = fresh, '' = the interactive picker, else that session.
 // --remote-control lists the session in the Claude phone app; --settings
-// injects the status hooks and merges with the user's own settings. Token
-// accounts get no --remote-control (Remote Control refuses setup-tokens).
+// injects the status hooks and merges with the user's own settings. Token and
+// endpoint accounts get no --remote-control (Remote Control refuses
+// setup-tokens and non-Anthropic base URLs).
 // prompt: only ever the literal `continue` (account switch after a limit).
 function claudeCommand(tab, resumeId = null, prompt = null) {
   let cmd = resumeId == null ? 'claude' : `claude --resume${resumeId ? ' ' + resumeId : ''}`;
@@ -940,6 +1085,11 @@ export async function relaunchOnAccount(tab, to, { prompt = 'continue', gentle =
   if (!tab.sessionId) { console.warn(`account switch: ${id} has no session id — not relaunching`); return; }
   if (tab.switching) { console.warn(`account switch: ${id} already switching`); return; }
   const from = tab.account || 'login';
+  // last line of defense: a conversation never crosses providers. Compared
+  // with the CONVERSATION's family, not the current account's: a picked
+  // conversation of the other provider may (must) move to its own.
+  const fam = tabFamily(tab);
+  if (familyOf(to) !== fam) { console.warn(`account switch: ${id} ${from} -> ${to} refused, different provider (${fam} vs ${familyOf(to)})`); return; }
   const askedAt = Date.now(); // a "move all" issued while this runs must still apply
   tab.switching = true;
   renderTabBar();
@@ -962,8 +1112,16 @@ export async function relaunchOnAccount(tab, to, { prompt = 'continue', gentle =
       return;
     }
     // switch the account only now: until the old claude exited, its statusLine
-    // ticks still belong to the old account
-    const used = await vs.setTermAccount(id, to);
+    // ticks still belong to the old account. If main can't, nothing is typed:
+    // the tab stays a plain shell on its old account.
+    let used;
+    try {
+      used = await vs.setTermAccount(id, to);
+    } catch (e) {
+      toast(`Couldn't start ${tab.name} on ${accountLabel(to)}: ${ipcMsg(e)}`, 'err');
+      return;
+    }
+    if (!tabs.has(id) || tab.dead) return;
     tab.account = typeof used === 'string' ? used : to;
     tab.accountAt = askedAt;
     tab.moveFails = 0;
@@ -980,6 +1138,23 @@ export async function relaunchOnAccount(tab, to, { prompt = 'continue', gentle =
     renderTabBar();
     persist();
   }
+}
+
+// The conversation found in this tab belongs to another provider than the
+// tab's account (picked in the resume picker, or /resume): it must not go on
+// there. Moved to the first available account of its own family — allowed,
+// the guard above compares with the conversation's family. Never over a
+// half-typed prompt; the chip says "wrong provider" until it moved.
+function fixProvider(tab) {
+  if (!tab.family || tab.dead || tab.switching || !tab.sessionId) return;
+  const cur = accountById(tab.account || 'login');
+  if (!cur || familyOf(cur.id) === tab.family) return; // a removed account: can't tell, leave it
+  const label = familyLabel(tab.family);
+  const to = ((accountsState && accountsState.accounts) || []).find(a => familyOf(a.id) === tab.family && accountUsable(a));
+  if (!to) { toast(`${tab.name}: its conversation belongs to ${label} and no ${label} account is available. Don't continue in this tab.`, 'err'); return; }
+  if (tab.draft) { toast(`${tab.name}: its conversation belongs to ${label}, not ${cur.label}. Don't continue here: clear the prompt, then right-click → Continue on ${to.label}.`, 'err'); return; }
+  toast(`${tab.name} was on ${label}: moving it`);
+  relaunchOnAccount(tab, to.id, { prompt: null });
 }
 
 // Preferences → "Open a setup-token tab": a plain tab running the token flow
@@ -1158,6 +1333,12 @@ function acctChip(tab) {
   }
   const a = accountById(tab.account || 'login');
   const name = a ? a.label : (tab.account || 'login');
+  // its conversation belongs to another provider than its account (fixProvider)
+  if (a && tab.sessionId && tab.family && familyOf(a.id) !== tab.family) {
+    const w = el('span', 'acct-pill wrong', 'wrong provider');
+    w.title = `This conversation belongs to ${familyLabel(tab.family)}, but the tab is on ${name}. Don't continue in this tab: right-click → Continue on … moves it.`;
+    return w;
+  }
   const to = pendingMove(tab);
   if (to) {
     const target = accountById(to);
@@ -1167,7 +1348,8 @@ function acctChip(tab) {
     return p;
   }
   const c = el('span', 'acct-pill', name.length > 10 ? name.slice(0, 9) + '…' : name);
-  c.title = `Account: ${name}` + (a && a.kind === 'token' ? ' — token: no phone control, no claude.ai connectors (Sheets, Docs, Chrome)' : '');
+  c.title = `Account: ${name}` + (a && a.kind === 'token' ? ' — token: no phone control, no claude.ai connectors (Sheets, Docs, Chrome)'
+    : a && a.kind === 'endpoint' ? ` — ${a.host || 'API endpoint'}; no phone control, no claude.ai connectors` : '');
   return c;
 }
 
@@ -1316,6 +1498,7 @@ export function snapshot() {
     claudeSessionId: t.sessionId || null,
     account: t.account || null,
     accountAt: t.accountAt || 0,
+    family: t.family || null, // the conversation's provider
     worktree: t.worktree || null,
     named: t.named || null,
   }));

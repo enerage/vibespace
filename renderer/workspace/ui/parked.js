@@ -54,6 +54,7 @@ export function makeEntry(tab, { lastMessage = null, model = null, now = Date.no
     worktree: tab.worktree || null,
     account: tab.account || null,
     accountAt: tab.accountAt || 0,
+    family: tab.family || null, // the conversation's provider: unpark resumes only on that family
     parkedAt: now,
     lastMessage: typeof lastMessage === 'string' && lastMessage.trim() ? lastMessage.trim().slice(0, MAX_LAST) : null,
     model: model || null,

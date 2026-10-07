@@ -53,6 +53,7 @@ contextBridge.exposeInMainWorld('vs', {
   // claude accounts (main/accounts.cjs): State = { accounts: [...], pick }
   accountsList: () => ipcRenderer.invoke('accounts:list'),
   accountsAdd: (label, token) => ipcRenderer.invoke('accounts:add', label, token),
+  accountsAddEndpoint: (label, envText) => ipcRenderer.invoke('accounts:addEndpoint', label, envText),
   accountsRemove: (id) => ipcRenderer.invoke('accounts:remove', id),
   accountsRename: (id, label) => ipcRenderer.invoke('accounts:rename', id, label),
   accountsMove: (id, delta) => ipcRenderer.invoke('accounts:move', id, delta),
@@ -60,6 +61,7 @@ contextBridge.exposeInMainWorld('vs', {
   accountsClear: (id) => ipcRenderer.invoke('accounts:clear', id),
   onAccountsChanged: (cb) => ipcRenderer.on('accounts:changed', (e, state) => cb(state)),
   setTermAccount: (termId, accountId) => ipcRenderer.invoke('accounts:setTerm', termId, accountId),
+  sessionFamily: (sessionId) => ipcRenderer.invoke('accounts:sessionFamily', sessionId),
   waitClaudeExit: (termId, timeoutMs, noKill) => ipcRenderer.invoke('pty:waitClaudeExit', termId, timeoutMs, Boolean(noKill)),
   claudeRunning: (termId) => ipcRenderer.invoke('pty:claudeRunning', termId),
   onAccountSwitch: (cb) => ipcRenderer.on('account:switch', (e, msg) => cb(msg)),
@@ -79,7 +81,7 @@ contextBridge.exposeInMainWorld('vs', {
 
   onPtyData: (cb) => ipcRenderer.on('pty:data', (e, termId, chunk) => cb(termId, chunk)),
   onPtyExit: (cb) => ipcRenderer.on('pty:exit', (e, termId) => cb(termId)),
-  onSessionFound: (cb) => ipcRenderer.on('session:found', (e, termId, sessionId) => cb(termId, sessionId)),
+  onSessionFound: (cb) => ipcRenderer.on('session:found', (e, termId, sessionId, family) => cb(termId, sessionId, family || null)),
   onTermStatus: (cb) => ipcRenderer.on('term:status', (e, termId, st) => cb(termId, st)),
   onTermFocus: (cb) => ipcRenderer.on('term:focus', (e, termId) => cb(termId)),
   onTermFeed: (cb) => ipcRenderer.on('term:feed', (e, msg) => cb(msg && msg.termId, msg && msg.feed)),
