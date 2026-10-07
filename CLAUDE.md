@@ -290,6 +290,15 @@ Key facts encoded in `main/sessions.cjs`:
     `accounts.DECRYPT_PS` snippet.
   - Token accounts get no `--remote-control` in either the wrapper or
     `claudeCommand`. Remote Control refuses setup-tokens.
+  - Seen live 2026-10-07: a conversation that ran with Remote Control on the
+    login account, resumed on a token account WITHOUT `--remote-control`, still
+    shows "Remote Control disconnected — Claude.ai login expired — run /login".
+    Claude seems to restore the session's RC and fail on the token. The message
+    is harmless (the agent works, there's just no phone control) and is not a
+    VibeSpace bug: don't chase it. RC and usage always come from the SAME
+    credential in one claude process, so phone control lives on whichever
+    account is the `/login`. To move phone control to another account, make
+    THAT account the `/login` and re-add the other one as a token.
   - Usage-limit evidence: the transcript's last `isApiErrorMessage` line carries
     `error: "rate_limit"`, the "You've hit your weekly limit · resets …" text and
     `quotaLimits { status: "rejected", resetsAt }`. That is the exact reset;
