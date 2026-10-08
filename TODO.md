@@ -20,11 +20,11 @@ itself while an agent runs in the same window.
       worked. Found with temporary keydiag logging, fixed in 669b11a (in-page
       `confirmBox()`). No episode in any log from the fix until 2026-10-02, so the
       logging was removed. If it ever recurs: look for another native dialog first.
-- [ ] **Orphaned MCP servers pile up** (2026-09-29) — found 124 `mcp-postgres`
-      node processes (~6.4 GB) whose claude + cmd.exe parents were gone; the PC
-      was barely usable. Not yet proven that VibeSpace is the cause: check whether
-      closing a tab / restarting a window / killing a pty leaves claude's MCP
-      children alive, and if so kill the whole tree (`taskkill /T /F`) on pty exit.
+- [x] **Orphaned MCP servers pile up** (2026-09-29, fixed 0.6.52) — proven: a
+      pty close leaves claude's hidden `cmd /c` MCP children alive. `kill()` now
+      runs `taskkill /T /F` on the shell tree BEFORE closing the pty; `killAll()`
+      does one synchronous taskkill. Still open: orphans left when the shell or
+      claude exits by itself (parents already dead, no safe way to trace them).
 - [x] **Drop a file/photo onto a terminal did nothing** (0.6.13) — now pastes the
       quoted path(s) like Windows Terminal; Claude attaches dropped images.
       Needs Valentin's manual check (a real Explorer drag can't be scripted).

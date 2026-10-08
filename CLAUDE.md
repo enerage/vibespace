@@ -79,6 +79,13 @@ Knowledge is tracked **as we go**, never batched for later:
   that sits in the taskbar overflow, toggle `OverflowButton` through UI
   Automation and screenshot above it. Never read `ws.iconPath` once and keep
   it: it changes with every logo.
+- **Closing a pty must kill its process TREE first** (`ptyhost.kill`, 0.6.52).
+  ClosePseudoConsole only ends processes attached to the console; claude's MCP
+  servers run in their own hidden console and survived as orphans (124
+  mcp-postgres, 2026-09-29). `taskkill /T` walks from the shell pid, so it must
+  FINISH before `s.kill()`: once the pty is closed the shell is gone and the
+  tree can't be found (fire-and-forget lost that race 3/3). Hence the delayed
+  close, and the `onData`/`onExit` owner checks for the dying pty.
 - GPU acceleration is deliberately off (`app.disableHardwareAcceleration()`) — windows
   went blank over remote-display software. Renderers self-heal via
   `render-process-gone` → reload WITHOUT killing ptys — the renderer re-attaches.
@@ -145,7 +152,7 @@ Key facts encoded in `main/sessions.cjs`:
 
 ## Developing VibeSpace
 
-- `npm run smoke` — 113 self-tests (as of 0.6.50) incl. pty echo and live session discovery. Run it after
+- `npm run smoke` — 115 self-tests (as of 0.6.52) incl. pty echo and live session discovery. Run it after
   touching main-process code, **from a normal shell**: inside a Claude pty the stripped
   PATH and nested ConPTY break the pty test (`powershell.exe` "File not found" /
   AttachConsole) — prepend System32 to PATH and give it its own console, or just use a

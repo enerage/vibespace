@@ -2,6 +2,17 @@
 
 Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 
+## [0.6.52] — 2026-10-08
+
+### Fixed
+- **Closing a tab or a window now also stops the hidden processes its agent
+  started** (MCP servers such as mcp-postgres). They used to survive as
+  orphans: 124 of them (~6.4 GB) were found on 2026-09-29. Closing the
+  terminal alone only ends processes attached to it, and claude starts its MCP
+  servers in their own hidden console. Now the whole process tree under the
+  tab's shell is killed first (`taskkill /T /F`), then the terminal closes.
+  Closing a window waits about 1 s for this. Smoke 115/115 (2 new tests).
+
 ## [0.6.51] — 2026-10-07
 
 ### Added

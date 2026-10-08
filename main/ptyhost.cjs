@@ -33,7 +33,7 @@ const logger = require('./logger.cjs');
 const U = require('./util.cjs');
 const presence = require('./presence.cjs');
 const accounts = require('./accounts.cjs');
-const { spawn, execFile } = require('node:child_process');
+const { spawn, spawnSync, execFile } = require('node:child_process');
 
 function available() {
   return Boolean(pty);
@@ -228,6 +228,9 @@ function create(termId, cwd, cols = 120, rows = 30, wsId = null, { settingsPath 
   buffers.set(termId, { chunks: [], len: 0 });
   logger.info(`pty spawn: ${termId} cwd=${cwd}`);
   proc.onData(chunk => {
+    // a killed pty stays open until its tree kill is done (~1 s): its last
+    // output belongs to no tab (and must not stamp busyNow or a re-created id)
+    if (sessions.get(termId) !== proc) return;
     const t = Date.now();
     lastActivity.set(termId, t);
     lastOutput.set(termId, t);
@@ -236,6 +239,11 @@ function create(termId, cwd, cols = 120, rows = 30, wsId = null, { settingsPath 
     dataListener(termId, chunk);
   });
   proc.onExit(({ exitCode }) => {
+    // create() on a live termId kills the old pty, whose exit lands after the
+    // new one took the id (kill closes the pty only after its tree kill, ~1 s):
+    // that exit must not clean up, or report as dead, the NEW pty
+    const owner = sessions.get(termId);
+    if (owner && owner !== proc) { logger.info(`pty exit: ${termId} code=${exitCode} (replaced pty, ignored)`); return; }
     sessions.delete(termId);
     const meta = metas.get(termId);
     if (meta?.statusFile) { try { fs.rmSync(meta.statusFile, { force: true }); } catch {} }
@@ -342,10 +350,17 @@ function claudePidsUnder(shellPid) {
   });
 }
 
-function taskkill(pid) {
+function taskkillExe() {
   const exe = path.join(process.env.SystemRoot || process.env.windir || 'C:\\Windows', 'System32', 'taskkill.exe');
+  return fs.existsSync(exe) ? exe : 'taskkill.exe';
+}
+
+function taskkill(pid) {
   return new Promise((resolve) => {
-    const child = spawn(fs.existsSync(exe) ? exe : 'taskkill.exe', ['/PID', String(pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
+    let child;
+    try {
+      child = spawn(taskkillExe(), ['/PID', String(pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
+    } catch { resolve(false); return; }
     child.on('error', () => resolve(false));
     child.on('close', (code) => resolve(code === 0));
   });
@@ -419,7 +434,32 @@ function resize(termId, cols, rows) {
   }
 }
 
-function kill(termId) {
+// Closing the pty alone (s.kill() = ClosePseudoConsole) only ends processes
+// ATTACHED to the pseudoconsole. Claude starts its MCP stdio servers hidden
+// (`cmd /c npx …` with their own invisible console), so they are not attached,
+// and one that ignores stdin EOF lives on forever (124 orphaned mcp-postgres
+// node processes, 2026-09-29). So the whole tree under the shell is killed
+// first. ORDER MATTERS: taskkill /T walks the tree from the shell pid, and once
+// the pty is closed the shell is gone and taskkill finds nothing (a
+// fire-and-forget taskkill next to s.kill() lost that race 3 times out of 3).
+// So the pty closes when taskkill is done (~1 s), or after 5 s at the latest.
+function killTreeThenPty(s) {
+  let closed = false;
+  let timer = null;
+  const close = () => {
+    if (closed) return;
+    closed = true;
+    clearTimeout(timer);
+    try { s.kill(); } catch {}
+  };
+  timer = setTimeout(close, 5000);
+  const pid = Number(s.pid) || 0;
+  if (pid > 0) taskkill(pid).then(close, close);
+  else close();
+}
+
+// tree = false: the caller already killed the process trees (killAll)
+function kill(termId, { tree = true } = {}) {
   const s = sessions.get(termId);
   if (s) {
     const meta = metas.get(termId);
@@ -431,12 +471,28 @@ function kill(termId) {
     buffers.delete(termId);
     lastActivity.delete(termId);
     lastOutput.delete(termId);
-    try { s.kill(); } catch {}
+    if (tree) killTreeThenPty(s);
+    else { try { s.kill(); } catch {} }
   }
 }
 
+// window close / app quit: ONE synchronous taskkill for every shell tree (blocks
+// main ~1 s). An async one would race the process exit: the exit closes the
+// ptys, the shells die first, and taskkill /T then finds no tree to walk.
 function killAll() {
-  for (const id of [...sessions.keys()]) kill(id);
+  const ids = [...sessions.keys()];
+  if (!ids.length) return;
+  const pidArgs = [];
+  for (const id of ids) {
+    const pid = Number(sessions.get(id)?.pid) || 0;
+    if (pid > 0) pidArgs.push('/PID', String(pid));
+  }
+  if (pidArgs.length) {
+    try {
+      spawnSync(taskkillExe(), [...pidArgs, '/T', '/F'], { windowsHide: true, stdio: 'ignore', timeout: 8000 });
+    } catch {}
+  }
+  for (const id of ids) kill(id, { tree: false });
 }
 
 function alive(termId) {

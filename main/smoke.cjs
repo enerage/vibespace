@@ -88,6 +88,84 @@ function ptyBufferTest() {
   });
 }
 
+// Orphaned MCP servers (2026-09-29: 124 mcp-postgres node processes): claude
+// starts MCP stdio servers HIDDEN through `cmd /c`, so they are not attached to
+// the pseudoconsole and survived the pty close. Mirror that without claude: a
+// "fake claude" in the pty spawns `cmd /c <node> leaf.js` with windowsHide, and
+// the leaf ignores stdin EOF. kill() must take the leaf down with the tab and
+// leave other tabs' trees alone; killAll() (window close / quit) takes the rest.
+async function ptyTreeKillTest() {
+  if (!ptyhost.available()) return { ok: false, detail: 'node-pty unavailable' };
+  const os = require('node:os');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-smoke-tree-'));
+  const leafJs = path.join(dir, 'leaf.js');
+  const fakeJs = path.join(dir, 'fakeclaude.js');
+  fs.writeFileSync(leafJs, [
+    "require('fs').writeFileSync(process.argv[2], String(process.pid));",
+    "process.stdin.on('data', () => {}); process.stdin.on('end', () => {}); process.stdin.on('error', () => {});",
+    'setInterval(() => {}, 1000);',
+  ].join('\n'));
+  fs.writeFileSync(fakeJs, [
+    "const { spawn } = require('child_process');",
+    'const c = spawn(process.env.ComSpec || "cmd.exe", ["/d", "/s", "/c", `""${process.execPath}" "${process.argv[2]}" "${process.argv[3]}""`],',
+    "  { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'], windowsVerbatimArguments: true });",
+    "c.stdout.on('data', () => {}); c.stderr.on('data', () => {});",
+    'setInterval(() => {}, 1000);',
+  ].join('\n'));
+  const alive = (pid) => { try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } };
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+  const waitFor = async (fn, ms) => { const end = Date.now() + ms; while (Date.now() < end) { const v = fn(); if (v) return v; await sleep(200); } return fn(); };
+  const ids = ['smoketree1', 'smoketree2'];
+  const leafPid = {};
+  try {
+    for (const id of ids) {
+      ptyhost.create(id, U.BIN_ROOT, 160, 30);
+      const pidFile = path.join(dir, `${id}.pid`);
+      await sleep(1200);
+      // ELECTRON_RUN_AS_NODE: the Electron binary runs the scripts as plain node
+      // (packaged too); the hidden cmd and the leaf inherit it
+      ptyhost.write(id, `$env:ELECTRON_RUN_AS_NODE='1'; & "${process.execPath}" "${fakeJs}" "${leafJs}" "${pidFile}"\r`);
+      leafPid[id] = await waitFor(() => { try { return Number(fs.readFileSync(pidFile, 'utf8')) || 0; } catch { return 0; } }, 15000);
+      if (!leafPid[id]) return { ok: false, detail: `${id}: hidden leaf never started` };
+    }
+    const [a, b] = ids.map(id => leafPid[id]);
+    if (!alive(a) || !alive(b)) return { ok: false, detail: `leaves not alive before kill: ${a}=${alive(a)} ${b}=${alive(b)}` };
+    ptyhost.kill(ids[0]);
+    const goneA = await waitFor(() => !alive(a), 8000);
+    const keptB = alive(b) && ptyhost.alive(ids[1]);
+    ptyhost.killAll(); // synchronous tree kill
+    const goneB = await waitFor(() => !alive(b), 3000);
+    const ok = goneA && keptB && goneB;
+    for (const pid of [a, b]) { if (alive(pid)) { try { process.kill(pid); } catch {} } }
+    return { ok, detail: `kill(): leaf ${a} gone=${goneA}, other tab's leaf ${b} kept=${keptB}; killAll(): leaf ${b} gone=${goneB}` };
+  } catch (err) {
+    return { ok: false, detail: 'threw: ' + (err && err.message ? err.message : err) };
+  } finally {
+    for (const id of ids) ptyhost.kill(id);
+    for (const pid of Object.values(leafPid)) { if (pid && alive(pid)) { try { process.kill(pid); } catch {} } }
+    setTimeout(() => { try { fs.rmSync(dir, { recursive: true, force: true }); } catch {} }, 2000);
+  }
+}
+
+// create() on a live termId: the old pty's exit (it closes only after its tree
+// kill, ~1 s) must not clean up or report the NEW pty as exited
+async function ptyRecreateTest() {
+  if (!ptyhost.available()) return { ok: false, detail: 'node-pty unavailable' };
+  const id = 'smokerecreate';
+  try {
+    ptyhost.create(id, U.BIN_ROOT, 120, 30);
+    await new Promise(r => setTimeout(r, 1200));
+    ptyhost.create(id, U.BIN_ROOT, 120, 30); // kills the first
+    await new Promise(r => setTimeout(r, 4000));
+    const ok = ptyhost.alive(id) && ptyhost.list().some(p => p.termId === id);
+    return { ok, detail: `alive after old pty exit: ${ok}` };
+  } catch (err) {
+    return { ok: false, detail: 'threw: ' + (err && err.message ? err.message : err) };
+  } finally {
+    ptyhost.kill(id);
+  }
+}
+
 async function runSmoke() {
   U.ensureDir(U.dataRoot());
   U.ensureDir(path.join(U.dataRoot(), 'icons'));
@@ -1670,6 +1748,12 @@ async function runSmoke() {
   check('pty ring buffer + list lifecycle', ring.ok, ring.detail);
   check('pty busyNow guard signal (Layer 3)', ring.busyNow === true && ring.busyFuture === false && ring.busyAfterKill === false,
     `now=${ring.busyNow} future=${ring.busyFuture} afterKill=${ring.busyAfterKill}`);
+
+  // 9b. tab close kills hidden grandchildren (orphaned MCP servers) + id reuse
+  const tree = await ptyTreeKillTest();
+  check('pty kill takes hidden grandchildren (MCP servers) down, per tab', tree.ok, tree.detail);
+  const recreate = await ptyRecreateTest();
+  check('pty re-create on a live id survives the old pty exit', recreate.ok, recreate.detail);
 
   const failed = results.filter(r => !r.ok);
   console.log(`\nSMOKE RESULT: ${results.length - failed.length}/${results.length} passed`);

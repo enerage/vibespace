@@ -1,7 +1,7 @@
 {
   "name": "vibespace",
   "productName": "VibeSpace",
-  "version": "0.6.51",
+  "version": "0.6.52",
   "description": "Lightweight per-repo workspace app: file tree + preview + named Claude Code agent terminals, one taskbar app per repo",
   "main": "main/index.cjs",
   "author": "Valentin",
