@@ -100,6 +100,19 @@ Build in this order. Verify the statusLine and HTTP hooks live in a pty before r
       2026-10-01 reboot rebuilds lost it.
 - [ ] Launcher still uses 2 native `confirm()` boxes (remove workspace, remove
       Explorer menu). Port them to an in-page confirm like `confirmBox` (S).
+- [ ] Logo change on a PINNED workspace: the new icon path + taskbar-button
+      rebuild (0.6.41) is verified only for running, unpinned windows. Check a
+      pinned one; pinning can't be scripted on Windows 11 (S).
+- [ ] Typing lag: if `lag:` lines keep showing high `cpu`, add the "priority
+      guard" (lower the priority of agents' vitest/tsc/build processes, keep
+      claude + UI normal). Valentin chose "measure first" on 2026-10-02 (M).
+- [ ] Garbled terminal characters after the Unicode 11 fix (0.6.34): next A/B is
+      `useConptyDll: true` + `CLAUDE_CODE_FORCE_SYNC_OUTPUT=1`
+      (RESEARCH-TERMINAL-GARBLE.md). Only if it still happens; ask for a screenshot (M).
+- [ ] Background state: tell a finished background shell (test run) from a
+      long-lived one (dev server) so shell-only tabs can move to Working (S/M).
+- [ ] Regenerate the README screenshot: it predates the status bar, + Claude ▾,
+      the account chips and the background ring (S).
 
 ## Session tracking robustness
 - [x] Resume-an-existing-conversation flow (0.6.2): right-click `+ Claude` opens
