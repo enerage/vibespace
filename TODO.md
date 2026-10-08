@@ -98,7 +98,7 @@ Build in this order. Verify the statusLine and HTTP hooks live in a pty before r
 - [ ] tablog: include the layout (`termPosition`, sizes) in the `open:` line, so a
       state rebuilt from the log keeps the terminal on the right (S). The
       2026-10-01 reboot rebuilds lost it.
-- [ ] Launcher still uses 2 native `confirm()` boxes (remove workspace, remove
+- [x] (0.6.52) Launcher still uses 2 native `confirm()` boxes (remove workspace, remove
       Explorer menu). Port them to an in-page confirm like `confirmBox` (S).
 - [ ] Logo change on a PINNED workspace: the new icon path + taskbar-button
       rebuild (0.6.41) is verified only for running, unpinned windows. Check a

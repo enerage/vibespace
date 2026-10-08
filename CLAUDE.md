@@ -551,7 +551,11 @@ Key facts encoded in `main/sessions.cjs`:
   Electron the window gets no real focus back after the native box closes.
   Keydown still fires, but keypress/beforeinput don't until the window is
   re-focused, so Space dies in xterm while letters keep working. Use
-  `confirmBox()` from `common.js` (found via keydiag, 2026-09-29).
+  `confirmBox()` from `common.js` (found via keydiag, 2026-09-29). The launcher
+  imports it from there too (0.6.52), so `common.js` must stay free of
+  workspace-only imports. Testing an isolated launcher while the real one runs
+  needs `--user-data-dir=<throwaway>`: redirecting `APPDATA` doesn't move
+  Electron's userData, and the single-instance lock makes it quit at once.
 - **Notification prefs** (0.6.25): `main/notifyprefs.cjs`, machine-wide
   `<dataRoot>/notify.json`, re-read on mtime change because every workspace is
   its own process. `notifyAttention` asks `shouldToast(st)` for the TOAST only.

@@ -120,6 +120,24 @@ input[type="text"]:focus { outline: none; border-color: var(--accent); }
 
 .hidden { display: none !important; }
 
+/* confirmBox() (workspace/ui/common.js) — the in-page replacement for window.confirm */
+.info-modal {
+  position: fixed; inset: 0; z-index: 120;
+  background: rgba(4, 8, 14, 0.66);
+  display: flex; align-items: center; justify-content: center;
+  backdrop-filter: blur(2px);
+}
+.info-box {
+  width: min(640px, 92vw);
+  background: var(--panel);
+  border: 1px solid var(--border); border-radius: 12px;
+  padding: 16px 18px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.55);
+}
+.info-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+.confirm-box { width: min(460px, 92vw); }
+.confirm-msg { white-space: pre-wrap; font-size: 13px; line-height: 1.5; }
+
 #toasts {
   position: fixed;
   right: 18px;

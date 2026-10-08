@@ -1,4 +1,8 @@
 'use strict';
+// In-page confirm shared with the workspace windows: native confirm() leaves a
+// Windows Electron window without real focus afterwards (CLAUDE.md).
+import { confirmBox } from '../workspace/ui/common.js';
+
 const $ = (sel) => document.querySelector(sel);
 
 function toast(msg, kind = '') {
@@ -88,7 +92,7 @@ async function refresh() {
     del.className = 'btn small ghost danger';
     del.textContent = 'Remove';
     del.onclick = async () => {
-      if (!confirm(`Remove workspace "${ws.name}"?\n(Your repo is untouched; shortcuts and saved terminal state are deleted.)`)) return;
+      if (!await confirmBox(`Remove workspace "${ws.name}"?\n(Your repo is untouched; shortcuts and saved terminal state are deleted.)`, { ok: 'Remove', danger: true })) return;
       await vs.removeWorkspace(ws.id);
       refresh();
     };
@@ -112,7 +116,7 @@ function wireExplorerButton() {
     const btn = $('#btn-explorer');
     const installed = btn.dataset.installed === '1';
     if (installed) {
-      if (!confirm('Remove "Open with VibeSpace" from the folder right-click menu?')) return;
+      if (!await confirmBox('Remove "Open with VibeSpace" from the folder right-click menu?', { ok: 'Remove', danger: true })) return;
       await vs.contextMenu('uninstall');
       toast('Right-click menu removed');
     } else {

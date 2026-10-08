@@ -12,6 +12,9 @@ Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
   servers in their own hidden console. Now the whole process tree under the
   tab's shell is killed first (`taskkill /T /F`), then the terminal closes.
   Closing a window waits about 1 s for this. Smoke 115/115 (2 new tests).
+- **Launcher: Remove workspace and Remove right-click menu ask in an in-page
+  box** instead of a native confirm, so the launcher keeps keyboard focus
+  afterwards (same `confirmBox` as the workspace windows; Esc cancels).
 
 ## [0.6.51] — 2026-10-07
 
