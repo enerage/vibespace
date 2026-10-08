@@ -380,10 +380,11 @@ async function runSmoke() {
       const plan = pkm.restorable(saved, [...shelf, { name: 'junk' }]).map(t => t.termId).join(',');
       const norm = pkm.normalizeParked([{ id: 'x', name: 'old', claudeSessionId: 'o', parkedAt: 1 }, ...shelf, { claudeSessionId: 'o', parkedAt: 9 }, null, { name: 'no-sid' }]);
       const names = [pkm.uniqueName('agent-3', ['agent-1']), pkm.uniqueName('agent-3', ['agent-3', 'agent-3-2'])];
-      const entry = pkm.makeEntry({ name: 'n', cwd: 'C:\\r', sessionId: 's', worktree: null, account: 'login' }, { lastMessage: 'x'.repeat(3000), model: 'Haiku', now: 7 });
+      const entry = pkm.makeEntry({ name: 'n', cwd: 'C:\\r', sessionId: 's', worktree: null, account: 'login', model: 'sonnet' }, { lastMessage: 'x'.repeat(3000), model: 'Haiku', now: 7 });
       check('parked: restore skips the shelf (never auto-resumed), normalize, -2 names, entry shape',
         plan === 'a,c' && norm.map(e => e.name).join(',') === 'agent-3,old' && names.join(',') === 'agent-3,agent-3-3'
-        && entry.claudeSessionId === 's' && entry.parkedAt === 7 && entry.lastMessage.length === 2000 && entry.isClaude === true,
+        && entry.claudeSessionId === 's' && entry.parkedAt === 7 && entry.lastMessage.length === 2000 && entry.isClaude === true
+        && entry.modelArg === 'sonnet' && entry.model === 'Haiku', // the tab's --model is kept apart from the display name
         JSON.stringify({ plan, norm: norm.map(e => e.name), names, len: entry.lastMessage.length }));
       try { fs.rmSync(d, { recursive: true, force: true }); } catch {}
     }
@@ -1190,6 +1191,7 @@ async function runSmoke() {
     const cases = [
       ['claude --resume abc', '--resume|abc|--remote-control|WS · t1|--settings|S.json'],
       ['claude', '--remote-control|WS · t1|--settings|S.json'],
+      ['claude --model sonnet', '--model|sonnet|--remote-control|WS · t1|--settings|S.json'], // the tab model (terms.js claudeCommand): passed once, never doubled
       ['claude update', 'update'],
       ['claude -p hi', '-p|hi'],
       ['claude --settings X.json --remote-control N', '--settings|X.json|--remote-control|N'],

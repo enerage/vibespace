@@ -57,7 +57,8 @@ export function makeEntry(tab, { lastMessage = null, model = null, now = Date.no
     family: tab.family || null, // the conversation's provider: unpark resumes only on that family
     parkedAt: now,
     lastMessage: typeof lastMessage === 'string' && lastMessage.trim() ? lastMessage.trim().slice(0, MAX_LAST) : null,
-    model: model || null,
+    model: model || null, // display name of the model it last ran on (card only)
+    modelArg: tab.model || null, // the tab's chosen/switched model (terms.js tab.model): unpark keeps it
   };
 }
 

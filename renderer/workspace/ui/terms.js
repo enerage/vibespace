@@ -139,13 +139,53 @@ async function conversationFamily(sessionId, saved = {}) {
 // family. With none left (its endpoint account was removed) the tab opens as a
 // plain terminal that keeps the session id, so a restart after the endpoint
 // is added again resumes it.
-async function resumeConversation({ termId = null, name, cwd, sessionId, account = null, accountAt = 0, worktree = null, family = null, activate = true }) {
+async function resumeConversation({ termId = null, name, cwd, sessionId, account = null, accountAt = 0, worktree = null, family = null, model = null, activate = true }) {
   const fam = await conversationFamily(sessionId, { family, account });
   if (resolveAccount(account, accountAt, fam) === null) {
     toast(`${name}: its conversation ran on ${familyLabel(fam)}; add that endpoint again to resume it`, 'err');
-    return createTab({ termId, name, cwd, savedSessionId: sessionId, worktree, family: fam, activate });
+    return createTab({ termId, name, cwd, savedSessionId: sessionId, worktree, family: fam, model, activate });
   }
-  return createTab({ termId, name, cwd, resumeId: sessionId, account, accountAt, worktree, family: fam, activate });
+  return createTab({ termId, name, cwd, resumeId: sessionId, account, accountAt, worktree, family: fam, model, activate });
+}
+
+// ---- per-tab model (claude --model) --------------------------------------------
+// tab.model = the model the user chose for the tab (+ ▾ → New agent with model)
+// or switched to in the session (/model, seen in the feed): an alias
+// (opus/sonnet/haiku) when it maps to one, else claude's exact id. null =
+// claude's default, and no --model is ever typed. Only a FRESH claude gets
+// --model: `claude --resume <id>` restores the conversation's own model by itself
+// (verified 2.1.294, interactive and -p), so a resume never overrides it.
+export const MODEL_ALIASES = ['opus', 'sonnet', 'haiku'];
+// typed into PowerShell unquoted: one plain word or nothing
+const cleanModel = (m) => (typeof m === 'string' && /^[A-Za-z0-9._:-]{1,80}$/.test(m) ? m : null);
+// a feed model id → the tab's model value: the alias of its tier when it maps
+// cleanly (claude-<tier>-…, or the model an endpoint account maps that alias
+// to), else the id itself without claude's `[1m]` suffix
+function modelValue(id, accountId) {
+  const bare = String(id || '').replace(/\[[^\]]*\]$/, '').trim();
+  if (!bare) return null;
+  const m = /^claude-(?:[\d.-]+-)?(opus|sonnet|haiku)\b/i.exec(bare);
+  if (m) return m[1].toLowerCase();
+  const a = accountById(accountId || 'login');
+  const models = (a && a.kind === 'endpoint' && a.models) || {};
+  const strip = (x) => String(x || '').replace(/\[[^\]]*\]$/, '').toLowerCase();
+  const alias = MODEL_ALIASES.find(k => models[k] && strip(models[k]) === bare.toLowerCase());
+  return alias || cleanModel(bare);
+}
+// the feed's statusLine carries the running model: follow it. A tab with a
+// chosen model tracks every change; a default tab only becomes explicit when
+// this window saw the model CHANGE (/model), never on its first tick.
+function followModel(tab, f) {
+  const id = f && f.model && f.model.id;
+  if (!tab || !tab.isClaude || tab.switching || !id) return;
+  const prev = tab.feedModelId;
+  tab.feedModelId = id;
+  if (!tab.model && (!prev || prev === id)) return;
+  const v = modelValue(id, tab.account);
+  if (!v || v === tab.model) return;
+  tab.model = v;
+  renderTabBar();
+  persist();
 }
 
 // ---- "move all agents here" ----------------------------------------------------
@@ -360,7 +400,7 @@ export function init(opts) {
     if (!termId) return;
     feeds.set(termId, feed);
     const tab = tabs.get(termId);
-    if (tab) paintMeter(tab);
+    if (tab) { followModel(tab, feed); paintMeter(tab); }
     feedui.onFeed(termId);
     notifyAgents();
   });
@@ -434,6 +474,7 @@ export function init(opts) {
           account: t.account || null,
           accountAt: t.accountAt || 0,
           worktree: t.worktree || null,
+          model: t.model || null,
           family: t.claudeSessionId ? await conversationFamily(t.claudeSessionId, t) : null,
         });
       } else if (t.worktree && !(await worktreeAlive(t.worktree))) {
@@ -445,10 +486,10 @@ export function init(opts) {
         // saved session file is gone — open claude's interactive picker instead of
         // typing a resume id that would silently error out
         deadSessions.push(t.name);
-        createTab({ termId: t.termId || null, name: t.name, cwd: t.cwd || repoPath, pickSession: true, account: t.account || null, accountAt: t.accountAt || 0, worktree: t.worktree || null });
+        createTab({ termId: t.termId || null, name: t.name, cwd: t.cwd || repoPath, pickSession: true, account: t.account || null, accountAt: t.accountAt || 0, worktree: t.worktree || null, model: t.model || null });
       } else if (opts.autoResume && t.claudeSessionId) {
         // keep stable ids across restarts (sessions pin by termId)
-        await resumeConversation({ termId: t.termId || null, name: t.name, cwd: t.cwd || repoPath, sessionId: t.claudeSessionId, account: t.account || null, accountAt: t.accountAt || 0, worktree: t.worktree || null, family: t.family || null, activate: true });
+        await resumeConversation({ termId: t.termId || null, name: t.name, cwd: t.cwd || repoPath, sessionId: t.claudeSessionId, account: t.account || null, accountAt: t.accountAt || 0, worktree: t.worktree || null, family: t.family || null, model: t.model || null, activate: true });
       } else {
         createTab({
           termId: t.termId || null, // keep stable ids across restarts (sessions pin by termId)
@@ -458,6 +499,7 @@ export function init(opts) {
           account: t.account || null,
           accountAt: t.accountAt || 0,
           worktree: t.worktree || null,
+          model: t.model || null,
         });
       }
     }
@@ -481,7 +523,7 @@ export function init(opts) {
     for (const t of saved) {
       const isClaude = t.isClaude === undefined ? true : Boolean(t.isClaude);
       if (opts.autoResume && t.claudeSessionId) {
-        await resumeConversation({ termId: t.termId || null, name: t.name, cwd: t.cwd || repoPath, sessionId: t.claudeSessionId, account: t.account || null, accountAt: t.accountAt || 0, worktree: t.worktree || null, family: t.family || null, activate: true });
+        await resumeConversation({ termId: t.termId || null, name: t.name, cwd: t.cwd || repoPath, sessionId: t.claudeSessionId, account: t.account || null, accountAt: t.accountAt || 0, worktree: t.worktree || null, family: t.family || null, model: t.model || null, activate: true });
         continue;
       }
       createTab({
@@ -492,6 +534,7 @@ export function init(opts) {
         account: t.account || null,
         accountAt: t.accountAt || 0,
         worktree: t.worktree || null,
+        model: t.model || null,
       });
     }
   });
@@ -571,6 +614,7 @@ async function openClaudeMenu() {
     { label: 'New agent', run: () => createTab({ name: nextName('agent'), cwd: repoPath, claude: true }) },
     { label: 'New agent in a worktree', hint: "Its own git worktree and branch vs/<name>: parallel agents never touch each other's files", run: () => newWorktreeAgent() },
     { label: 'New terminal', hint: 'A plain PowerShell terminal', run: () => createTab({ name: nextName('term'), cwd: repoPath }) },
+    ...newAgentModelItems(),
     ...newAgentOnItems(),
     { sep: true },
     { section: 'Resume' },
@@ -579,6 +623,22 @@ async function openClaudeMenu() {
   ];
   if (kept.length) items.push({ label: `Kept worktrees (${kept.length}) ▸`, hint: 'Worktrees kept after their tab closed, or held by a parked agent', run: () => worktreesMenu(r, kept) });
   showMenu(r.left, r.bottom + 4, items);
+}
+
+// "New agent with model": a fresh claude started with --model <alias>; the tab
+// keeps it (tab.model) through restarts. Plain "New agent" = claude's default.
+// On an API endpoint account the alias is the endpoint's model for that tier.
+function newAgentModelItems() {
+  const items = [{ sep: true }, { section: 'New agent with model' }];
+  for (const m of MODEL_ALIASES) {
+    items.push({
+      label: m[0].toUpperCase() + m.slice(1),
+      meta: `--model ${m}`,
+      hint: `A new agent started with --model ${m}; restarts and resumes keep it. On an API endpoint account it is that endpoint's ${m} model.`,
+      run: () => createTab({ name: nextName('agent'), cwd: repoPath, claude: true, model: m }),
+    });
+  }
+  return items;
 }
 
 // "New agent on <account>": a fresh claude on THAT account, once there is a
@@ -725,7 +785,7 @@ export async function unparkAgent(id) {
       toast(`worktree ${e.worktree.name} no longer exists: the conversation can still be resumed from + ▾ → All conversations…`, 'err');
     } else if (!(await vs.sessionCheck(wsId, e.claudeSessionId, cwd).catch(() => false))) {
       // transcript gone: claude's picker instead of a resume id that would error out
-      tab = createTab({ name, cwd, pickSession: true, account: e.account || null, accountAt: e.accountAt || 0, worktree: e.worktree || null });
+      tab = createTab({ name, cwd, pickSession: true, account: e.account || null, accountAt: e.accountAt || 0, worktree: e.worktree || null, model: e.modelArg || null });
       toast(`${name}: saved session gone — resume picker opened in tab`, 'err');
     } else {
       // no account of its family left (its endpoint was removed): it stays
@@ -735,7 +795,7 @@ export async function unparkAgent(id) {
         toast(`${name}: its conversation ran on ${familyLabel(fam)}; add that endpoint again to unpark it`, 'err');
         return null;
       }
-      tab = await resumeConversation({ name, cwd, sessionId: e.claudeSessionId, account: e.account || null, accountAt: e.accountAt || 0, worktree: e.worktree || null, family: fam, activate: true });
+      tab = await resumeConversation({ name, cwd, sessionId: e.claudeSessionId, account: e.account || null, accountAt: e.accountAt || 0, worktree: e.worktree || null, family: fam, model: e.modelArg || null, activate: true });
     }
     shelf = shelf.filter(x => x.id !== id);
     parked.paintChip();
@@ -933,7 +993,7 @@ function registerFileLinks(term, tab) {
   } catch {} // xterm without link-provider support — links simply don't light up
 }
 
-export function createTab({ name = 'agent', cwd = repoPath, claude = false, resumeId = null, activate = true, termId = null, attachBuffer = null, savedIsClaude = null, savedSessionId = null, pickSession = false, run = null, account = null, accountAt = 0, worktree = null, family = null, setup = '' } = {}) {
+export function createTab({ name = 'agent', cwd = repoPath, claude = false, resumeId = null, activate = true, termId = null, attachBuffer = null, savedIsClaude = null, savedSessionId = null, pickSession = false, run = null, account = null, accountAt = 0, worktree = null, family = null, model = null, setup = '' } = {}) {
   const id = termId || newTermId();
   const host = el('div', 'term-host');
   host.style.display = 'none';
@@ -968,6 +1028,7 @@ export function createTab({ name = 'agent', cwd = repoPath, claude = false, resu
     worktree: worktree && worktree.path ? worktree : null, // { name, path, branch, base }
     named: restoredNamed.get(id) || null, // 'user' | 'auto' | null (still on its default name)
     isClaude: savedIsClaude !== null ? Boolean(savedIsClaude) : Boolean(claude || resumeId || pickSession),
+    model: cleanModel(model), // chosen/switched model (--model on a fresh claude); null = default
   };
   if (tab.isClaude) {
     // a live (re-attached) agent keeps whatever account it is running on;
@@ -1084,8 +1145,10 @@ function launchOpts(tab, picker) {
 }
 
 // The ONE builder for a new interactive claude:
-//   claude [--resume [<id>]] [--remote-control "<label>"] [--settings "<path>"] ["<prompt>"]
+//   claude [--resume [<id>] | --model <m>] [--remote-control "<label>"] [--settings "<path>"] ["<prompt>"]
 // resumeId: null = fresh, '' = the interactive picker, else that session.
+// --model only on a fresh claude with a tab model: a resume (or a pick)
+// restores the conversation's own model.
 // --remote-control lists the session in the Claude phone app; --settings
 // injects the status hooks and merges with the user's own settings. Token and
 // endpoint accounts get no --remote-control (Remote Control refuses
@@ -1093,6 +1156,8 @@ function launchOpts(tab, picker) {
 // prompt: only ever the literal `continue` (account switch after a limit).
 function claudeCommand(tab, resumeId = null, prompt = null) {
   let cmd = resumeId == null ? 'claude' : `claude --resume${resumeId ? ' ' + resumeId : ''}`;
+  const model = resumeId == null ? cleanModel(tab.model) : null;
+  if (model) cmd += ` --model ${model}`;
   if (remote() && !(tab.account && tab.account !== 'login')) {
     const label = rcLabel(tab.name);
     if (label) cmd += ` --remote-control "${label}"`;
@@ -1313,6 +1378,12 @@ function renderTabBar() {
       t.append(wt);
     }
     t.append(label);
+    // the tab's chosen/switched model, subtle; nothing on a default tab
+    if (tab.isClaude && tab.model) {
+      const mt = el('span', 'model-tag', tab.model.length > 12 ? tab.model.slice(0, 11) + '…' : tab.model);
+      mt.title = `Model: ${tab.model}. A restart or resume keeps it.`;
+      t.append(mt);
+    }
     const acct = acctChip(tab);
     if (acct) t.append(acct);
     t.append(pill, close, meter);
@@ -1528,6 +1599,7 @@ export function snapshot() {
     family: t.family || null, // the conversation's provider
     worktree: t.worktree || null,
     named: t.named || null,
+    model: t.model || null, // chosen/switched model; null = claude's default
   }));
 }
 

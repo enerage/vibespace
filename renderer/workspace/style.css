@@ -733,6 +733,8 @@ body.dragging #split-v, body.dragging #split-h { background: color-mix(in srgb, 
 .acct-pill.switching { color: var(--yellow); background: color-mix(in srgb, var(--yellow) 14%, transparent); font-style: italic; }
 /* its conversation belongs to another provider than its account */
 .acct-pill.wrong { color: var(--danger); background: color-mix(in srgb, var(--danger) 16%, transparent); font-weight: 600; }
+/* the tab's chosen/switched model (--model); plain dim text, no chip */
+.model-tag { flex: none; font-size: 10.5px; line-height: 15px; color: var(--dim); white-space: nowrap; }
 /* activity strip: a status bar BELOW the active terminal (0.6.42; it sat between
    the tab bar and the terminal before). Claude's prompt and mode line are at the
    bottom, so that's where the eyes already are. */
