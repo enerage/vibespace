@@ -24,6 +24,7 @@ contextBridge.exposeInMainWorld('vs', {
   gitBranch: () => ipcRenderer.invoke('git:branch'),
   // Search tab: { query, caseSensitive, wholeWord, regex } in the window's own repo
   searchText: (q) => ipcRenderer.invoke('search:text', q),
+  onGitFetched: (cb) => ipcRenderer.on('git:fetched', (e, r) => cb(r)),
   dropPath: (file) => { try { return webUtils.getPathForFile(file); } catch { return null; } },
   reveal: (file) => ipcRenderer.invoke('fs:reveal', file),
   openFolder: (dir) => ipcRenderer.invoke('fs:openFolder', dir),

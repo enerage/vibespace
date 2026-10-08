@@ -222,15 +222,20 @@ const OP_MARKERS = [
   ['MERGE_HEAD', 'merging'], ['CHERRY_PICK_HEAD', 'cherry-picking'], ['REVERT_HEAD', 'reverting'],
 ];
 
-async function branch(repoPath) {
-  const out = await git(repoPath, ['status', '--porcelain=v2', '--branch', '-z', '--untracked-files=no'], { timeout: 5000 });
-  if (out === null) return null;
-  const b = parseBranch(out);
+// absolute git dir (per worktree: index, index.lock and the op markers live here)
+async function gitDir(repoPath) {
   if (!gitDirs.has(repoPath)) {
     const d = await git(repoPath, ['rev-parse', '--absolute-git-dir']);
     if (d) gitDirs.set(repoPath, d.trim());
   }
-  const dir = gitDirs.get(repoPath);
+  return gitDirs.get(repoPath) || null;
+}
+
+async function branch(repoPath) {
+  const out = await git(repoPath, ['status', '--porcelain=v2', '--branch', '-z', '--untracked-files=no'], { timeout: 5000 });
+  if (out === null) return null;
+  const b = parseBranch(out);
+  const dir = await gitDir(repoPath);
   b.operation = null;
   if (dir) for (const [marker, op] of OP_MARKERS) if (fs.existsSync(path.join(dir, marker))) { b.operation = op; break; }
   return b;
@@ -238,6 +243,6 @@ async function branch(repoPath) {
 
 module.exports = {
   readOnlyGitEnv,
-  log, commit, fileAt, commitFileDiff, branch,
+  log, commit, fileAt, commitFileDiff, branch, gitDir,
   _parseLog: parseLog, _parseNameStatus: parseNameStatus, _parseNumstat: parseNumstat, _parseBranch: parseBranch,
 };

@@ -5,6 +5,7 @@ import * as terms from './ui/terms.js';
 import * as finder from './ui/finder.js';
 import * as diffpane from './ui/diff.js';
 import * as search from './ui/search.js';
+import { ago } from './ui/history.js';
 import * as prefs from './ui/prefs.js';
 import { applyTheme } from './ui/themes.js';
 import * as limits from './ui/limits.js';
@@ -25,6 +26,7 @@ function persistNow() {
     phoneRemote: $('#phone-remote').checked,
     wtSetup: $('#wt-setup').value.trim(),
     wtCopyEnv: $('#wt-copy-env').checked,
+    gitFetch: $('#git-fetch').checked,
     theme: state.theme || 'vibespace',
     termPosition: state.termPosition || 'bottom',
     treeWidth: $('#tree-pane').getBoundingClientRect().width,
@@ -275,6 +277,7 @@ function wireGitChip() {
       const tip = [b.upstream ? `${name} → ${b.upstream}` : `${name} (no upstream)`];
       if (b.ahead) { chip.append(Object.assign(document.createElement('span'), { className: 'ab up', textContent: '↑' + b.ahead })); tip.push(`${b.ahead} commit${b.ahead > 1 ? 's' : ''} not pushed`); }
       if (b.behind) { chip.append(Object.assign(document.createElement('span'), { className: 'ab down', textContent: '↓' + b.behind })); tip.push(`${b.behind} behind the remote (as of the last fetch)`); }
+      if (b.upstream) tip.push(fetchLine(b.fetch));
       chip.classList.toggle('warn', Boolean(b.operation));
       if (b.operation) { chip.append(Object.assign(document.createElement('span'), { className: 'ab op', textContent: b.operation })); tip.push(`Repository is stuck ${b.operation} — finish or abort it in a terminal`); }
       tip.push('Click for commit history');
@@ -295,6 +298,20 @@ function wireGitChip() {
   window.addEventListener('focus', () => update(true));
   document.addEventListener('visibilitychange', () => { if (!document.hidden) update(true); });
   vs.onTreeChanged(debounce(update, 800));
+  // main's background fetch (main/gitfetch.cjs) finished: ↓behind may have moved
+  vs.onGitFetched((r) => {
+    update(true);
+    if (r && r.changed) diffpane.remoteMoved();
+  });
+}
+
+// chip tooltip line for the background fetch (b.fetch = gitfetch.info, null
+// in screenshot mode)
+function fetchLine(f) {
+  if (!f) return 'Not fetched in the background';
+  if (!f.enabled) return 'Background fetch is off (⚙ Preferences)';
+  const when = f.at ? `Fetched ${ago(f.at)}` : 'Not fetched yet (every 5 min)';
+  return f.failures ? `${when} · last fetch failed: ${f.error || 'unknown error'}` : when;
 }
 
 // 📱 away toggle. Presence is machine-wide (main/presence.cjs): while away/idle
@@ -343,6 +360,7 @@ async function main() {
   if (typeof state.phoneRemote === 'boolean') $('#phone-remote').checked = state.phoneRemote;
   if (typeof state.wtSetup === 'string') $('#wt-setup').value = state.wtSetup;
   if (typeof state.wtCopyEnv === 'boolean') $('#wt-copy-env').checked = state.wtCopyEnv;
+  if (typeof state.gitFetch === 'boolean') $('#git-fetch').checked = state.gitFetch;
   if (state.treeWidth) $('#tree-pane').style.width = state.treeWidth + 'px';
   applyTermPosition();
   wireLayoutToggle();

@@ -731,6 +731,61 @@ async function runSmoke() {
       check('githistory non-repo resolves null', (await gh.log(empty)) === null && (await gh.branch(empty)) === null);
       check('githistory rejects bad sha', (await gh.commit(root, '--output=x')) === null);
 
+      // 17b2. background fetch (main/gitfetch.cjs): a bare remote + two clones;
+      // a push from clone B shows up as behind=1 in clone A after ONE round.
+      // Then an auth-requiring remote (local 401 server) must fail fast, with no
+      // prompt and no askpass program run (env AND core.askPass point at a marker).
+      {
+        const gf = require('./gitfetch.cjs');
+        const cp = require('node:child_process');
+        const d = fs.mkdtempSync(path.join(os.tmpdir(), 'vibespace-fetch-'));
+        const g = (cwd, args) => cp.spawnSync('git', args, { cwd, windowsHide: true, encoding: 'utf8' }).status === 0;
+        const bare = path.join(d, 'remote.git');
+        const a = path.join(d, 'a');
+        const b = path.join(d, 'b');
+        let setup = g(d, ['init', '-q', '--bare', bare]);
+        for (const c of [a, b]) {
+          setup = setup && g(d, ['clone', '-q', bare, c]) && g(c, ['config', 'user.email', 'smoke@vibespace.local'])
+            && g(c, ['config', 'user.name', 'VibeSpace Smoke']) && g(c, ['checkout', '-q', '-B', 'main']);
+        }
+        fs.writeFileSync(path.join(a, 'one.txt'), '1');
+        setup = setup && g(a, ['add', '.']) && g(a, ['commit', '-qm', 'one']) && g(a, ['push', '-q', '-u', 'origin', 'main'])
+          && g(b, ['pull', '-q', 'origin', 'main']);
+        fs.writeFileSync(path.join(b, 'two.txt'), '2');
+        setup = setup && g(b, ['add', '.']) && g(b, ['commit', '-qm', 'two']) && g(b, ['push', '-q', 'origin', 'main']);
+        const before = await gh.branch(a);
+        const r1 = await gf.fetchOnce(a);
+        const after = await gh.branch(a);
+        check('gitfetch one round → behind = 1', setup && before && before.behind === 0 && r1.ok && r1.changed
+          && after && after.behind === 1 && !fs.existsSync(path.join(a, '.git', 'FETCH_HEAD')),
+        JSON.stringify({ setup, r1, behind: after && after.behind }));
+        fs.writeFileSync(path.join(a, '.git', 'index.lock'), '');
+        const r2 = await gf.fetchOnce(a);
+        fs.rmSync(path.join(a, '.git', 'index.lock'), { force: true });
+        check('gitfetch skips while index.lock exists', r2.skipped === 'index.lock present', JSON.stringify(r2));
+        check('gitfetch skips a repo without upstream', (await gf.fetchOnce(root)).skipped === 'no upstream');
+
+        const marker = path.join(d, 'askpass-ran.txt');
+        const askpass = path.join(d, 'askpass.cmd');
+        fs.writeFileSync(askpass, `@echo off\r\necho ran>>"${marker}"\r\necho secret\r\n`);
+        const http = require('node:http');
+        const srv = http.createServer((req, res) => { res.writeHead(401, { 'WWW-Authenticate': 'Basic realm="smoke"' }); res.end(); });
+        await new Promise((res) => srv.listen(0, '127.0.0.1', res));
+        g(a, ['remote', 'set-url', 'origin', `http://127.0.0.1:${srv.address().port}/private.git`]);
+        g(a, ['config', 'core.askPass', askpass.replace(/\\/g, '/')]);
+        const saved = { GIT_ASKPASS: process.env.GIT_ASKPASS, SSH_ASKPASS: process.env.SSH_ASKPASS };
+        process.env.GIT_ASKPASS = askpass;
+        process.env.SSH_ASKPASS = askpass;
+        const t0 = Date.now();
+        const r3 = await gf.fetchOnce(a, { timeout: 45000 });
+        const ms = Date.now() - t0;
+        for (const [k, v] of Object.entries(saved)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
+        srv.close();
+        check('gitfetch auth-required remote fails fast, no prompt', r3.ok === false && !r3.timedOut && ms < 40000 && !fs.existsSync(marker),
+          `${ms} ms, askpass ran=${fs.existsSync(marker)}: ${r3.error}`);
+        try { fs.rmSync(d, { recursive: true, force: true }); } catch {}
+      }
+
       // 17c. worktree tabs (main/worktrees.cjs) on a dirty main tree
       {
         const wt = require('./worktrees.cjs');

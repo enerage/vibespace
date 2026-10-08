@@ -65,6 +65,12 @@ export function headMoved(oid) {
   if (had && loadedOnce) reload({ keepDetail: true });
 }
 
+// a background fetch moved remote refs: the origin/… pills and the ↑ "not
+// pushed" markers may be stale — same in-place refresh as a HEAD move
+export function remoteMoved() {
+  if (loadedOnce) reload({ keepDetail: true });
+}
+
 export function hasFilter() { return Boolean(pathFilter); }
 
 // f: null = whole repo, {rel, dir} = file/folder history. Applied on the next
@@ -301,7 +307,8 @@ async function selectFile(f, open = false) {
 }
 
 // "3m ago" / "5h ago" / "2d ago" / date — commit lists are scanned by recency
-function ago(ms) {
+// (also the branch chip's "fetched 3m ago")
+export function ago(ms) {
   const s = Math.max(0, (Date.now() - ms) / 1000);
   if (s < 60) return 'just now';
   if (s < 3600) return Math.floor(s / 60) + 'm ago';

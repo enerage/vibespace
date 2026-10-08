@@ -191,6 +191,7 @@ export function init(opts) {
   $('#wt-setup').addEventListener('input', opts.persist);
   $('#wt-setup').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); e.target.blur(); } });
   $('#wt-copy-env').addEventListener('change', opts.persist);
+  $('#git-fetch').addEventListener('change', opts.persist); // main reads it at each fetch round
 
   // theme swatch grid — click = instant live preview, persisted by the caller
   const grid = $('#theme-grid');

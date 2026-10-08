@@ -86,6 +86,7 @@ export function prepare(m, filter) {
 }
 
 export function headMoved(oid) { history.headMoved(oid); }
+export function remoteMoved() { history.remoteMoved(); }
 export function historyFiltered() { return history.hasFilter(); }
 
 // ---------- preview (the one DiffEditor) ----------

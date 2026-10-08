@@ -27,6 +27,7 @@ const gitstatus = require('./gitstatus.cjs');
 const gitdiff = require('./gitdiff.cjs');
 const githistory = require('./githistory.cjs');
 const textsearch = require('./textsearch.cjs');
+const gitfetch = require('./gitfetch.cjs');
 const worktrees = require('./worktrees.cjs');
 const fsops = require('./fsops.cjs');
 const srcstate = require('./srcstate.cjs');
@@ -579,6 +580,9 @@ function createWorkspaceWindow(ws, { shot = false } = {}) {
   sessions.start(ws.id, ws.repoPath);
   status.start(ws.id, path.join(U.dataRoot(), 'instances', ws.id, 'status'));
   treewatch.start(ws.id, ws.repoPath); // live file-tree refresh (agents write files)
+  // background fetch keeps the chip's ↓behind honest; ⚙ "Background git fetch"
+  // (state.gitFetch, default on) is read at each round
+  if (!shot) gitfetch.start(ws.id, ws.repoPath, { enabled: () => (rendererState.get(ws.id) || loadState(ws.id)).gitFetch !== false });
   board.start(ws.id, () => boardSummary(ws.id)); // other windows' boards read this
   baselineClaudeFor(ws.id); // update-button baseline: the version these agents run
 
@@ -599,6 +603,7 @@ function createWorkspaceWindow(ws, { shot = false } = {}) {
     tablog.forget(ws.id);
     status.stop(ws.id);
     treewatch.stop(ws.id);
+    gitfetch.stop(ws.id);
     board.stop(ws.id); // deletes <dataRoot>/board/<wsId>.json
     claudeBaselines.delete(ws.id);
     if (!workspaceWindowsFor(ws.id).length) {
@@ -845,9 +850,15 @@ function initIpc() {
       from: typeof file.from === 'string' ? file.from : undefined,
     });
   });
-  ipcMain.handle('git:branch', (e) => {
+  ipcMain.handle('git:branch', async (e) => {
     const root = repoFor(e);
-    return root ? githistory.branch(root) : null;
+    if (!root) return null;
+    const b = await githistory.branch(root);
+    if (b) {
+      const win = BrowserWindow.fromWebContents(e.sender);
+      b.fetch = gitfetch.info(win && winInfo.get(win.id)?.wsId); // chip tooltip: "fetched 3m ago"
+    }
+    return b;
   });
   // Search tab (Ctrl+Shift+F): always the sender's own repo. A newer search from
   // the same window kills the one still running.
@@ -1276,6 +1287,19 @@ function initIpc() {
     logger.info(`tree changed: ws=${wsId}`);
     for (const win of workspaceWindowsFor(wsId)) {
       if (!win.isDestroyed()) win.webContents.send('tree:changed');
+    }
+  });
+  // background fetch: failures are a log line only (never a toast); a success
+  // makes the window re-read the branch chip (and the History list if remote
+  // refs moved)
+  gitfetch.onResult((wsId, r, info) => {
+    if (!r.ok) {
+      logger.warn(`git fetch failed: ws=${wsId} (${info.failures} in a row${info.backoff ? ', next try in 30 min' : ''}) ${r.error}`);
+      return;
+    }
+    if (info.recovered) logger.info(`git fetch ok again: ws=${wsId}`);
+    for (const win of workspaceWindowsFor(wsId)) {
+      if (!win.isDestroyed()) win.webContents.send('git:fetched', { changed: r.changed, at: info.at });
     }
   });
 }
