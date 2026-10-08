@@ -22,6 +22,8 @@ contextBridge.exposeInMainWorld('vs', {
   gitCommit: (sha) => ipcRenderer.invoke('git:commit', sha),
   gitCommitFileDiff: (sha, file) => ipcRenderer.invoke('git:commitFileDiff', sha, file),
   gitBranch: () => ipcRenderer.invoke('git:branch'),
+  // Search tab: { query, caseSensitive, wholeWord, regex } in the window's own repo
+  searchText: (q) => ipcRenderer.invoke('search:text', q),
   dropPath: (file) => { try { return webUtils.getPathForFile(file); } catch { return null; } },
   reveal: (file) => ipcRenderer.invoke('fs:reveal', file),
   openFolder: (dir) => ipcRenderer.invoke('fs:openFolder', dir),

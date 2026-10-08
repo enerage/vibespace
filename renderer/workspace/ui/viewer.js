@@ -196,14 +196,31 @@ export async function open(path, name, { quiet = false } = {}) {
 
 // file:line links from the terminal — open, then jump (the reveal after
 // activate's viewState restore is what wins, so no special-casing needed)
-export async function openAt(path, name, line) {
+// Search hits pass col (1-based) + len: the match is selected = highlighted.
+export async function openAt(path, name, line, col = 0, len = 0) {
   await open(path, name);
   const t = tabs.get(path);
   if (!t || t.kind !== 'text' || !t.model || !line) return;
   const ln = Math.max(1, Math.min(line, t.model.getLineCount()));
-  editor.revealLineInCenter(ln);
-  editor.setPosition({ lineNumber: ln, column: 1 });
+  if (col > 0) {
+    const max = t.model.getLineMaxColumn(ln);
+    const c = Math.min(col, max);
+    const range = new monaco.Range(ln, c, ln, Math.min(c + Math.max(0, len), max));
+    editor.setSelection(range);
+    editor.revealRangeInCenter(range);
+  } else {
+    editor.revealLineInCenter(ln);
+    editor.setPosition({ lineNumber: ln, column: 1 });
+  }
   editor.focus();
+}
+
+// the preview's current single-line selection ('' when none) — Ctrl+Shift+F prefill
+export function selectionText() {
+  const m = editor && editor.getModel();
+  const sel = m && editor.getSelection();
+  if (!sel || sel.isEmpty() || sel.startLineNumber !== sel.endLineNumber) return '';
+  return m.getValueInRange(sel);
 }
 
 function activate(path) {

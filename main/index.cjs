@@ -26,6 +26,7 @@ const status = require('./status.cjs');
 const gitstatus = require('./gitstatus.cjs');
 const gitdiff = require('./gitdiff.cjs');
 const githistory = require('./githistory.cjs');
+const textsearch = require('./textsearch.cjs');
 const worktrees = require('./worktrees.cjs');
 const fsops = require('./fsops.cjs');
 const srcstate = require('./srcstate.cjs');
@@ -847,6 +848,21 @@ function initIpc() {
   ipcMain.handle('git:branch', (e) => {
     const root = repoFor(e);
     return root ? githistory.branch(root) : null;
+  });
+  // Search tab (Ctrl+Shift+F): always the sender's own repo. A newer search from
+  // the same window kills the one still running.
+  const textSearches = new Map(); // webContents id -> AbortController
+  ipcMain.handle('search:text', async (e, q) => {
+    const root = repoFor(e);
+    if (!root || !q || typeof q.query !== 'string' || !q.query || q.query.length > 500) return null;
+    textSearches.get(e.sender.id)?.abort();
+    const ac = new AbortController();
+    textSearches.set(e.sender.id, ac);
+    try {
+      return await textsearch.search(root, q, { signal: ac.signal });
+    } finally {
+      if (textSearches.get(e.sender.id) === ac) textSearches.delete(e.sender.id);
+    }
   });
   ipcMain.handle('fs:list', (e, dir) => {
     if (!fs.existsSync(dir)) return { entries: [] };

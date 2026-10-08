@@ -4,6 +4,7 @@ import * as viewer from './ui/viewer.js';
 import * as terms from './ui/terms.js';
 import * as finder from './ui/finder.js';
 import * as diffpane from './ui/diff.js';
+import * as search from './ui/search.js';
 import * as prefs from './ui/prefs.js';
 import { applyTheme } from './ui/themes.js';
 import * as limits from './ui/limits.js';
@@ -231,12 +232,14 @@ function makeSplitter(handle, onStart, onDrag) {
 // clicking a file there diffs it in the preview's pinned Diff tab.
 let sideView = 'files';
 function setSideView(v, { save = true } = {}) {
-  if (v !== 'files' && v !== 'git') return;
+  if (v !== 'files' && v !== 'git' && v !== 'search') return;
   sideView = v;
   for (const b of document.querySelectorAll('#side-tabs button')) b.classList.toggle('active', b.dataset.side === v);
-  $('#tree').classList.toggle('hidden', v === 'git');
+  $('#tree').classList.toggle('hidden', v !== 'files');
   $('#git-side').classList.toggle('hidden', v !== 'git');
+  $('#search-side').classList.toggle('hidden', v !== 'search');
   if (v === 'git') diffpane.showSidebar(); else diffpane.hideSidebar();
+  if (v === 'search') search.focusInput();
   if (save) persist();
 }
 
@@ -359,6 +362,13 @@ async function main() {
   for (const b of document.querySelectorAll('#side-tabs button')) b.onclick = () => setSideView(b.dataset.side);
   setSideView(state.sideView === 'git' ? 'git' : 'files', { save: false });
   wireGitChip();
+  // Search tab + Ctrl+Shift+F (ui/search.js); a hit opens in the preview at the match
+  search.init({
+    show: () => setSideView('search'),
+    openAt: (p, n, line, col, len) => viewer.openAt(p, n, line, col, len),
+    selection: () => viewer.selectionText(),
+    focusTerminal: () => { const id = terms.activeTermId(); if (id) terms.activate(id); },
+  });
   // second tree:changed subscriber alongside tree.js — preload wraps each cb in its
   // own ipcRenderer.on listener, so both fire
   vs.onTreeChanged(() => viewer.onFilesChanged());

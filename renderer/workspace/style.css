@@ -176,6 +176,58 @@ body { margin: 0; background: var(--bg); color: var(--text); font: 13.5px/1.45 "
 #diff-files, #hist-list { flex: 1; min-height: 0; overflow-y: auto; padding: 2px 4px 6px; }
 #diff-files.hidden, #hist-list.hidden { display: none; }
 
+/* ---------- Search tab (ui/search.js, Ctrl+Shift+F) ---------- */
+#search-side { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+#search-side.hidden { display: none; }
+#search-bar { display: flex; gap: 4px; padding: 6px 6px 4px; flex: none; }
+#search-input {
+  flex: 1; min-width: 0; background: var(--bg); color: var(--text);
+  border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; font-size: 12px;
+}
+#search-input:focus { outline: none; border-color: var(--accent); }
+#search-toggles { display: flex; gap: 2px; flex: none; }
+#search-toggles button {
+  min-width: 24px; padding: 0 4px; background: transparent; color: var(--dim);
+  border: 1px solid transparent; border-radius: 5px; cursor: pointer;
+  font-size: 11.5px; font-family: "Cascadia Code", Consolas, monospace;
+}
+#search-toggles button:hover { color: var(--text); background: var(--hover); }
+#search-toggles button.active { color: var(--accent-text); background: color-mix(in srgb, var(--accent) 18%, transparent); border-color: color-mix(in srgb, var(--accent) 55%, transparent); }
+#search-summary { flex: none; padding: 0 10px 4px; font-size: 11px; color: var(--dim); }
+#search-summary:empty { display: none; }
+#search-summary.warn { color: var(--yellow); }
+#search-summary.err { color: var(--danger); user-select: text; }
+#search-results { flex: 1; min-height: 0; overflow-y: auto; padding: 2px 4px 6px; user-select: none; }
+.search-file {
+  display: flex; align-items: center; gap: 6px;
+  padding: 3px 6px; border-radius: 5px;
+  cursor: pointer; white-space: nowrap; font-size: 12.3px;
+}
+.search-file:hover { background: var(--hover); }
+.search-file .tw { flex: none; width: 10px; color: var(--dim); font-size: 10px; transition: transform 0.1s; }
+.search-group.collapsed .search-file .tw { transform: rotate(-90deg); }
+.search-file .name { flex: none; max-width: 60%; overflow: hidden; text-overflow: ellipsis; }
+.search-file .dir { flex: 1 1 auto; min-width: 0; color: var(--dim); font-size: 11px; overflow: hidden; text-overflow: ellipsis; }
+.search-file .count {
+  flex: none; min-width: 16px; padding: 0 5px; border-radius: 8px; text-align: center;
+  font-size: 10.5px; line-height: 15px; color: var(--dim); background: var(--panel-2);
+}
+.search-group.collapsed .search-hits { display: none; }
+.search-hit {
+  display: flex; align-items: baseline; gap: 6px;
+  padding: 2px 6px 2px 22px; border-radius: 5px; cursor: pointer;
+  white-space: nowrap; font-size: 12px; font-family: "Cascadia Code", Consolas, monospace;
+}
+.search-hit:hover { background: var(--hover); }
+.search-hit.active { background: color-mix(in srgb, var(--accent) 16%, transparent); }
+.search-hit .ln { flex: none; min-width: 22px; text-align: right; color: var(--dim); font-size: 10.5px; }
+.search-hit .txt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
+.search-hit mark {
+  color: var(--text-strong); border-radius: 2px;
+  background: color-mix(in srgb, var(--yellow) 38%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--yellow) 55%, transparent);
+}
+
 /* ---------- git history (History mode of the git pane) ---------- */
 .hist-bar { display: flex; gap: 6px; padding: 2px 2px 6px; }
 .hist-bar.hidden { display: none; }

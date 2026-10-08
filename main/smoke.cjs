@@ -418,6 +418,42 @@ async function runSmoke() {
         JSON.stringify({ onlyAi, defaultCustom, custom, long, dup, other }));
       try { fs.rmSync(d, { recursive: true, force: true }); } catch {}
     }
+    // Search tab (textsearch): git grep in this repo (file + line + column of a
+    // known definition), then the non-git walk fallback in a throwaway folder
+    {
+      const os = require('node:os');
+      const ts = require('./textsearch.cjs');
+      const needle = 'function ' + 'writeJsonAtomic('; // split: smoke.cjs itself must not match
+      let ok = true;
+      let detail = 'packaged: the repo is not on disk';
+      if (U.ROOT === U.BIN_ROOT) {
+        const want = fs.readFileSync(path.join(U.ROOT, 'main', 'util.cjs'), 'utf8').split('\n').findIndex(l => l.includes(needle)) + 1;
+        const r = await ts.search(U.ROOT, { query: needle, caseSensitive: true });
+        const f = r && r.files && r.files.find(x => x.rel === 'main/util.cjs');
+        const h = f && f.hits[0];
+        ok = Boolean(r && r.engine === 'git' && h && want > 0 && h.line === want && h.col === 1 && h.len === needle.length
+          && !r.files.some(x => /node_modules|\.claude\/worktrees/.test(x.rel)));
+        detail = JSON.stringify({ engine: r && r.engine, want, got: h ? [h.line, h.col, h.len] : null, files: r && r.files ? r.files.map(x => x.rel) : r });
+      }
+      check('text search: git grep finds a known line in this repo', ok, detail);
+      const d = fs.mkdtempSync(path.join(os.tmpdir(), 'vibespace-search-'));
+      const put = (rel, data) => { const p = path.join(d, rel); fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, data); };
+      put('src/a.txt', 'nothing\nSay Needle, then needles <b>\n');
+      put('node_modules/pkg/b.txt', 'needle');
+      put('.claude/worktrees/x/c.txt', 'needle');
+      put('bin.dat', Buffer.from([110, 101, 101, 100, 108, 101, 0, 1]));
+      const all = await ts.search(d, { query: 'needle' });
+      const word = await ts.search(d, { query: 'needle', wholeWord: true });
+      const bad = await ts.search(d, { query: '(', regex: true });
+      try { fs.rmSync(d, { recursive: true, force: true }); } catch {}
+      const h = all && all.files && all.files[0] && all.files[0].hits[0];
+      check('text search: non-git walk (ignore rules, binary skipped, ranges, whole word, bad regex)',
+        all && all.engine === 'walk' && all.files.length === 1 && all.files[0].rel === 'src/a.txt'
+        && h.line === 2 && h.col === 5 && JSON.stringify(h.ranges) === '[[4,10],[17,23]]'
+        && word.hitCount === 1 && JSON.stringify(word.files[0].hits[0].ranges) === '[[4,10]]'
+        && Boolean(bad && bad.error),
+        JSON.stringify({ all, word: word && word.files, bad }));
+    }
     // logo picker scan (logoscan): ranks the logo first, never looks in
     // node_modules / build output / dot-folders, drops unreadable images
     {
