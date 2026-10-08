@@ -104,9 +104,10 @@ Build in this order. Verify the statusLine and HTTP hooks live in a pty before r
 ## Session tracking robustness
 - [x] Resume-an-existing-conversation flow (0.6.2): right-click `+ Claude` opens
       claude's picker; the picked old conversation is auto-pinned by mtime revival.
-      0.6.20: a visible ↺ Resume button does the same, and feed agents get the
-      pick pinned about 1 s after picking, before any message (verified live), so
-      "pick, then restart before typing" no longer loses it.
+      0.6.20: a visible ↺ Resume button does the same (since 0.6.38: + ▾ → All
+      conversations…), and feed agents get the pick pinned about 1 s after
+      picking, before any message (verified live), so "pick, then restart before
+      typing" no longer loses it.
 - [x] Detect `/resume` (and `/clear`) typed mid-session inside a running tab —
       solved for feed agents (0.6.20): every feed payload carries `session_id`,
       tagged with the tab, and main re-pins it (`sessions.pinFromFeed`). Verified

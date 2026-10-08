@@ -206,7 +206,10 @@ Key facts encoded in `main/sessions.cjs`:
   **Layers (0.6.17):** the status files are the BASE state (working/waiting/done).
   The feed is the DETAIL layer on top of it: the lock/?/✕ light, the reason
   tooltip, the `3/7` pill, the activity strip and the peek card
-  (`renderer/workspace/ui/feedui.js`). A tab with no feed must look exactly as it
+  (`renderer/workspace/ui/feedui.js`). Since 0.6.42 the strip is a status bar
+  BELOW the terminal (`#term-strip` comes after `#term-hosts`), so anything
+  anchored to it (the task checklist) must flip upward when there's no room
+  below. A tab with no feed must look exactly as it
   did before 0.6.16. The lights/toasts/badge rule now covers feed reasons too:
   `claudefeed.attentionText()` builds the text for the light tooltip, the strip
   and the toast body. A failed turn (StopFailure) fires no Stop hook, so main
