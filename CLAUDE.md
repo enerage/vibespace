@@ -403,6 +403,11 @@ Key facts encoded in `main/sessions.cjs`:
   - The login counts as available when `.credentials.json` exists (also under
     `CLAUDE_CONFIG_DIR`), or with `ANTHROPIC_API_KEY`, or with an `oauthAccount`
     in `~/.claude.json`. Only with none of them is it skipped (the z.ai-only PC).
+  - **The top-bar limit chip is per account** (0.6.52, `limits.js`): it renders
+    from `accounts.state()` rows (`limits` + `limitsAt`, refreshed by
+    `accounts:changed`), login + token kinds only, plus the live
+    `account:limits` push for the login account. One Claude account = the old
+    unlabelled chip. The red border means NO Claude account has room left.
   - Claude repeats its last `rate_limits` reading on every statusLine tick until
     its next API response. Only a reading that just became full marks an account
     (`becameFull`), or an idle tab's stale 100 % re-marks it after a reset.

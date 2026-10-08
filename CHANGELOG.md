@@ -4,6 +4,16 @@ Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 
 ## [0.6.52] — 2026-10-08
 
+### Added
+- **The plan-limit chip shows every Claude account side by side**, each with
+  its label: `Main 5h 32% · 2h06m 7d 11% │ Work out · resets 09:30`. Before,
+  it showed only the logged-in account, with nothing saying so. An account out
+  of usage shows `out · resets …` in red; one with no reading yet shows `—`.
+  z.ai accounts get no group (they report no limits). With a single account
+  it looks as before. The tooltip names the account and says how old its
+  reading is (an extra account's numbers only refresh while one of its agents
+  runs). On a narrow window the countdowns and bars drop first.
+
 ### Fixed
 - **Closing a tab or a window now also stops the hidden processes its agent
   started** (MCP servers such as mcp-postgres). They used to survive as
