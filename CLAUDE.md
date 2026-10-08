@@ -152,7 +152,7 @@ Key facts encoded in `main/sessions.cjs`:
 
 ## Developing VibeSpace
 
-- `npm run smoke` — 115 self-tests (as of 0.6.52) incl. pty echo and live session discovery. Run it after
+- `npm run smoke` — 122 self-tests (as of 0.6.52) incl. pty echo and live session discovery. Run it after
   touching main-process code, **from a normal shell**: inside a Claude pty the stripped
   PATH and nested ConPTY break the pty test (`powershell.exe` "File not found" /
   AttachConsole) — prepend System32 to PATH and give it its own console, or just use a
@@ -502,6 +502,25 @@ Key facts encoded in `main/sessions.cjs`:
   emoji output with node, not `Write-Host`: Windows PowerShell 5.1 drops emoji
   from its own output. More suspects (in-box ConPTY strips DEC 2026 sync
   output; `useConptyDll` passes it through) are in RESEARCH-TERMINAL-GARBLE.md.
+- **Never `git worktree remove --force` a worktree that has a `node_modules`
+  junction** (2026-10-08). Git follows the junction and deletes the MAIN
+  repo's `node_modules` file by file until it hits a DLL a running window
+  holds (sharp's), then fails with "Invalid argument". Every new VibeSpace
+  launch then died with "Could not load the sharp module". Unlink every
+  reparse point first (`[IO.Directory]::Delete(path)`, non-recursive),
+  then remove the folder. To repair a half-deleted `node_modules` while windows
+  run, don't use `npm install`: it tries to replace electron and fails EBUSY.
+  Diff `package-lock.json` against the disk, `npm pack` each missing
+  name@version and extract it in place (Git Bash `tar` needs `--force-local`
+  for `C:` paths).
+- **Search tab** (0.6.52, `main/textsearch.cjs` + `ui/search.js`): `git grep`
+  in the SENDER window's repo, `GIT_OPTIONAL_LOCKS=0`, `:!.claude/worktrees`,
+  results capped and sorted by path (git grep's file order varies).
+- **Background fetch** (0.6.52, `main/gitfetch.cjs`): `--no-tags --prune
+  --no-write-fetch-head`, no prompts (`GIT_TERMINAL_PROMPT=0`, empty askpass,
+  `ssh -o BatchMode=yes` only when the user set no ssh command), skips on
+  `index.lock` / merge / rebase. On timeout it kills the whole TREE: killing
+  only the `git` wrapper left the real fetch running.
 - **Worktree tabs** (0.6.36, `main/worktrees.cjs`): ▾ → New agent in a worktree
   makes `<repo>\.claude\worktrees\<name>` on `vs/<name>` with a plain
   `git worktree add`. **Never use `claude -w`**: it moves the transcript between

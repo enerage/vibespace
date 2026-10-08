@@ -80,7 +80,7 @@ Build in this order. Verify the statusLine and HTTP hooks live in a pty before r
 - [ ] Git: flag commits that swept in another agent's half-done files (`git add -A`
       by a second agent in the same working copy) (M, needs a heuristic).
 - [ ] Git: commit graph lanes (port VS Code SCM graph, see DECISIONS) (M).
-- [ ] Git: background `fetch` so ↓behind is fresh (needs `GIT_TERMINAL_PROMPT=0`) (S).
+- [x] Git: background `fetch` so ↓behind is fresh (0.6.52, `main/gitfetch.cjs`).
 - [x] Tree file operations (done 0.6.0) — context menu: new file/folder,
       rename (F2), delete to Recycle Bin; fs IPC jailed to the workspace.
 - [x] **Session picker on restore** (done 0.5.0) — dead saved session → claude's
@@ -90,7 +90,7 @@ Build in this order. Verify the statusLine and HTTP hooks live in a pty before r
 - [x] **File finder Ctrl+P** (done 0.5.0) — fuzzy palette over the repo index.
 - [x] **Editor tabs** (done 0.6.0) — dirty dots, per-tab edit state, persisted
       across reloads, agent-edited files refresh in place.
-- [ ] Full-text grep panel (S/M).
+- [x] Full-text grep panel (0.6.52: Search tab, `git grep`, Ctrl+Shift+F).
 - [ ] Prompt keyboard selection (inputsel.js): cross wrapped/multi-line prompts
       (Shift+↑/↓, Left past the line start), and handle lines with emoji / wide
       characters (S/M). Drop the whole module once anthropics/claude-code#80734
@@ -181,7 +181,7 @@ Build in this order. Verify the statusLine and HTTP hooks live in a pty before r
       `repo/.claude/worktrees/<name>` on `vs/<name>`, removed on close when clean.
 - [ ] **Git pane for the active worktree** (M) — Changes/History of the worktree
       tab you're looking at, not only the main tree.
-- [ ] **Per-workspace worktree setup command** (S) — run after a worktree is made,
+- [x] (0.6.52) **Per-workspace worktree setup command** (S) — run after a worktree is made,
       e.g. copy `.env` or `npm ci`, so the agent doesn't start without deps.
 - [x] File tree and Ctrl+P index walk into `.claude/worktrees/` (every worktree's
       files showed up twice). Hidden in the tree/index/watcher (0.6.37).
@@ -190,7 +190,7 @@ Build in this order. Verify the statusLine and HTTP hooks live in a pty before r
       click to focus. Needs a status signal from claude (OSC title or output heuristics).
 - [ ] **New agent presets** (S) — per-workspace prompt templates (e.g. "backend",
       "frontend") applied to `+ Claude` with a name + optional first message.
-- [ ] Model picker per tab (opus/sonnet/haiku) like Claude Layout Session does.
+- [x] Model picker per tab (0.6.52: + ▾ → New agent with model).
 
 ## Terminal
 - [x] Search inside terminal (done 0.5.0, @xterm/addon-search + Ctrl+F bar).
@@ -206,6 +206,14 @@ Build in this order. Verify the statusLine and HTTP hooks live in a pty before r
 - [ ] Per-workspace notification badge when an agent finishes (taskbar overlay icon).
 
 ## Internal
+- [ ] Worktree setup command: a `#` in it comments out the rest of the typed
+      line, so claude doesn't start. Run the setup from a script block or
+      encoded command instead of pasting it inline (S).
+- [ ] Model tag after `/model` + restart with no message sent: the resumed
+      conversation comes back on its OLD model (resume never gets `--model`)
+      while the tag shows the new one (S).
+- [ ] Background fetch: an ssh agent that asks for approval on every use
+      (1Password) could pop up every 5 min. Watch for it (S).
 - [ ] Unit tests for sessions.cjs assignment heuristic (pure logic, easy to test).
 - [ ] Rate-limit `fs.watch` + polling in sessions.cjs (currently 4 s poll per workspace).
 - [ ] i18n pass if anyone else ever uses this. 😄

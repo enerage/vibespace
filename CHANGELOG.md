@@ -13,6 +13,26 @@ Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
   it looks as before. The tooltip names the account and says how old its
   reading is (an extra account's numbers only refresh while one of its agents
   runs). On a narrow window the countdowns and bars drop first.
+- **Search tab** in the left pane (Files | Git | **Search**, or Ctrl+Shift+F,
+  which takes the preview's selection). Full-text search with match case /
+  whole word / regex toggles, results grouped by file with the match
+  highlighted. Clicking a hit opens the file in the preview with the match
+  selected; Esc goes back to the terminal. Built on `git grep` (tracked and
+  untracked files, agent worktrees skipped); a folder that isn't a git repo
+  gets a bounded plain scan.
+- **+ ▾ → New agent with model: Opus / Sonnet / Haiku.** The tab shows a small
+  model tag, and a `/model` switch inside the session updates it. A restart
+  resumes the conversation on its own model (claude's `--resume` already keeps
+  it, verified on 2.1.294), so `--model` is only added to a fresh claude.
+- **Worktree setup command** (⚙ Preferences, per workspace): runs in a NEW
+  worktree tab before claude starts, visible in the terminal, e.g. `npm ci`.
+  If it fails, claude starts anyway with a yellow warning. Optional: copy the
+  repo root's untracked `.env*` files into each new worktree (never
+  overwrites). Restore and unpark never run it again.
+- **Background `git fetch`** every 5 minutes keeps the branch chip's ↓behind
+  current. It never prompts for credentials, skips a round while a commit,
+  merge or rebase is in progress, and backs off after failures. The chip's
+  tooltip says "Fetched Nm ago". Off switch per workspace in ⚙ Preferences.
 
 ### Fixed
 - **Closing a tab or a window now also stops the hidden processes its agent
