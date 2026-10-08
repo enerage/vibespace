@@ -478,6 +478,14 @@ body { margin: 0; background: var(--bg); color: var(--text); font: 13.5px/1.45 "
 .prefs-label { font-size: 13px; font-weight: 600; }
 .prefs-hint { color: var(--dim); font-size: 11.5px; margin-top: 2px; }
 .prefs-hint code { font: 11px Consolas, "Cascadia Mono", monospace; color: var(--text); }
+/* a row whose control is a full-width field under the text (worktree setup) */
+.prefs-row.prefs-col { flex-direction: column; align-items: stretch; gap: 6px; }
+.prefs-input {
+  padding: 4px 8px; font: 12px Consolas, "Cascadia Mono", monospace;
+  background: var(--bg); color: var(--text);
+  border: 1px solid var(--border); border-radius: 6px; outline: none;
+}
+.prefs-input:focus { border-color: var(--accent); }
 
 /* accounts (prefs.js): one row per account, in preference order */
 #acct-list { margin-top: 6px; }

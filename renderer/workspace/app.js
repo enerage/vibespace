@@ -22,6 +22,8 @@ function persistNow() {
     activeTerm: terms.activeTermId(),
     autoResume: $('#auto-resume').checked,
     phoneRemote: $('#phone-remote').checked,
+    wtSetup: $('#wt-setup').value.trim(),
+    wtCopyEnv: $('#wt-copy-env').checked,
     theme: state.theme || 'vibespace',
     termPosition: state.termPosition || 'bottom',
     treeWidth: $('#tree-pane').getBoundingClientRect().width,
@@ -336,6 +338,8 @@ async function main() {
   applyTheme(state.theme || 'vibespace', wsId);
   if (typeof state.autoResume === 'boolean') $('#auto-resume').checked = state.autoResume;
   if (typeof state.phoneRemote === 'boolean') $('#phone-remote').checked = state.phoneRemote;
+  if (typeof state.wtSetup === 'string') $('#wt-setup').value = state.wtSetup;
+  if (typeof state.wtCopyEnv === 'boolean') $('#wt-copy-env').checked = state.wtCopyEnv;
   if (state.treeWidth) $('#tree-pane').style.width = state.treeWidth + 'px';
   applyTermPosition();
   wireLayoutToggle();
@@ -384,6 +388,7 @@ async function main() {
     persistNow, // park: the entry is on disk before the agent is stopped
     autoResume: $('#auto-resume').checked,
     remote: () => $('#phone-remote').checked, // read at each launch: applies to new agents
+    wtPrefs: () => ({ setup: $('#wt-setup').value.trim(), copyEnv: $('#wt-copy-env').checked }), // read at each new worktree
     wsName: ws.name,
     persist,
     quiet: Boolean(shot),

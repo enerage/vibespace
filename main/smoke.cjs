@@ -745,6 +745,26 @@ async function runSmoke() {
           && safe.ok && !fs.existsSync(a.path) && discarded.ok && !fs.existsSync(b.path) && branches === '' && left && left.length === 0,
           JSON.stringify({ refused, safe, discarded, branches, left: left && left.length }));
         check('worktrees on a non-repo: create refuses, list null', (await wt.create(empty, 'x')).ok === false && (await wt.list(empty)) === null);
+        // copyEnv: untracked .env* from the repo root, a tracked one never overwritten
+        const inRoot = (args) => new Promise((res) => {
+          const p = require('node:child_process').spawn('git', args, { cwd: root, windowsHide: true });
+          p.on('close', (c) => res(c === 0));
+        });
+        fs.writeFileSync(path.join(root, '.env.example'), 'tracked');
+        await inRoot(['add', '.env.example']);
+        await inRoot(['commit', '-m', 'env example']);
+        fs.writeFileSync(path.join(root, '.env.example'), 'local edit');
+        fs.writeFileSync(path.join(root, '.env'), 'SECRET=1');
+        const c = await wt.create(root, 'env-agent', { copyEnv: true });
+        const plain = await wt.create(root, 'env-plain');
+        const rd = (p) => { try { return fs.readFileSync(p, 'utf8'); } catch { return null; } };
+        check('worktrees.create copyEnv: untracked .env* copied, tracked kept, off by default',
+          c.ok && JSON.stringify(c.copied) === '[".env"]' && rd(path.join(c.path, '.env')) === 'SECRET=1'
+          && rd(path.join(c.path, '.env.example')) === 'tracked'
+          && plain.ok && plain.copied.length === 0 && rd(path.join(plain.path, '.env')) === null,
+          JSON.stringify({ c: c.ok && c.copied, plain: plain.ok && plain.copied }));
+        if (c.ok) await wt.remove(root, c.name, { discard: true });
+        if (plain.ok) await wt.remove(root, plain.name, { discard: true });
       }
       try { fs.rmSync(root, { recursive: true, force: true }); fs.rmSync(empty, { recursive: true, force: true }); } catch {}
     }

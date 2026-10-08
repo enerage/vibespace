@@ -187,6 +187,10 @@ export function init(opts) {
   $('#btn-logs').onclick = () => vs.openLogs();
   $('#auto-resume').addEventListener('change', opts.persist);
   $('#phone-remote').addEventListener('change', opts.persist);
+  // new-worktree setup (per workspace, state.json): read when a worktree is made
+  $('#wt-setup').addEventListener('input', opts.persist);
+  $('#wt-setup').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); e.target.blur(); } });
+  $('#wt-copy-env').addEventListener('change', opts.persist);
 
   // theme swatch grid — click = instant live preview, persisted by the caller
   const grid = $('#theme-grid');

@@ -1043,11 +1043,11 @@ function initIpc() {
     const ws = self && self === wsId && workspaces.get(self);
     return ws ? ws.repoPath : null;
   };
-  ipcMain.handle('wt:create', async (e, wsId, name) => {
+  ipcMain.handle('wt:create', async (e, wsId, name, opts) => {
     const repo = wtRepo(e, wsId);
     if (!repo) return { ok: false, reason: 'no workspace' };
-    const r = await worktrees.create(repo, String(name || 'agent'));
-    logger.info(`worktree create: ws=${wsId} ${r.ok ? `${r.path} branch=${r.branch} base=${r.base}` : 'failed: ' + r.reason}`);
+    const r = await worktrees.create(repo, String(name || 'agent'), { copyEnv: Boolean(opts && opts.copyEnv) });
+    logger.info(`worktree create: ws=${wsId} ${r.ok ? `${r.path} branch=${r.branch} base=${r.base}${r.copied.length ? ' copied=' + r.copied.join(',') : ''}` : 'failed: ' + r.reason}`);
     if (r.ok) gitstatus.bust(repo);
     return r;
   });

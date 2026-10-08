@@ -104,6 +104,20 @@
         </div>
         <label class="toggle"><input type="checkbox" id="phone-remote" checked /></label>
       </div>
+      <div class="prefs-row prefs-col">
+        <div>
+          <div class="prefs-label">Worktree setup command</div>
+          <div class="prefs-hint">PowerShell, runs in the new worktree before claude starts (+ ▾ → New agent in a worktree), visible in its tab. If it fails, claude starts anyway. Empty = none.</div>
+        </div>
+        <input id="wt-setup" class="prefs-input" type="text" placeholder="e.g. npm ci; Copy-Item ..\..\..\.secrets.json ." autocomplete="off" spellcheck="false" />
+      </div>
+      <div class="prefs-row">
+        <div>
+          <div class="prefs-label">Copy .env files into new worktrees</div>
+          <div class="prefs-hint">Copies the untracked .env* files at the repo root into each new worktree, before the setup command. Never overwrites.</div>
+        </div>
+        <label class="toggle"><input type="checkbox" id="wt-copy-env" /></label>
+      </div>
       <div class="prefs-row">
         <div>
           <div class="prefs-label">Terminal dock</div>

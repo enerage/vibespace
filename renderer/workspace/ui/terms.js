@@ -14,6 +14,7 @@ let repoPath;
 let persist = () => {};
 let openFile = null; // (path, name, line) — file:line links hand off to the viewer
 let remote = () => false; // phone control pref (⚙): launch claude with --remote-control
+let wtPrefs = () => ({ setup: '', copyEnv: false }); // new-worktree prefs (⚙), read at each creation
 let wsName = '';
 
 const tabs = new Map(); // termId -> tab record
@@ -267,6 +268,7 @@ export function init(opts) {
   shelf = parked.normalizeParked(opts.savedParked);
   parked.init({ list: () => shelf || [], unpark: unparkAgent, forget: forgetParked });
   remote = opts.remote || remote;
+  wtPrefs = opts.wtPrefs || wtPrefs;
   wsName = opts.wsName || '';
 
   // a theme switch repaints every live terminal in place (xterm v5 options setter)
@@ -512,15 +514,36 @@ async function worktreeAlive(wt) {
 
 export function repoRoot() { return repoPath; }
 
+// The workspace's setup command (⚙ Preferences) runs only here, in a FRESH
+// worktree: restore, unpark and "Open agent here" never pass one.
 export async function newWorktreeAgent() {
   const name = nextName('agent');
+  const prefs = wtPrefs() || {};
+  const setup = oneLine(prefs.setup);
   let wt;
-  try { wt = await vs.wtCreate(wsId, name); } catch (e) { wt = { ok: false, reason: (e && e.message) || String(e) }; }
+  try { wt = await vs.wtCreate(wsId, name, { copyEnv: Boolean(prefs.copyEnv) }); } catch (e) { wt = { ok: false, reason: (e && e.message) || String(e) }; }
   if (!wt || !wt.ok) { toast(`Worktree failed: ${(wt && wt.reason) || 'unknown error'}`, 'err'); return null; }
-  const tab = createTab({ name, cwd: wt.path, claude: true, worktree: wtInfo(wt) });
+  const tab = createTab({ name, cwd: wt.path, claude: true, worktree: wtInfo(wt), setup });
   const from = feedui.wtText(wt).replace(/^⎇ \S+ · from /, '');
-  toast(`Worktree ready: ${wt.branch} (from ${from}). Not shared: node_modules, .env, build output; the agent may need to install.`, 'ok');
+  const copied = Array.isArray(wt.copied) ? wt.copied : [];
+  const notes = [];
+  if (copied.length) notes.push(`Copied ${copied.join(', ')}.`);
+  notes.push(setup ? `Setup runs first: ${setup}` : `Not shared: node_modules, ${copied.length ? '' : '.env, '}build output; the agent may need to install.`);
+  toast(`Worktree ready: ${wt.branch} (from ${from}). ${notes.join(' ')}`, 'ok');
   return tab;
+}
+
+const oneLine = (s) => String(s || '').split(/\r?\n/).map(l => l.trim()).filter(Boolean).join('; ');
+
+// A fresh worktree's setup command, typed in front of claude on the same line,
+// so its output (npm ci…) shows in the tab. claude starts even when it fails
+// (the agent can fix it), after a one-line warning. Failed = a native exit code,
+// a new $Error entry (non-terminating errors) or a terminating error (catch).
+function setupPrefix(setup) {
+  if (!setup) return '';
+  return '$vsE = $Error.Count; $global:LASTEXITCODE = 0; '
+    + `try { ${setup} } catch { $vsE = -1; Write-Host $_ -ForegroundColor Red }; `
+    + "if ($LASTEXITCODE -or $Error.Count -gt $vsE) { Write-Host 'VibeSpace: the worktree setup command failed; starting claude anyway' -ForegroundColor Yellow }; ";
 }
 
 // the parked agent that owns a worktree (its folder is kept for the unpark)
@@ -910,7 +933,7 @@ function registerFileLinks(term, tab) {
   } catch {} // xterm without link-provider support — links simply don't light up
 }
 
-export function createTab({ name = 'agent', cwd = repoPath, claude = false, resumeId = null, activate = true, termId = null, attachBuffer = null, savedIsClaude = null, savedSessionId = null, pickSession = false, run = null, account = null, accountAt = 0, worktree = null, family = null } = {}) {
+export function createTab({ name = 'agent', cwd = repoPath, claude = false, resumeId = null, activate = true, termId = null, attachBuffer = null, savedIsClaude = null, savedSessionId = null, pickSession = false, run = null, account = null, accountAt = 0, worktree = null, family = null, setup = '' } = {}) {
   const id = termId || newTermId();
   const host = el('div', 'term-host');
   host.style.display = 'none';
@@ -1037,7 +1060,11 @@ export function createTab({ name = 'agent', cwd = repoPath, claude = false, resu
       }
       if (!tabs.has(id)) return;
       const cmd = claudeCommand(tab, pickSession ? '' : resumeId); // '' = picker: saved id is dead
-      vs.ptyWrite(id, cmd + '\r');
+      // a fresh worktree's setup runs first on the same line. claude then starts
+      // later than launchedAt, which is fine: a worktree tab is offRepo, so the
+      // timing heuristic never uses it (the feed pins it)
+      const pre = !resumeId && !pickSession ? setupPrefix(setup) : '';
+      vs.ptyWrite(id, pre + cmd + '\r');
       tab.launchedAt = Date.now();
       vs.claudeStarted(wsId, id, launchOpts(tab, pickSession));
       if (resumeId) vs.sessionPinned(wsId, id, resumeId);

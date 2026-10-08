@@ -104,10 +104,27 @@ async function branchExists(repo, branch) {
   return (await git(repo, ['show-ref', '--verify', '--quiet', 'refs/heads/' + branch])).ok;
 }
 
-// create(repo, name) → { ok: true, name, path, branch, base } | { ok: false, reason }
+// The workspace's "copy .env* files" setting: untracked .env* files at the repo
+// root go into the same folder of the new worktree. Never overwrites: a tracked
+// one (.env.example) is already there from the checkout.
+// prefix = the repo's folder inside the git toplevel ('' at the top).
+function copyEnvFiles(repo, wtPath, prefix) {
+  const to = path.join(wtPath, prefix || '');
+  const copied = [];
+  let names = [];
+  try {
+    names = fs.readdirSync(repo, { withFileTypes: true }).filter(d => d.isFile() && /^\.env/i.test(d.name)).map(d => d.name);
+  } catch { return copied; }
+  for (const n of names) {
+    try { fs.copyFileSync(path.join(repo, n), path.join(to, n), fs.constants.COPYFILE_EXCL); copied.push(n); } catch {}
+  }
+  return copied;
+}
+
+// create(repo, name, { copyEnv }) → { ok: true, name, path, branch, base, copied } | { ok: false, reason }
 // Works with a dirty main tree: the new worktree checks out HEAD, uncommitted
-// changes stay where they are.
-async function create(repo, name) {
+// changes stay where they are. copied = the .env* files copyEnv copied.
+async function create(repo, name, { copyEnv = false } = {}) {
   const top = await git(repo, ['rev-parse', '--show-toplevel']);
   if (!top.ok) return { ok: false, reason: /not a git repository/i.test(top.err) ? 'not a git repository' : gitError(top) };
   const head = await git(repo, ['rev-parse', '--verify', '--quiet', 'HEAD']);
@@ -135,7 +152,12 @@ async function create(repo, name) {
   const add = await git(repo, ['worktree', 'add', '-b', branch, p, 'HEAD'], { timeout: 120000 });
   if (!add.ok) return { ok: false, reason: gitError(add) };
   await git(repo, ['config', `branch.${branch}.${BASE_KEY}`, base]);
-  return { ok: true, name: n, path: p, branch, base };
+  let copied = [];
+  if (copyEnv) {
+    const prefix = await git(repo, ['rev-parse', '--show-prefix']);
+    if (prefix.ok) copied = copyEnvFiles(repo, p, firstLine(prefix.out));
+  }
+  return { ok: true, name: n, path: p, branch, base, copied };
 }
 
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
