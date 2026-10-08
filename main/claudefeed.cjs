@@ -533,7 +533,7 @@ function snapshot(wsId) {
   const out = {};
   for (const [termId, t] of terms) if (t.wsId === wsId) out[termId] = withReason(t.state);
   seedLimits(); // another process may have seen newer limits
-  return { terms: out, limits };
+  return { terms: out, limits, limitsAt: limits ? limitsAt : null };
 }
 
 module.exports = {

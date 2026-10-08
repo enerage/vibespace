@@ -213,7 +213,8 @@ function isExhausted(d, id, now) {
 }
 
 // the logged-in account's limits are the shared <dataRoot>/limits.json copy
-// (claudefeed's); token accounts keep theirs here. Raw statusLine window shape.
+// (claudefeed's); token accounts keep theirs here. Raw statusLine window shape,
+// plus `at` (ms, when the reading last changed).
 function loginLimits(now) {
   const j = U.readJson(path.join(U.dataRoot(), 'limits.json'), null);
   if (!j || !j.limits || typeof j.at !== 'number' || now - j.at > 6 * 3600 * 1000) return null;
@@ -221,7 +222,7 @@ function loginLimits(now) {
   const out = {};
   if (w(j.limits.fiveHour)) out.five_hour = w(j.limits.fiveHour);
   if (w(j.limits.sevenDay)) out.seven_day = w(j.limits.sevenDay);
-  return Object.keys(out).length ? out : null;
+  return Object.keys(out).length ? { limits: out, at: j.at } : null;
 }
 
 // The stored `/login` exists only while claude's credentials file does. Someone
@@ -282,6 +283,7 @@ function state(now = Date.now()) {
   const accounts = d.order.map((id) => {
     const a = d.accounts[id];
     const ex = isExhausted(d, id, now) ? d.exhausted[id] : null; // expired entries drop out
+    const reading = id === LOGIN ? loginLimits(now) : (d.limits[id] || null); // { limits, at }
     const row = {
       id,
       label: a.label,
@@ -290,7 +292,8 @@ function state(now = Date.now()) {
       available: usable(d, id, now),
       exhaustedUntil: ex ? ex.until : null,
       reason: ex ? ex.reason : null,
-      limits: id === LOGIN ? loginLimits(now) : ((d.limits[id] && d.limits[id].limits) || null),
+      limits: (reading && reading.limits) || null,
+      limitsAt: (reading && reading.at) || null, // ms; the top-bar chip's "updated … ago"
     };
     if (id === LOGIN && !loggedIn()) row.note = 'not logged in';
     if (a.kind === 'endpoint') {

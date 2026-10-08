@@ -672,6 +672,14 @@ body.dragging #split-v, body.dragging #split-h { background: color-mix(in srgb, 
 .lim-fill { display: block; height: 100%; border-radius: 2px; }
 .lim-cd { color: var(--dim); }
 .lim-seg.stale .lim-pct { color: var(--dim); }
+/* several Claude accounts: one labelled group each, │ between them */
+.lim-acct { display: inline-flex; align-items: center; gap: 8px; }
+.lim-acct + .lim-acct { border-left: 1px solid var(--border); padding-left: 10px; }
+.lim-label { color: var(--accent-text); font-weight: 600; }
+.lim-none { color: var(--dim); }
+.lim-out { color: var(--danger); font-weight: 600; }
+/* top bar too narrow: countdowns go first, then the bars */
+#limits-chip.no-cd .lim-cd, #limits-chip.no-bar .lim-bar { display: none; }
 
 /* ---------- claude feed detail layer (ui/feedui.js) ---------- */
 /* light detail on top of the base status: lock = permission, ? = question,
