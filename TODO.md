@@ -210,22 +210,22 @@ Build in this order. Verify the statusLine and HTTP hooks live in a pty before r
       `toast: failed`. Not run live yet: the 3-continue cap and "fails again →
       back to waiting". The dashed amber light is close to the blue background
       ring; tell them apart better if it confuses (S).
-- [ ] Session-timing heuristic briefly gave one fresh tab another tab's
+- [x] (0.6.55) Session-timing heuristic briefly gave one fresh tab another tab's
       session in the outage test (pre-feed fallback path) — check (S).
-- [ ] Restore of a tab whose saved session is a running BACKGROUND job (claude
+- [x] (0.6.55) Restore of a tab whose saved session is a running BACKGROUND job (claude
       refuses: "running in the background"): detect `kind: "bg"` in
       `~/.claude/sessions/*.json` before typing the resume and say so / offer
       `claude attach` instead of a dead prompt. Since 0.6.53's feed filter a pin
       can't flip to a bg id any more, so this only hits older saved states (S).
-- [ ] Automatic account order (0.6.53), watch live: a toast per moved tab may be
-      noisy with many agents (batch them?); a token account's % only refreshes
+- [ ] Automatic account order (0.6.53), watch live: a toast per moved tab (batched
+      in 0.6.55); a token account's % only refreshes
       while one of its agents runs, so its room can be stale until its reset;
       a restored tab moves only after its first turn + a cold cache (~1 h).
       Check `account auto:` lines after the next weekly reset (S).
-- [ ] Worktree setup command: a `#` in it comments out the rest of the typed
+- [x] (0.6.55) Worktree setup command: a `#` in it comments out the rest of the typed
       line, so claude doesn't start. Run the setup from a script block or
       encoded command instead of pasting it inline (S).
-- [ ] Model tag after `/model` + restart with no message sent: the resumed
+- [x] (0.6.55) Model tag after `/model` + restart with no message sent: the resumed
       conversation comes back on its OLD model (resume never gets `--model`)
       while the tag shows the new one (S).
 - [ ] Background fetch: an ssh agent that asks for approval on every use

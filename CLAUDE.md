@@ -127,7 +127,13 @@ Key facts encoded in `main/sessions.cjs`:
   + ▾ → "All conversations…" (was the ↺ Resume button, 0.6.20–0.6.37) =
   `pickSession`.
 - The heuristic above is now only the fallback for agents without a feed
-  (started before 0.6.16). Its known holes (manual `/resume`, near-simultaneous
+  (started before 0.6.16). **Since 0.6.55 it is enforced**: main records per
+  pty whether its settings carried the feed (`feedPtys`) and passes
+  `feedLaunch` with `pty:claudeStarted`; `scan()` never guesses for those
+  (two launches seconds apart used to hand tab 2 tab 1's conversation, because
+  a transcript is born at the first message, inside the LAST launch's window).
+  A feed id seen before its `.jsonl` exists is kept as `pending` and pinned by
+  `scan()` when the file appears. Guesses skip ids another tab owns. Its known holes (manual `/resume`, near-simultaneous
   launches) remain for those only; see TODO.md.
 - **Without `--settings` there is no feed, so no tracking.** A claude started
   without it was lost on restart (2026-09-29: a hand-`/resume`d conversation
@@ -152,7 +158,7 @@ Key facts encoded in `main/sessions.cjs`:
 
 ## Developing VibeSpace
 
-- `npm run smoke` — 129 self-tests (as of 0.6.54) incl. pty echo and live session discovery. Run it after
+- `npm run smoke` — 132 self-tests (as of 0.6.55) incl. pty echo and live session discovery. Run it after
   touching main-process code, **from a normal shell**: inside a Claude pty the stripped
   PATH and nested ConPTY break the pty test (`powershell.exe` "File not found" /
   AttachConsole) — prepend System32 to PATH and give it its own console, or just use a
@@ -444,6 +450,15 @@ Key facts encoded in `main/sessions.cjs`:
     never taskkill. A background job is a `--fork-session` copy, so the tab's
     own conversation is the older id; resuming the bg id is refused ("That
     session is running in the background").
+  - **Restore/unpark onto a running background job** (0.6.55): `sessions:background`
+    (claudefeed `backgroundSession`, registry + live pid) is asked before a
+    resume is typed; a bg conversation opens a plain tab that keeps the id,
+    with an Attach note. A refusal that still gets printed is caught from the
+    pty output (`shellcmd.bgRefusal`) for 60 s after a typed resume.
+  - **Text typed into PowerShell lives in `ui/shellcmd.js`** (pure): the
+    worktree setup goes in as a single-quoted string dot-sourced through
+    `[scriptblock]::Create` (never inline, never `-EncodedCommand`), so `#`,
+    quotes and parse errors stay inside it.
   - **`/exit` can take longer than 15 s.** A gentle move waits up to 75 s, and
     `tab.exitSentAt` marks our own `/exit`: an empty shell found later with
     nothing typed since is relaunched (`launchOnAccount`), never treated as
