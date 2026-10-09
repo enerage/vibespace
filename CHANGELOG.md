@@ -2,6 +2,31 @@
 
 Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 
+## [0.6.53] — 2026-10-09
+
+### Added
+- **Automatic account order** (⚙ Preferences → Accounts, on by default): the
+  Claude account whose WEEKLY limit resets soonest goes first, because an
+  allowance not used before its reset is lost. Example: MAIN (82 % left,
+  resets Monday) now carries the agents before MAIN 2 (29 % left, resets next
+  Thursday). Each account's row says why ("resets Mon 15:00 · 82 % left",
+  "5h full until 07:30", "no reading yet"). The reset times come from each
+  account's own readings, projected forward week by week.
+  - New agents start on the top account. Running agents move there only when
+    idle (nothing typed, no dialog, no background work) AND their prompt cache
+    is already cold, so a move never costs a full-price re-read. A moved tab
+    stays put for 30 min unless its account runs out of room.
+  - An account at 95 % of its 5-hour or weekly window passes agents to the
+    next one; they come back after the reset.
+  - While it's on, the manual arrows and "Move all here" are disabled; turn it
+    off for the old manual order. Endpoint accounts (z.ai) keep their manual
+    place and never move automatically.
+- **The header shows the 7-day countdown too** (`7d 18% · 3d12h`), and ▸ marks
+  the account new agents start on.
+
+### Fixed
+- Opening ⚙ Preferences no longer logs "opts.layoutLabel is not a function".
+
 ## [0.6.52] — 2026-10-08
 
 ### Added

@@ -152,7 +152,7 @@ Key facts encoded in `main/sessions.cjs`:
 
 ## Developing VibeSpace
 
-- `npm run smoke` — 122 self-tests (as of 0.6.52) incl. pty echo and live session discovery. Run it after
+- `npm run smoke` — 124 self-tests (as of 0.6.53) incl. pty echo and live session discovery. Run it after
   touching main-process code, **from a normal shell**: inside a Claude pty the stripped
   PATH and nested ConPTY break the pty test (`powershell.exe` "File not found" /
   AttachConsole) — prepend System32 to PATH and give it its own console, or just use a
@@ -408,6 +408,18 @@ Key facts encoded in `main/sessions.cjs`:
     `accounts:changed`), login + token kinds only, plus the live
     `account:limits` push for the login account. One Claude account = the old
     unlabelled chip. The red border means NO Claude account has room left.
+  - **Automatic order** (0.6.53, `accounts.rankRows` pure + `ui/automove.js`
+    pure): Claude accounts ranked by has-room, then soonest WEEKLY reset
+    (a passed reset is projected forward by 7 d and its % reads 0), unknown
+    resets after known ones, manual order as tie-break; endpoints keep their
+    slot. Room = usable, not exhausted, 5h and 7d < 95 %. The switch is its OWN
+    file `<dataRoot>/accounts-auto.json` (default on; older main code would drop
+    a key in accounts.json). `state()` returns `auto`, `ranked`, per-row
+    `room/weeklyResetAt/blockedBy/roomAt` and `nextChangeAt`; main re-pushes
+    `accounts:changed` when a reset passes (no file changes then). An auto move
+    = the "Move all" evidence rules PLUS a cold prompt cache (`expiresAt`, or
+    1 h after `doneAt` without feed info), then a 30-min hold. While auto is on,
+    `switchAll` is refused and `state().switchAll` is null. Log: `account auto:`.
   - Claude repeats its last `rate_limits` reading on every statusLine tick until
     its next API response. Only a reading that just became full marks an account
     (`becameFull`), or an idle tab's stale 100 % re-marks it after a reset.

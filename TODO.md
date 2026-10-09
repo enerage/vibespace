@@ -206,6 +206,11 @@ Build in this order. Verify the statusLine and HTTP hooks live in a pty before r
 - [ ] Per-workspace notification badge when an agent finishes (taskbar overlay icon).
 
 ## Internal
+- [ ] Automatic account order (0.6.53), watch live: a toast per moved tab may be
+      noisy with many agents (batch them?); a token account's % only refreshes
+      while one of its agents runs, so its room can be stale until its reset;
+      a restored tab moves only after its first turn + a cold cache (~1 h).
+      Check `account auto:` lines after the next weekly reset (S).
 - [ ] Worktree setup command: a `#` in it comments out the rest of the typed
       line, so claude doesn't start. Run the setup from a script block or
       encoded command instead of pasting it inline (S).

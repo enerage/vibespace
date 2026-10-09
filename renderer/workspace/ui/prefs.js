@@ -8,7 +8,7 @@ import { roomText } from './automove.js';
 // theme picker. New settings = one row here + one key in the state snapshot.
 
 export function init(opts) {
-  // opts: { wsId, onThemePicked(id), layoutLabel: () => string }
+  // opts: { wsId, onThemePicked(id), layoutTitle: () => string }
   const modal = $('#prefs-modal');
 
   const close = () => { modal.classList.add('hidden'); clearSecrets(); };
@@ -33,7 +33,7 @@ export function init(opts) {
     markActiveTheme();
     loadNotify();
     loadAccounts();
-    $('#btn-layout').title = opts.layoutLabel(); // title lives on the modal's copy now
+    $('#btn-layout').title = opts.layoutTitle(); // title lives on the modal's copy now
   };
   modal.addEventListener('mousedown', (e) => { if (e.target === modal) close(); });
   modal.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
