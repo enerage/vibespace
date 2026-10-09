@@ -416,24 +416,43 @@ const BG_KINDS = new Set(['bg', 'background']);
 let sessionsDirOverride = null; // smoke
 const sessionsDir = () => sessionsDirOverride
   || path.join(process.env.CLAUDE_CONFIG_DIR || path.join(process.env.USERPROFILE || os.homedir(), '.claude'), 'sessions');
-let kindScan = { at: 0, kinds: new Map() }; // sessionId -> kind
+let kindScan = { at: 0, kinds: new Map(), pids: new Map() }; // sessionId -> kind / pid
 function rescanKinds() {
   const kinds = new Map();
+  const pids = new Map();
   try {
     for (const f of fs.readdirSync(sessionsDir())) {
       if (!/^\d+\.json$/.test(f)) continue;
       try {
         const j = JSON.parse(fs.readFileSync(path.join(sessionsDir(), f), 'utf8'));
-        if (j && typeof j.sessionId === 'string') kinds.set(j.sessionId, String(j.kind || ''));
+        if (j && typeof j.sessionId === 'string') {
+          kinds.set(j.sessionId, String(j.kind || ''));
+          pids.set(j.sessionId, Number(j.pid) || Number(f.slice(0, -5)) || null);
+        }
       } catch {} // a registry file being rewritten: next scan
     }
   } catch {} // no registry: nothing is background
-  kindScan = { at: Date.now(), kinds };
+  kindScan = { at: Date.now(), kinds, pids };
 }
 function sessionKind(sid) {
   const age = Date.now() - kindScan.at;
   if (age > 60000 || (!kindScan.kinds.has(sid) && age > 3000)) rescanKinds();
   return kindScan.kinds.get(sid) || null;
+}
+// Restore/unpark/resume: is this conversation a RUNNING background job right
+// now? Claude refuses `claude --resume <id>` on one ("That session is running
+// in the background"). A fresh registry read (at most one per 3 s), and the
+// job's process must still exist: a crashed job can leave its file behind.
+// → { pid } or null
+function backgroundSession(sid) {
+  if (!sid) return null;
+  if (Date.now() - kindScan.at > 3000) rescanKinds();
+  if (!BG_KINDS.has(kindScan.kinds.get(sid) || '')) return null;
+  const pid = kindScan.pids.get(sid) || null;
+  if (pid) {
+    try { process.kill(pid, 0); } catch (e) { if (e && e.code === 'ESRCH') return null; } // EPERM = alive
+  }
+  return { pid };
 }
 const acceptedSid = new Map(); // termId -> last session id accepted for it
 const droppedBg = new Set(); // "termId sid" already logged
@@ -604,7 +623,8 @@ function snapshot(wsId) {
 
 module.exports = {
   fromBackground, // smoke
-  _setSessionsDir: (d) => { sessionsDirOverride = d; kindScan = { at: 0, kinds: new Map() }; acceptedSid.clear(); },
+  backgroundSession,
+  _setSessionsDir: (d) => { sessionsDirOverride = d; kindScan = { at: 0, kinds: new Map(), pids: new Map() }; acceptedSid.clear(); },
   start,
   stop,
   forget,

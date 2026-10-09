@@ -81,6 +81,30 @@ export function roomText(a, nowMs = Date.now()) {
   return 'no reading yet';
 }
 
+// One toast per burst of automatic moves instead of one per tab.
+// moves = [{ name, to, toLabel, why }] → one line per target account:
+// "agent-3 moved to MAIN (automatic order: …)" for one,
+// "Moved 6 agents to MAIN (automatic order: …): agent-1, agent-2, agent-4 +3" for more.
+// The reason is shown when every move to that account had the same one.
+export function autoMoveSummary(moves, maxNames = 3) {
+  const byTo = new Map();
+  for (const m of moves || []) {
+    if (!m || !m.to) continue;
+    if (!byTo.has(m.to)) byTo.set(m.to, []);
+    byTo.get(m.to).push(m);
+  }
+  const lines = [];
+  for (const list of byTo.values()) {
+    const label = list[0].toLabel || list[0].to;
+    const whys = [...new Set(list.map(m => m.why || ''))];
+    const why = whys.length === 1 && whys[0] ? `automatic order: ${whys[0]}` : 'automatic order';
+    if (list.length === 1) { lines.push(`${list[0].name} moved to ${label} (${why})`); continue; }
+    const names = list.slice(0, maxNames).map(m => m.name).join(', ') + (list.length > maxNames ? ` +${list.length - maxNames}` : '');
+    lines.push(`Moved ${list.length} agents to ${label} (${why}): ${names}`);
+  }
+  return lines;
+}
+
 // One verdict for the automatic order: { to, wait } — to = target or null;
 // wait = null (move now) | 'busy' | ms epoch when its cache goes cold | 'unknown'.
 export function autoDecision(tab, feed, state, now, { family, usable, bgCount = 0 } = {}) {

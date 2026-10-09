@@ -25,6 +25,7 @@ function filterBg(list, repoPath) {
     .map(a => ({
       id: String(a.id), name: String(a.name || a.id).slice(0, 120), status: a.status || null, state: a.state || null,
       startedAt: typeof a.startedAt === 'number' ? a.startedAt : null, waitingFor: a.waitingFor || null,
+      sessionId: typeof a.sessionId === 'string' ? a.sessionId : null, // restore: the job that holds a saved conversation
     }))
     .sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0));
 }

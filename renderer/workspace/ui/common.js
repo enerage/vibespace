@@ -7,10 +7,16 @@ export function el(tag, cls, text) {
   return e;
 }
 
-export function toast(msg, kind = '') {
+// action = { label, run }: one button in the toast, which then stays longer
+export function toast(msg, kind = '', { action = null } = {}) {
   const t = el('div', `toast ${kind}`, msg);
+  if (action && action.label && typeof action.run === 'function') {
+    const b = el('button', 'btn small toast-action', action.label);
+    b.onclick = () => { t.remove(); action.run(); };
+    t.append(b);
+  }
   $('#toasts').appendChild(t);
-  setTimeout(() => t.remove(), 4200);
+  setTimeout(() => t.remove(), action ? 15000 : 4200);
 }
 
 // Small centered text prompt — Electron has no window.prompt. Resolves with

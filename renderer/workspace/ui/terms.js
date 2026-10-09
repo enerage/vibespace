@@ -6,6 +6,7 @@ import * as board from './board.js';
 import * as parked from './parked.js';
 import * as inputsel from './inputsel.js';
 import * as automove from './automove.js';
+import { setupPrefix, setupLines, bgRefusal, JOB_ID } from './shellcmd.js';
 
 // terminal tabs: each hosts a PowerShell pty; "claude" tabs run Claude Code and
 // get their session id tracked (main process) so they can be resumed after updates.
@@ -140,22 +141,88 @@ async function conversationFamily(sessionId, saved = {}) {
 // family. With none left (its endpoint account was removed) the tab opens as a
 // plain terminal that keeps the session id, so a restart after the endpoint
 // is added again resumes it.
-async function resumeConversation({ termId = null, name, cwd, sessionId, account = null, accountAt = 0, worktree = null, family = null, model = null, activate = true }) {
+async function resumeConversation({ termId = null, name, cwd, sessionId, account = null, accountAt = 0, worktree = null, family = null, model = null, modelSwitch = false, activate = true }) {
   const fam = await conversationFamily(sessionId, { family, account });
   if (resolveAccount(account, accountAt, fam) === null) {
     toast(`${name}: its conversation ran on ${familyLabel(fam)}; add that endpoint again to resume it`, 'err');
     return createTab({ termId, name, cwd, savedSessionId: sessionId, worktree, family: fam, model, activate });
   }
-  return createTab({ termId, name, cwd, resumeId: sessionId, account, accountAt, worktree, family: fam, model, activate });
+  // a conversation running as one of Claude's background jobs: claude refuses
+  // the resume. A plain tab that keeps the id (a restart after the job was
+  // stopped resumes it), with a note and the board's Attach path.
+  const bg = await vs.sessionBackground(sessionId).catch(() => null);
+  if (bg) {
+    const tab = createTab({ termId, name, cwd, savedSessionId: sessionId, worktree, family: fam, model, activate });
+    noteBackground(tab, bg.job);
+    return tab;
+  }
+  return createTab({ termId, name, cwd, resumeId: sessionId, account, accountAt, worktree, family: fam, model, modelSwitch, activate });
+}
+
+// The tab's conversation is a RUNNING Claude background job (`claude --bg`,
+// owned by claude's daemon). Resuming it is refused ("That session is running
+// in the background"), so the tab stays a plain shell: a toast and a strip note
+// say so, both with Attach (the board's path: `claude attach <job>` in a new
+// tab) when the job id is known. Stopping the job (`claude stop <job>`) frees
+// the conversation for `claude --resume` here.
+function noteBackground(tab, job) {
+  if (!tab || !tabs.has(tab.id)) return;
+  const id = job && JOB_ID.test(job) ? job : null;
+  tab.bgNote = {
+    job: id,
+    text: `conversation running in Claude's background${id ? ` (job ${id})` : ''}: Attach to watch it, or `
+      + `${id ? `claude stop ${id}` : 'stop it'} to resume it here (claude --resume ${tab.sessionId})`,
+  };
+  console.warn(`restore: ${tab.name} (${tab.id}) session ${tab.sessionId} runs in Claude's background${id ? ` as job ${id}` : ''}: plain tab`);
+  toast(`${tab.name}'s conversation is running in Claude's background — Attach to watch it, or stop it to resume here`, '',
+    { action: id ? { label: 'Attach', run: () => attachBackground(id, tab.name) } : null });
+  renderTabBar();
+}
+
+// The registry check before a resume can miss (the job went to the background
+// a moment later, or `claude agents` was slow): claude then prints its refusal
+// and exits. Watch a typed resume's output for a minute; the refusal text alone
+// isn't proof (a resumed conversation that TALKS about it repaints the same
+// words), so the tab only turns plain once no claude runs under its shell.
+const RESUME_WATCH_MS = 60000;
+function armResumeWatch(tab) {
+  tab.resumeWatch = { at: Date.now(), until: Date.now() + RESUME_WATCH_MS, tail: '' };
+}
+function watchResume(tab, chunk) {
+  const w = tab.resumeWatch;
+  if (Date.now() > w.until) { tab.resumeWatch = null; return; }
+  w.tail = (w.tail + chunk).slice(-4000);
+  if (!/background/i.test(w.tail)) return;
+  const hit = bgRefusal(w.tail);
+  if (!hit) return;
+  tab.resumeWatch = null;
+  const sid = tab.sessionId;
+  setTimeout(async () => {
+    if (!tabs.has(tab.id) || tab.dead || tab.sessionId !== sid) return;
+    let running = null;
+    try { running = await vs.claudeRunning(tab.id); } catch {}
+    if (running !== false) return; // claude runs (or can't tell): it was only text
+    tab.isClaude = false; // a plain shell now; the id stays, so a restart tries again
+    tab.status = null;
+    noteBackground(tab, hit.job);
+    persist();
+  }, 1500);
 }
 
 // ---- per-tab model (claude --model) --------------------------------------------
 // tab.model = the model the user chose for the tab (+ ▾ → New agent with model)
 // or switched to in the session (/model, seen in the feed): an alias
 // (opus/sonnet/haiku) when it maps to one, else claude's exact id. null =
-// claude's default, and no --model is ever typed. Only a FRESH claude gets
-// --model: `claude --resume <id>` restores the conversation's own model by itself
-// (verified 2.1.294, interactive and -p), so a resume never overrides it.
+// claude's default, and no --model is ever typed. A FRESH claude gets --model:
+// `claude --resume <id>` restores the conversation's own model by itself
+// (verified 2.1.294, interactive and -p), so a resume normally doesn't. The
+// exception is tab.modelSwitch: a /model switch seen in the feed with no reply
+// since. Its transcript doesn't carry that model yet, so a plain resume would
+// come back on the OLD model under the new tag: that resume (restore, unpark,
+// account move) adds --model <tab.model>. The next finished turn clears the
+// flag. Whatever claude ends up on, its first statusLine tick after a launch
+// sets the tag to it (followModel), so the tag never names a model claude
+// isn't running.
 export const MODEL_ALIASES = ['opus', 'sonnet', 'haiku'];
 // typed into PowerShell unquoted: one plain word or nothing
 const cleanModel = (m) => (typeof m === 'string' && /^[A-Za-z0-9._:-]{1,80}$/.test(m) ? m : null);
@@ -181,9 +248,13 @@ function followModel(tab, f) {
   if (!tab || !tab.isClaude || tab.switching || !id) return;
   const prev = tab.feedModelId;
   tab.feedModelId = id;
-  if (!tab.model && (!prev || prev === id)) return;
+  const switched = Boolean(prev) && prev !== id; // changed under a running claude: /model
+  if (!tab.model && !switched) return;
   const v = modelValue(id, tab.account);
-  if (!v || v === tab.model) return;
+  if (!v) return;
+  const flag = switched && !tab.modelSwitch; // no reply on it yet (see above)
+  if (flag) tab.modelSwitch = true;
+  if (v === tab.model) { if (flag) persist(); return; }
   tab.model = v;
   renderTabBar();
   persist();
@@ -255,7 +326,9 @@ function drainMoves() {
     const cold = autoWaitUntil(tab);
     if (cold) { wakeAt = Math.min(wakeAt, cold); continue; } // warm cache (Infinity: no finished turn seen)
     tab.moveQueued = true;
-    moveChain = moveChain.then(() => moveOne(tab)).catch((e) => console.warn('account move failed', e && e.message));
+    movesInFlight++;
+    moveChain = moveChain.then(() => moveOne(tab)).catch((e) => console.warn('account move failed', e && e.message))
+      .finally(() => { movesInFlight--; });
   }
   armAutoWake(wakeAt);
 }
@@ -324,8 +397,37 @@ async function moveOne(tab) {
   } else if (auto) {
     tab.autoMovedAt = Date.now(); // no ping-pong: stays for 30 min unless its account runs out of room
     console.warn(`account auto: ${tab.name} (${id}) ${from} -> ${to} (${why})`);
-    toast(`${tab.name} moved to ${accountLabel(to)} (automatic order: ${why})`);
+    noteAutoMove(tab.name, to, why);
   }
+}
+
+// The automatic order moves tabs one at a time (moveChain). One toast per
+// burst, not per tab: shown once no move ran for 10 s and none is queued, at
+// the latest 2 min after the burst's first move. The log keeps a line per tab.
+const AUTO_TOAST_QUIET_MS = 10000;
+const AUTO_TOAST_MAX_MS = 120000;
+let movesInFlight = 0;
+let autoMoved = [];
+let autoMovedFirst = 0;
+let autoToastTimer = null;
+function noteAutoMove(name, to, why) {
+  if (!autoMoved.length) autoMovedFirst = Date.now();
+  autoMoved.push({ name, to, toLabel: accountLabel(to), why });
+  armAutoToast();
+}
+function armAutoToast() {
+  clearTimeout(autoToastTimer);
+  const wait = Math.min(AUTO_TOAST_QUIET_MS, autoMovedFirst + AUTO_TOAST_MAX_MS - Date.now());
+  autoToastTimer = setTimeout(flushAutoMoves, Math.max(0, wait));
+}
+function flushAutoMoves() {
+  autoToastTimer = null;
+  if (!autoMoved.length) return;
+  // more moves still queued or running: wait for them (up to the cap)
+  if (movesInFlight > 0 && Date.now() - autoMovedFirst < AUTO_TOAST_MAX_MS) { armAutoToast(); return; }
+  const moves = autoMoved;
+  autoMoved = [];
+  for (const line of automove.autoMoveSummary(moves)) toast(line);
 }
 
 // why the automatic order moves a tab, for the log line and the toast
@@ -386,6 +488,7 @@ export function init(opts) {
   vs.onPtyData((termId, chunk) => {
     const tab = tabs.get(termId);
     if (!tab) return;
+    if (tab.resumeWatch) watchResume(tab, chunk);
     const t0 = tab.lagT0;
     if (t0 == null) { tab.term.write(chunk); return; }
     // first output after a typed key: time key → parsed (+ next paint)
@@ -428,6 +531,7 @@ export function init(opts) {
     tab.status = st;
     if (st === 'done') {
       tab.doneAt = Date.now();
+      if (tab.modelSwitch) { tab.modelSwitch = false; persist(); } // a reply on the switched model is in the transcript now
       syncClaudeName(tab);
       setTimeout(drainMoves, 1500); // the feed's background list lands with Stop
     }
@@ -464,12 +568,15 @@ export function init(opts) {
   // PLACE; a full renderTabBar per tick would churn the bar and kill a rename in
   // progress) + activity strip / peek card (ui/feedui.js). The snapshot covers a
   // reload: everything shows before the next tick arrives.
-  feedui.init({ getTab: (id) => tabs.get(id), getFeed: (id) => feeds.get(id), activeId: () => activeId });
+  feedui.init({ getTab: (id) => tabs.get(id), getFeed: (id) => feeds.get(id), activeId: () => activeId, attach: attachBackground });
   board.init({ wsId }); // ▦ agent board (Ctrl+Shift+B) — reads tabs + feeds via the exports below
   vs.onTermFeed((termId, feed) => {
     if (!termId) return;
     feeds.set(termId, feed);
     const tab = tabs.get(termId);
+    // a statusLine tick from the resumed claude: it runs, no refusal to watch for
+    // (not in the first 3 s: a tick of the claude that just left can still land)
+    if (tab && tab.resumeWatch && Date.now() - tab.resumeWatch.at > 3000) tab.resumeWatch = null;
     if (tab) { followModel(tab, feed); paintMeter(tab); }
     feedui.onFeed(termId);
     notifyAgents();
@@ -545,6 +652,7 @@ export function init(opts) {
           accountAt: t.accountAt || 0,
           worktree: t.worktree || null,
           model: t.model || null,
+          modelSwitch: Boolean(t.modelSwitch),
           family: t.claudeSessionId ? await conversationFamily(t.claudeSessionId, t) : null,
         });
       } else if (t.worktree && !(await worktreeAlive(t.worktree))) {
@@ -559,7 +667,7 @@ export function init(opts) {
         createTab({ termId: t.termId || null, name: t.name, cwd: t.cwd || repoPath, pickSession: true, account: t.account || null, accountAt: t.accountAt || 0, worktree: t.worktree || null, model: t.model || null });
       } else if (opts.autoResume && t.claudeSessionId) {
         // keep stable ids across restarts (sessions pin by termId)
-        await resumeConversation({ termId: t.termId || null, name: t.name, cwd: t.cwd || repoPath, sessionId: t.claudeSessionId, account: t.account || null, accountAt: t.accountAt || 0, worktree: t.worktree || null, family: t.family || null, model: t.model || null, activate: true });
+        await resumeConversation({ termId: t.termId || null, name: t.name, cwd: t.cwd || repoPath, sessionId: t.claudeSessionId, account: t.account || null, accountAt: t.accountAt || 0, worktree: t.worktree || null, family: t.family || null, model: t.model || null, modelSwitch: Boolean(t.modelSwitch), activate: true });
       } else {
         createTab({
           termId: t.termId || null, // keep stable ids across restarts (sessions pin by termId)
@@ -593,7 +701,7 @@ export function init(opts) {
     for (const t of saved) {
       const isClaude = t.isClaude === undefined ? true : Boolean(t.isClaude);
       if (opts.autoResume && t.claudeSessionId) {
-        await resumeConversation({ termId: t.termId || null, name: t.name, cwd: t.cwd || repoPath, sessionId: t.claudeSessionId, account: t.account || null, accountAt: t.accountAt || 0, worktree: t.worktree || null, family: t.family || null, model: t.model || null, activate: true });
+        await resumeConversation({ termId: t.termId || null, name: t.name, cwd: t.cwd || repoPath, sessionId: t.claudeSessionId, account: t.account || null, accountAt: t.accountAt || 0, worktree: t.worktree || null, family: t.family || null, model: t.model || null, modelSwitch: Boolean(t.modelSwitch), activate: true });
         continue;
       }
       createTab({
@@ -632,7 +740,7 @@ export function repoRoot() { return repoPath; }
 export async function newWorktreeAgent() {
   const name = nextName('agent');
   const prefs = wtPrefs() || {};
-  const setup = oneLine(prefs.setup);
+  const setup = setupLines(prefs.setup).join('\n'); // typed through shellcmd.setupPrefix
   let wt;
   try { wt = await vs.wtCreate(wsId, name, { copyEnv: Boolean(prefs.copyEnv) }); } catch (e) { wt = { ok: false, reason: (e && e.message) || String(e) }; }
   if (!wt || !wt.ok) { toast(`Worktree failed: ${(wt && wt.reason) || 'unknown error'}`, 'err'); return null; }
@@ -641,23 +749,12 @@ export async function newWorktreeAgent() {
   const copied = Array.isArray(wt.copied) ? wt.copied : [];
   const notes = [];
   if (copied.length) notes.push(`Copied ${copied.join(', ')}.`);
-  notes.push(setup ? `Setup runs first: ${setup}` : `Not shared: node_modules, ${copied.length ? '' : '.env, '}build output; the agent may need to install.`);
+  notes.push(setup ? `Setup runs first: ${oneLine(setup)}` : `Not shared: node_modules, ${copied.length ? '' : '.env, '}build output; the agent may need to install.`);
   toast(`Worktree ready: ${wt.branch} (from ${from}). ${notes.join(' ')}`, 'ok');
   return tab;
 }
 
-const oneLine = (s) => String(s || '').split(/\r?\n/).map(l => l.trim()).filter(Boolean).join('; ');
-
-// A fresh worktree's setup command, typed in front of claude on the same line,
-// so its output (npm ci…) shows in the tab. claude starts even when it fails
-// (the agent can fix it), after a one-line warning. Failed = a native exit code,
-// a new $Error entry (non-terminating errors) or a terminating error (catch).
-function setupPrefix(setup) {
-  if (!setup) return '';
-  return '$vsE = $Error.Count; $global:LASTEXITCODE = 0; '
-    + `try { ${setup} } catch { $vsE = -1; Write-Host $_ -ForegroundColor Red }; `
-    + "if ($LASTEXITCODE -or $Error.Count -gt $vsE) { Write-Host 'VibeSpace: the worktree setup command failed; starting claude anyway' -ForegroundColor Yellow }; ";
-}
+const oneLine = (s) => setupLines(s).join('; ');
 
 // the parked agent that owns a worktree (its folder is kept for the unpark)
 const parkedOwner = (wtPath) => (shelf || []).find(e => e.worktree && samePath(e.worktree.path, wtPath)) || null;
@@ -865,7 +962,7 @@ export async function unparkAgent(id) {
         toast(`${name}: its conversation ran on ${familyLabel(fam)}; add that endpoint again to unpark it`, 'err');
         return null;
       }
-      tab = await resumeConversation({ name, cwd, sessionId: e.claudeSessionId, account: e.account || null, accountAt: e.accountAt || 0, worktree: e.worktree || null, family: fam, model: e.modelArg || null, activate: true });
+      tab = await resumeConversation({ name, cwd, sessionId: e.claudeSessionId, account: e.account || null, accountAt: e.accountAt || 0, worktree: e.worktree || null, family: fam, model: e.modelArg || null, modelSwitch: Boolean(e.modelSwitch), activate: true });
     }
     shelf = shelf.filter(x => x.id !== id);
     parked.paintChip();
@@ -1063,7 +1160,7 @@ function registerFileLinks(term, tab) {
   } catch {} // xterm without link-provider support — links simply don't light up
 }
 
-export function createTab({ name = 'agent', cwd = repoPath, claude = false, resumeId = null, activate = true, termId = null, attachBuffer = null, savedIsClaude = null, savedSessionId = null, pickSession = false, run = null, account = null, accountAt = 0, worktree = null, family = null, model = null, setup = '' } = {}) {
+export function createTab({ name = 'agent', cwd = repoPath, claude = false, resumeId = null, activate = true, termId = null, attachBuffer = null, savedIsClaude = null, savedSessionId = null, pickSession = false, run = null, account = null, accountAt = 0, worktree = null, family = null, model = null, modelSwitch = false, setup = '' } = {}) {
   const id = termId || newTermId();
   const host = el('div', 'term-host');
   host.style.display = 'none';
@@ -1100,6 +1197,7 @@ export function createTab({ name = 'agent', cwd = repoPath, claude = false, resu
     isClaude: savedIsClaude !== null ? Boolean(savedIsClaude) : Boolean(claude || resumeId || pickSession),
     model: cleanModel(model), // chosen/switched model (--model on a fresh claude); null = default
   };
+  tab.modelSwitch = Boolean(modelSwitch && tab.model); // a /model switch with no reply since: a resume adds --model
   if (tab.isClaude) {
     // a live (re-attached) agent keeps whatever account it is running on;
     // main relearns it so the feed files its limits under the right account.
@@ -1195,6 +1293,7 @@ export function createTab({ name = 'agent', cwd = repoPath, claude = false, resu
       // later than launchedAt, which is fine: a worktree tab is offRepo, so the
       // timing heuristic never uses it (the feed pins it)
       const pre = !resumeId && !pickSession ? setupPrefix(setup) : '';
+      if (resumeId) armResumeWatch(tab);
       vs.ptyWrite(id, pre + cmd + '\r');
       tab.launchedAt = Date.now();
       vs.claudeStarted(wsId, id, launchOpts(tab, pickSession));
@@ -1217,8 +1316,9 @@ function launchOpts(tab, picker) {
 // The ONE builder for a new interactive claude:
 //   claude [--resume [<id>] | --model <m>] [--remote-control "<label>"] [--settings "<path>"] ["<prompt>"]
 // resumeId: null = fresh, '' = the interactive picker, else that session.
-// --model only on a fresh claude with a tab model: a resume (or a pick)
-// restores the conversation's own model.
+// --model on a fresh claude with a tab model, and on a resume only after a
+// /model switch with no reply since (tab.modelSwitch); otherwise a resume (or
+// a pick) restores the conversation's own model.
 // --remote-control lists the session in the Claude phone app; --settings
 // injects the status hooks and merges with the user's own settings. Token and
 // endpoint accounts get no --remote-control (Remote Control refuses
@@ -1226,7 +1326,7 @@ function launchOpts(tab, picker) {
 // prompt: only ever the literal `continue` (account switch after a limit).
 function claudeCommand(tab, resumeId = null, prompt = null) {
   let cmd = resumeId == null ? 'claude' : `claude --resume${resumeId ? ' ' + resumeId : ''}`;
-  const model = resumeId == null ? cleanModel(tab.model) : null;
+  const model = resumeId == null || (resumeId && tab.modelSwitch) ? cleanModel(tab.model) : null;
   if (model) cmd += ` --model ${model}`;
   if (remote() && !(tab.account && tab.account !== 'login')) {
     const label = rcLabel(tab.name);
@@ -1320,6 +1420,7 @@ async function launchOnAccount(tab, to, askedAt, prompt) {
   tab.draft = false; // a new claude starts with an empty prompt
   tab.launchedAt = Date.now();
   // same bookkeeping as createTab's known-resume launch: tracking stays pinned
+  armResumeWatch(tab);
   vs.ptyWrite(id, claudeCommand(tab, tab.sessionId, prompt) + '\r');
   vs.claudeStarted(wsId, id, launchOpts(tab, false));
   vs.sessionPinned(wsId, id, tab.sessionId);
@@ -1696,6 +1797,7 @@ export function snapshot() {
     worktree: t.worktree || null,
     named: t.named || null,
     model: t.model || null, // chosen/switched model; null = claude's default
+    modelSwitch: Boolean(t.modelSwitch), // /model switch with no reply since: the resume adds --model
   }));
 }
 

@@ -210,11 +210,15 @@ export function refresh() {
   const id = ctx.activeId();
   const tab = id && ctx.getTab(id);
   const f = tab && ctx.getFeed(id);
+  // a tab without a feed has no strip, unless it carries a note (its
+  // conversation runs as a Claude background job: terms.js noteBackground)
+  const note = tab && !f ? tab.bgNote : null;
   // show/hide only on change: #term-hosts' ResizeObserver then refits xterm
   // once (throttled in terms.js) — never per feed tick
-  const show = Boolean(f);
+  const show = Boolean(f || note);
   if (stripEl.classList.contains('hidden') === show) stripEl.classList.toggle('hidden', !show);
   if (!show) { closeList(); return; }
+  if (note) { closeList(); paintNote(tab, note); return; }
   const line = stateLine(tab, f);
   stripEl.className = 'st-' + line.cls;
   stripEl.innerHTML = '';
@@ -254,6 +258,21 @@ export function refresh() {
   if (f.subagents > 0) stripEl.append(el('span', 'ts-sub', `${f.subagents} subagent${f.subagents > 1 ? 's' : ''}`));
   // timers tick here, not per feed tick: 1 s while working (or background work runs), 30 s otherwise
   stripTimer = setTimeout(refresh, line.cls === 'working' || line.cls === 'bg' ? 1000 : 30000);
+}
+
+// note = { text, job }: job → an Attach link (the board's `claude attach` path)
+function paintNote(tab, note) {
+  stripEl.className = 'st-note';
+  stripEl.innerHTML = '';
+  const text = el('span', 'ts-text', note.text);
+  text.title = note.text;
+  stripEl.append(el('span', 'ts-dot'), el('span', 'ts-name', tab.name), el('span', 'ts-sep', '·'), text, el('span', 'spacer'));
+  if (note.job && ctx.attach) {
+    const a = el('span', 'ts-action', 'Attach');
+    a.title = `Watch it in a new tab (claude attach ${note.job}); it keeps running when you close that tab`;
+    a.onclick = (e) => { e.stopPropagation(); ctx.attach(note.job, tab.name); };
+    stripEl.append(a);
+  }
 }
 
 // ---------- task checklist popover ----------

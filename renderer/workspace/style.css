@@ -706,6 +706,7 @@ html[data-mode="light"] .ficon { filter: brightness(0.55) saturate(1.4); }
 }
 .toast.ok { border-left-color: var(--ok); }
 .toast.err { border-left-color: var(--danger); }
+.toast .toast-action { margin-left: 10px; vertical-align: baseline; }
 
 body.dragging { user-select: none; }
 body.dragging #split-v, body.dragging #split-h { background: color-mix(in srgb, var(--accent) 35%, transparent); }
@@ -783,6 +784,11 @@ body.dragging #split-v, body.dragging #split-h { background: color-mix(in srgb, 
   border: 2px dashed var(--yellow);
 }
 #term-strip.st-net .ts-text { color: var(--yellow); }
+/* a plain tab whose conversation runs as a Claude background job (can't resume here) */
+#term-strip.st-note .ts-dot { background: var(--yellow); }
+#term-strip.st-note .ts-text { color: var(--yellow); }
+#term-strip .ts-action { flex: none; cursor: pointer; color: var(--accent-text); }
+#term-strip .ts-action:hover { text-decoration: underline; }
 .fu-pop .fu-bg { color: var(--dim); margin-bottom: 6px; font-size: 11.5px; }
 .fu-pop .fu-bg > div { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .task-pill {

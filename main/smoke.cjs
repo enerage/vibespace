@@ -1277,9 +1277,52 @@ async function runSmoke() {
       unknownAccepted: feed.fromBackground('t-bg', 'sess-new') === false, // a fresh /clear session not registered yet
       noSid: feed.fromBackground('t-bg', '') === false,
     };
+    // restore/unpark: a saved conversation that is a RUNNING background job is
+    // not resumed (claude refuses); a job whose process is gone doesn't count
+    fs.writeFileSync(path.join(dir, `${process.pid}.json`), JSON.stringify({ pid: process.pid, sessionId: 'sess-live-bg', kind: 'bg' }));
+    fs.writeFileSync(path.join(dir, '999999.json'), JSON.stringify({ pid: 999999, sessionId: 'sess-dead-bg', kind: 'bg' }));
+    feed._setSessionsDir(dir); // fresh scan
+    r.liveBg = JSON.stringify(feed.backgroundSession('sess-live-bg')) === JSON.stringify({ pid: process.pid });
+    r.deadBg = feed.backgroundSession('sess-dead-bg') === null;
+    r.interactiveNot = feed.backgroundSession('sess-tab') === null && feed.backgroundSession('') === null;
     feed._setSessionsDir(null);
     try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
-    check('feed drops background-session events reporting as a tab', Object.values(r).every(Boolean), JSON.stringify(r));
+    check('feed drops background-session events reporting as a tab; restore spots a running bg job', Object.values(r).every(Boolean), JSON.stringify(r));
+  }
+
+  // 22c. text typed into / read from a tab's shell (renderer/workspace/ui/shellcmd.js):
+  //      the worktree setup runs as its own script block, so a `#`, quotes or a
+  //      syntax error in it never stop claude; claude's "running in the
+  //      background" refusal is recognised; automatic moves get one toast per burst
+  {
+    const sc = await import(require('node:url').pathToFileURL(path.join(U.ROOT, 'renderer', 'workspace', 'ui', 'shellcmd.js')).href);
+    const am = await import(require('node:url').pathToFileURL(path.join(U.ROOT, 'renderer', 'workspace', 'ui', 'automove.js')).href);
+    const os = require('node:os');
+    const cases = [
+      ['echo one # comment', false], [`echo "it's" 'say "hi"'`, false], ['echo \u2018smart\u2019', false],
+      ['cmd /c exit 3', true], ["throw 'boom'", true], ['echo (', true],
+    ];
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-setup-'));
+    const file = path.join(dir, 'setup.ps1');
+    fs.writeFileSync(file, '\ufeff' + cases.map(([s], i) => `Write-Output 'CASE-${i}'; ` + sc.setupPrefix(s) + `Write-Output 'CLAUDE-${i}'`).join('\r\n') + '\r\n', 'utf8');
+    const ps = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+    const run = require('node:child_process').spawnSync(ps, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', file], { encoding: 'utf8', timeout: 30000, windowsHide: true });
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+    const out = String(run.stdout || '') + String(run.stderr || '');
+    const got = cases.map(([, fails], i) => {
+      const part = out.split(`CASE-${i}`)[1] || '';
+      const seg = part.split(`CASE-${i + 1}`)[0];
+      return seg.includes(`CLAUDE-${i}`) && /worktree setup command failed/.test(seg) === fails;
+    });
+    const refusal = sc.bgRefusal('\x1b[31mThat session is running in the\r\n background (6ce06036).\x1b[0m Run `claude attach 6ce06036` or `claude stop 6ce06036` first');
+    const lines = am.autoMoveSummary(['a1', 'a2', 'a3', 'a4'].map(name => ({ name, to: 'main', toLabel: 'MAIN', why: 'cache cold' })));
+    const r = {
+      setup: got.every(Boolean) ? true : got.join(','),
+      refusal: Boolean(refusal && refusal.job === '6ce06036') && sc.bgRefusal('tests are running in the background') === null,
+      oneToast: lines.length === 1 && lines[0] === 'Moved 4 agents to MAIN (automatic order: cache cold): a1, a2, a3 +1',
+    };
+    check('shell text: setup script block (# / quotes / errors still start claude), bg refusal, one toast per burst',
+      Object.values(r).every(v => v === true), JSON.stringify(r) + (got.every(Boolean) ? '' : ' out=' + out.slice(0, 400)));
   }
 
   // 23. agent board summary (main/board.cjs): shape, write, other-workspace read

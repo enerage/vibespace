@@ -1053,6 +1053,24 @@ function initIpc() {
     const ws = win && workspaces.get(winInfo.get(win.id)?.wsId);
     return ws ? bgagents.list(ws.repoPath) : { ok: false, agents: [] };
   });
+  // restore/unpark/resume: the conversation is a RUNNING background job
+  // (claude refuses to resume it) → { job, pid } (job = the short id that
+  // `claude attach/stop` take, null when `claude agents` doesn't list it), else null
+  ipcMain.handle('sessions:background', async (e, sid) => {
+    const s = String(sid || '');
+    const bg = claudefeed.backgroundSession(s);
+    if (!bg) return null;
+    const win = BrowserWindow.fromWebContents(e.sender);
+    const ws = win && workspaces.get(winInfo.get(win.id)?.wsId);
+    let job = null;
+    if (ws) {
+      const r = await bgagents.list(ws.repoPath);
+      const a = r && r.ok ? r.agents.find(x => x.sessionId === s) : null;
+      job = a ? a.id : null;
+    }
+    logger.info(`restore: session ${s} is a running background job${job ? ' ' + job : ''} (pid ${bg.pid}): not resumed in a tab`);
+    return { job, pid: bg.pid };
+  });
   ipcMain.on('board:watch', (e, on) => {
     const sender = e.sender;
     if (!on) { board.unwatch(); return; }

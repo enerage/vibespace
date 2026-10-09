@@ -49,6 +49,7 @@ contextBridge.exposeInMainWorld('vs', {
   boardWatch: (on) => ipcRenderer.send('board:watch', Boolean(on)),
   boardFocus: (wsId) => ipcRenderer.invoke('board:focus', wsId),
   bgList: () => ipcRenderer.invoke('bg:list'),
+  sessionBackground: (sessionId) => ipcRenderer.invoke('sessions:background', sessionId),
   onBoardChanged: (cb) => ipcRenderer.on('board:changed', () => cb()),
   presenceGet: () => ipcRenderer.invoke('presence:get'),
   presenceSet: (mode) => ipcRenderer.invoke('presence:set', mode),
