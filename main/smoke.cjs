@@ -1203,6 +1203,28 @@ async function runSmoke() {
     check('background agents filter (kind, cwd under repo, id check)', JSON.stringify(got) === '["aa11bb22","6ce06036"]', JSON.stringify(got));
   }
 
+  // 22b. background sessions (Claude's daemon, `kind: "bg"` in ~/.claude/sessions)
+  //      keep the tab's $VIBESPACE_TERM_ID: their feed events must be dropped
+  {
+    const feed = require('./claudefeed.cjs');
+    const os = require('node:os');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-sessreg-'));
+    fs.writeFileSync(path.join(dir, '111.json'), JSON.stringify({ pid: 111, sessionId: 'sess-tab', kind: 'interactive' }));
+    fs.writeFileSync(path.join(dir, '222.json'), JSON.stringify({ pid: 222, sessionId: 'sess-bg', kind: 'bg' }));
+    fs.writeFileSync(path.join(dir, '222.0123abcd.key'), 'not json');
+    feed._setSessionsDir(dir);
+    const r = {
+      tabAccepted: feed.fromBackground('t-bg', 'sess-tab') === false,
+      bgDropped: feed.fromBackground('t-bg', 'sess-bg') === true,
+      tabStillAccepted: feed.fromBackground('t-bg', 'sess-tab') === false,
+      unknownAccepted: feed.fromBackground('t-bg', 'sess-new') === false, // a fresh /clear session not registered yet
+      noSid: feed.fromBackground('t-bg', '') === false,
+    };
+    feed._setSessionsDir(null);
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+    check('feed drops background-session events reporting as a tab', Object.values(r).every(Boolean), JSON.stringify(r));
+  }
+
   // 23. agent board summary (main/board.cjs): shape, write, other-workspace read
   //     with freshness filter, delete on close
   {

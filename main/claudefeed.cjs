@@ -399,6 +399,55 @@ function ingest(termId, kind, event, body) {
   return true;
 }
 
+// ---------- background sessions ----------
+// Claude Code can send a session to the BACKGROUND (its daemon runs it under
+// `claude --bg-pty-host`). That process keeps the env it was started with, so it
+// still posts to our feed with the tab's $VIBESPACE_TERM_ID, for days, on the
+// account it started on. Seen 2026-10-09: a background agent from 10-06
+// re-pinned its tab every few seconds (the tab's real conversation and its own
+// alternated), and its weekly-limit failure marked the TAB's account as out.
+// Claude's session registry (~/.claude/sessions/<pid>.json) says `kind: "bg"`
+// for those, so their events are dropped here. Only a session id that differs
+// from the last accepted one for the tab is looked up; normal traffic costs nothing.
+const BG_KINDS = new Set(['bg', 'background']);
+let sessionsDirOverride = null; // smoke
+const sessionsDir = () => sessionsDirOverride
+  || path.join(process.env.CLAUDE_CONFIG_DIR || path.join(process.env.USERPROFILE || os.homedir(), '.claude'), 'sessions');
+let kindScan = { at: 0, kinds: new Map() }; // sessionId -> kind
+function rescanKinds() {
+  const kinds = new Map();
+  try {
+    for (const f of fs.readdirSync(sessionsDir())) {
+      if (!/^\d+\.json$/.test(f)) continue;
+      try {
+        const j = JSON.parse(fs.readFileSync(path.join(sessionsDir(), f), 'utf8'));
+        if (j && typeof j.sessionId === 'string') kinds.set(j.sessionId, String(j.kind || ''));
+      } catch {} // a registry file being rewritten: next scan
+    }
+  } catch {} // no registry: nothing is background
+  kindScan = { at: Date.now(), kinds };
+}
+function sessionKind(sid) {
+  const age = Date.now() - kindScan.at;
+  if (age > 60000 || (!kindScan.kinds.has(sid) && age > 3000)) rescanKinds();
+  return kindScan.kinds.get(sid) || null;
+}
+const acceptedSid = new Map(); // termId -> last session id accepted for it
+const droppedBg = new Set(); // "termId sid" already logged
+function fromBackground(termId, sid) {
+  if (!sid || acceptedSid.get(termId) === sid) return false;
+  if (BG_KINDS.has(sessionKind(sid))) {
+    const k = termId + ' ' + sid;
+    if (!droppedBg.has(k)) {
+      droppedBg.add(k);
+      logger.info(`feed: dropping events of background session ${sid} that still reports as term=${termId}`);
+    }
+    return true;
+  }
+  acceptedSid.set(termId, sid);
+  return false;
+}
+
 // ---------- server ----------
 function handle(req, res) {
   let done = false;
@@ -427,6 +476,7 @@ function handle(req, res) {
       const pathname = new URL(req.url, 'http://127.0.0.1').pathname;
       let body;
       try { body = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { return; } // bad JSON: ignore
+      if (body && fromBackground(termId, typeof body.session_id === 'string' ? body.session_id : '')) return;
       if (pathname === '/sl') ingest(termId, 'sl', null, body);
       else if (pathname.startsWith('/hook/')) ingest(termId, 'hook', decodeURIComponent(pathname.slice(6)), body);
     } catch (e) {
@@ -537,6 +587,8 @@ function snapshot(wsId) {
 }
 
 module.exports = {
+  fromBackground, // smoke
+  _setSessionsDir: (d) => { sessionsDirOverride = d; kindScan = { at: 0, kinds: new Map() }; acceptedSid.clear(); },
   start,
   stop,
   forget,

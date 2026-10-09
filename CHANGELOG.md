@@ -26,6 +26,18 @@ Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 
 ### Fixed
 - Opening ⚙ Preferences no longer logs "opts.layoutLabel is not a function".
+- **A moved agent could be left as a plain shell.** When an account move's
+  `/exit` took longer than 15 s, the move gave up; claude then left anyway,
+  and the retry read the empty shell as "you quit claude by hand" and never
+  restarted it (Cosiall, 2026-10-09). Now it waits up to another 60 s for the
+  exit it asked for, and an empty shell after OUR `/exit` (nothing typed since)
+  is relaunched on the new account.
+- **A background agent no longer impersonates its old tab.** An agent sent to
+  Claude's background on 10-06 kept the tab's id and went on reporting as
+  "WTF BUGS": the tab's conversation flipped between the two every few seconds
+  and its weekly-limit failure marked MAIN as out ("out · resets Thu" on both
+  accounts). Events from sessions Claude's registry marks as background are
+  now dropped.
 
 ## [0.6.52] — 2026-10-08
 

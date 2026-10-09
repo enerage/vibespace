@@ -152,7 +152,7 @@ Key facts encoded in `main/sessions.cjs`:
 
 ## Developing VibeSpace
 
-- `npm run smoke` — 124 self-tests (as of 0.6.53) incl. pty echo and live session discovery. Run it after
+- `npm run smoke` — 125 self-tests (as of 0.6.53) incl. pty echo and live session discovery. Run it after
   touching main-process code, **from a normal shell**: inside a Claude pty the stripped
   PATH and nested ConPTY break the pty test (`powershell.exe` "File not found" /
   AttachConsole) — prepend System32 to PATH and give it its own console, or just use a
@@ -420,6 +420,17 @@ Key facts encoded in `main/sessions.cjs`:
     = the "Move all" evidence rules PLUS a cold prompt cache (`expiresAt`, or
     1 h after `doneAt` without feed info), then a 30-min hold. While auto is on,
     `switchAll` is refused and `state().switchAll` is null. Log: `account auto:`.
+  - **Claude's background agents keep the tab's `$VIBESPACE_TERM_ID`**
+    (`claude --bg-pty-host`, owned by claude's daemon, parentless, can run for
+    days on the account it started on). They post to the feed as the tab, so
+    `claudefeed.fromBackground` drops events whose `session_id` is `kind: "bg"`
+    in `~/.claude/sessions/<pid>.json` (looked up only when the id differs from
+    the tab's last accepted one). Symptoms before: the tab's session flipping
+    between two ids in `tabs:` lines, and a false "out" on the tab's account.
+  - **`/exit` can take longer than 15 s.** A gentle move waits up to 75 s, and
+    `tab.exitSentAt` marks our own `/exit`: an empty shell found later with
+    nothing typed since is relaunched (`launchOnAccount`), never treated as
+    "the user left claude".
   - Claude repeats its last `rate_limits` reading on every statusLine tick until
     its next API response. Only a reading that just became full marks an account
     (`becameFull`), or an idle tab's stale 100 % re-marks it after a reset.

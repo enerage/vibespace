@@ -273,6 +273,25 @@ async function moveOne(tab) {
   const auto = autoOn();
   const from = tab.account || 'login';
   const why = auto ? autoReason(from, to) : '';
+  // claude left after OUR /exit (it outlasted the exit wait) and nothing was
+  // typed since: the shell is at a prompt we caused, so relaunch the agent
+  // instead of leaving it as a plain shell
+  // (no time limit: leaving claude by hand always means typing in the tab)
+  const ourExit = tab.exitSentAt && !typedSince(tab, tab.exitSentAt);
+  if (running === false && ourExit && !tab.switching) {
+    console.warn(`account move: ${id} claude left after our /exit, relaunching on ${to}`);
+    tab.switching = true;
+    renderTabBar();
+    try { await launchOnAccount(tab, to, Date.now(), null); } finally { tab.switching = false; renderTabBar(); persist(); }
+    if (auto && (tab.account || 'login') === to) {
+      tab.autoMovedAt = Date.now();
+      console.warn(`account auto: ${tab.name} (${id}) ${from} -> ${to} (${why}, after a slow exit)`);
+    }
+    return;
+  }
+  // our /exit is still on its way out: don't send another one, look again soon
+  if (running === true && ourExit) { drainLater(30000); return; }
+  tab.exitSentAt = 0; // typed since: an older /exit of ours no longer explains an empty shell
   if (running === false) {
     try {
       const used = await vs.setTermAccount(id, to); // the next `claude` typed here uses it
@@ -1240,37 +1259,31 @@ export async function relaunchOnAccount(tab, to, { prompt = 'continue', gentle =
       await new Promise(r => setTimeout(r, 500));
     }
     sendToAgent(id, '/exit');
+    const exitSentAt = Date.now();
     // gentle ("move all agents"): a claude that doesn't leave is never killed
-    const exit = await vs.waitClaudeExit(id, 15000, gentle);
+    let exit = await vs.waitClaudeExit(id, 15000, gentle);
+    // Our /exit was typed; claude can just be slow to leave. Seen 2026-10-09:
+    // still running at 15 s, gone soon after, and the retry then read the empty
+    // shell as "the user left claude" and never relaunched it. So wait longer
+    // for the exit we asked for, unless the user typed in the meantime.
+    if (gentle && exit && exit.how === 'running' && tabs.has(id) && !tab.dead && !typedSince(tab, exitSentAt)) {
+      exit = await vs.waitClaudeExit(id, 60000, true);
+    }
     const how = exit && exit.how;
     console.warn(`account switch: ${id} ${from} -> ${to}, claude exit: ${how}`);
     if (!tabs.has(id) || tab.dead) return;
     // only type into a shell we KNOW claude left; otherwise the command would
     // become a prompt inside the still-running agent
     if (!['prompt', 'gone', 'killed'].includes(how)) {
+      if (how === 'running') tab.exitSentAt = exitSentAt; // it may still leave: moveOne relaunches it then
       toast(`Couldn't move ${tab.name} to another account: claude didn't exit`, 'err');
       return;
     }
-    // switch the account only now: until the old claude exited, its statusLine
-    // ticks still belong to the old account. If main can't, nothing is typed:
-    // the tab stays a plain shell on its old account.
-    let used;
-    try {
-      used = await vs.setTermAccount(id, to);
-    } catch (e) {
-      toast(`Couldn't start ${tab.name} on ${accountLabel(to)}: ${ipcMsg(e)}`, 'err');
+    if (typedSince(tab, exitSentAt)) {
+      toast(`${tab.name} left claude, but you typed in it meanwhile, so it wasn't restarted. Type claude --resume to continue.`, 'err');
       return;
     }
-    if (!tabs.has(id) || tab.dead) return;
-    tab.account = typeof used === 'string' ? used : to;
-    tab.accountAt = askedAt;
-    tab.moveFails = 0;
-    tab.draft = false; // a new claude starts with an empty prompt
-    tab.launchedAt = Date.now();
-    // same bookkeeping as createTab's known-resume launch: tracking stays pinned
-    vs.ptyWrite(id, claudeCommand(tab, tab.sessionId, prompt) + '\r');
-    vs.claudeStarted(wsId, id, launchOpts(tab, false));
-    vs.sessionPinned(wsId, id, tab.sessionId);
+    await launchOnAccount(tab, to, askedAt, prompt);
   } catch (e) {
     console.warn(`account switch: ${id} failed`, e && e.message);
   } finally {
@@ -1278,6 +1291,36 @@ export async function relaunchOnAccount(tab, to, { prompt = 'continue', gentle =
     renderTabBar();
     persist();
   }
+}
+
+// the user typed in the tab after `at` (our own pastes don't count)
+const typedSince = (tab, at) => (tab.lastInputAt || 0) > at;
+
+// The shell under this tab is at a prompt (claude left): switch the account,
+// then type the resume. Switch only now: until the old claude exited, its
+// statusLine ticks still belong to the old account. If main can't, nothing is
+// typed: the tab stays a plain shell on its old account.
+async function launchOnAccount(tab, to, askedAt, prompt) {
+  const id = tab.id;
+  let used;
+  try {
+    used = await vs.setTermAccount(id, to);
+  } catch (e) {
+    toast(`Couldn't start ${tab.name} on ${accountLabel(to)}: ${ipcMsg(e)}`, 'err');
+    return false;
+  }
+  if (!tabs.has(id) || tab.dead) return false;
+  tab.account = typeof used === 'string' ? used : to;
+  tab.accountAt = askedAt;
+  tab.moveFails = 0;
+  tab.exitSentAt = 0;
+  tab.draft = false; // a new claude starts with an empty prompt
+  tab.launchedAt = Date.now();
+  // same bookkeeping as createTab's known-resume launch: tracking stays pinned
+  vs.ptyWrite(id, claudeCommand(tab, tab.sessionId, prompt) + '\r');
+  vs.claudeStarted(wsId, id, launchOpts(tab, false));
+  vs.sessionPinned(wsId, id, tab.sessionId);
+  return true;
 }
 
 // The conversation found in this tab belongs to another provider than the
