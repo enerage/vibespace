@@ -93,11 +93,20 @@ function bgTitle(tasks) {
       : '\nClaude continues by itself when they finish. It is not waiting on you.');
 }
 
+// ---------- internet outage (feed.net, main/index.cjs netFailure) ----------
+// The turn failed because the API can't be reached. Not a failure to act on:
+// main probes the network and the tab continues by itself when it's back.
+export const NET_TITLE = "Internet down — continues automatically when it's back";
+export function netWaiting(f) {
+  return Boolean(f && f.net);
+}
+
 // extra light class on top of the base status: failed regardless of base (a
 // StopFailure fires no Stop hook), perm/question only while base says waiting,
 // bg while the turn is done but background work is still running
 export function lightDetail(f, baseStatus) {
   if (!f) return { cls: '', title: '' };
+  if (f.net) return { cls: 'net', title: NET_TITLE };
   if (f.failure) return { cls: 'failed', title: reasonText(f) };
   const bg = bgTasks(f, baseStatus);
   if (bg.length) return { cls: 'bg', title: bgTitle(bg) };
@@ -112,6 +121,7 @@ export function lightDetail(f, baseStatus) {
 // one state line, shared by the strip and the peek card
 function stateLine(tab, f) {
   const st = tab.status || '';
+  if (f.net) return { cls: 'net', text: "waiting for the internet · continues automatically when it's back", time: fmtAgo(f.net.failedAt || f.net.since || Date.now()) };
   if (f.failure) return { cls: 'failed', text: reasonText(f), time: fmtAgo(f.failure.at) };
   if (st === 'waiting') return { cls: 'waiting', text: reasonText(f) || 'needs your input', time: '' };
   if (f.compacting) return { cls: 'working', text: 'compacting context…', time: f.compacting.at ? fmtElapsed(Date.now() - f.compacting.at) : '' };

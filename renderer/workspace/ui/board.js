@@ -37,6 +37,9 @@ export function columnOf(a) {
   const f = a.feed;
   const st = a.status;
   if (a.dead) return 'other';
+  // its turn failed because the internet is down: it continues by itself
+  // when the network is back, so it is still Working, not "needs you"
+  if (f && f.net) return 'working';
   if (st === 'waiting' || (f && (f.failure || f.attention === 'permission' || f.attention === 'question'))) return 'needs';
   if (st !== 'done' && (st === 'working' || (f && f.nowDoing))) return 'working';
   // turn finished but a background subagent still runs: claude continues by
@@ -62,7 +65,8 @@ const level = (pct) => (pct >= 85 ? 'hot' : pct >= 60 ? 'warn' : 'ok');
 function lightClass(a) {
   const f = a.feed;
   let cls = 'status' + (a.status ? ' ' + a.status : '');
-  if (f && f.failure) cls += ' failed';
+  if (f && f.net) cls += ' net';
+  else if (f && f.failure) cls += ' failed';
   else if (a.status === 'waiting' && f && f.attention === 'permission') cls += ' perm';
   else if (a.status === 'waiting' && f && f.attention === 'question') cls += ' question';
   else if (bgTasks(f, a.status).length) cls += ' bg';
@@ -86,7 +90,8 @@ function cardBody(a, col) {
     line = f.reason ? f.reason.replace(/^is /, '') : 'needs your input';
     lineCls += ' needs';
     if (f.attention === 'permission' && !f.failure) lineCls += ' perm';
-  } else if (col === 'working' && bgTasks(f, a.status).length) line = 'turn finished · ' + bgText(bgTasks(f, a.status));
+  } else if (col === 'working' && f.net) line = "waiting for the internet · continues automatically when it's back";
+  else if (col === 'working' && bgTasks(f, a.status).length) line = 'turn finished · ' + bgText(bgTasks(f, a.status));
   else if (col === 'working') line = f.compacting ? 'compacting context…' : f.nowDoing ? [f.nowDoing.tool, f.nowDoing.detail].filter(Boolean).join(' ') : 'thinking…';
   else if (col === 'done') { line = firstLines(f.lastMessage, 2) || 'finished its turn'; lineCls += ' reply'; }
   body.append(el('div', lineCls, line));
@@ -106,7 +111,7 @@ function cardBody(a, col) {
     }
     if (typeof f.cost === 'number') meta.append(el('span', '', '$' + f.cost.toFixed(2)));
     if (f.linesAdded || f.linesRemoved) meta.append(el('span', '', `+${f.linesAdded || 0}/−${f.linesRemoved || 0}`));
-    if (col === 'working' && f.turnStartedAt) meta.append(el('span', '', 'working ' + fmtElapsed(Date.now() - f.turnStartedAt)));
+    if (col === 'working' && f.turnStartedAt && !f.net) meta.append(el('span', '', 'working ' + fmtElapsed(Date.now() - f.turnStartedAt)));
     else if (col !== 'working' && f.turnEndedAt) meta.append(el('span', '', 'done ' + fmtAgo(f.turnEndedAt)));
     if (f.subagents > 0) meta.append(el('span', '', `${f.subagents} subagent${f.subagents > 1 ? 's' : ''}`));
     const chip = cacheChip(f, col === 'working' || (col === 'needs' && !f.failure));
@@ -243,7 +248,7 @@ function renderParked() {
 
 // ---------- other workspaces (read-only) ----------
 function chipLight(a) {
-  return 'status' + (a.status ? ' ' + a.status : '') + (a.failed ? ' failed' : '');
+  return 'status' + (a.status ? ' ' + a.status : '') + (a.net ? ' net' : a.failed ? ' failed' : '');
 }
 
 function renderOthers() {
@@ -259,7 +264,7 @@ function renderOthers() {
     if (!w.agents.length) chips.append(el('span', 'bo-none', 'no agents'));
     for (const a of w.agents) {
       const chip = el('span', 'bchip');
-      const short = a.failed || a.status === 'waiting' ? (a.reason || 'needs you').replace(/^is /, '')
+      const short = a.net ? 'waiting for the internet' : a.failed || a.status === 'waiting' ? (a.reason || 'needs you').replace(/^is /, '')
         : a.status === 'working' ? (a.nowDoing || 'working') : a.status === 'done' ? 'done' : '';
       chip.append(el('span', chipLight(a)), el('span', 'bchip-name', a.name));
       if (short) chip.append(el('span', 'bchip-why', short));

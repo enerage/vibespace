@@ -447,6 +447,9 @@ export function init(opts) {
     relaunchOnAccount(tab, to);
   });
 
+  // main: the API answers again after an outage → `continue` the waiting agents
+  vs.onNetResume((msg) => { netResume((msg && msg.termIds) || []); });
+
   // tabs wrap onto extra rows when they don't fit: the bar's height changes and
   // the terminal below shrinks or grows, so refit once (throttled) per change
   let barHeight = 0;
@@ -1779,6 +1782,45 @@ function syncClaudeName(tab) {
   const cmd = `/rename ${tab.pendingRename}`;
   tab.pendingRename = null;
   sendToAgent(tab.id, cmd);
+}
+
+// ---- internet outage: continue the waiting agents (main/index.cjs onNetChange) ----
+// A turn that failed because the API was unreachable waits (feed.net). When main's
+// probe sees the API again, each waiting agent gets `continue`, ~3 s apart, through
+// the same path as the board's quick reply. Same evidence rules as an account
+// move: never over anything typed since the failure, never into a half-typed
+// prompt, an open dialog, a compaction or a shell claude has left. A skipped tab
+// becomes a normal failed tab. Every decision goes back to main's log (`net:`).
+const NET_STAGGER_MS = 3000;
+let netChain = Promise.resolve();
+// why this tab must not get `continue` now ('' = it may)
+function netSkipWhy(tab, f) {
+  if (!tab || tab.dead) return 'tab closed';
+  if (!f || !f.net) return 'no longer waiting';
+  if (typedSince(tab, f.net.failedAt || 0)) return 'typed since the failure';
+  if (tab.draft) return 'half-typed prompt';
+  if (tab.switching) return 'switching account';
+  if (f.attention || tab.status === 'waiting') return 'dialog open';
+  if (f.compacting) return 'compacting';
+  return '';
+}
+function netResume(ids) {
+  netChain = netChain.then(async () => {
+    let sent = 0;
+    for (const id of ids) {
+      const tab = tabs.get(id);
+      let why = netSkipWhy(tab, feeds.get(id));
+      if (why) { vs.netReport(id, 'skipped', why); continue; }
+      if (sent) await new Promise(r => setTimeout(r, NET_STAGGER_MS)); // one agent at a time hits the API
+      let running = null;
+      try { running = await vs.claudeRunning(id); } catch {}
+      why = netSkipWhy(tabs.get(id), feeds.get(id)) || (running === true ? '' : running === false ? 'no claude running' : "can't tell if claude runs");
+      if (why) { vs.netReport(id, 'skipped', why); continue; }
+      if (!sendToAgent(id, 'continue')) { vs.netReport(id, 'skipped', 'paste failed'); continue; }
+      sent++;
+      vs.netReport(id, 'continued');
+    }
+  }).catch((e) => console.warn('net resume failed', e && e.message));
 }
 
 // board quick reply: the same path as typing — term.paste (bracketed when the

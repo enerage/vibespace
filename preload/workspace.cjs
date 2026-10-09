@@ -71,6 +71,12 @@ contextBridge.exposeInMainWorld('vs', {
   waitClaudeExit: (termId, timeoutMs, noKill) => ipcRenderer.invoke('pty:waitClaudeExit', termId, timeoutMs, Boolean(noKill)),
   claudeRunning: (termId) => ipcRenderer.invoke('pty:claudeRunning', termId),
   onAccountSwitch: (cb) => ipcRenderer.on('account:switch', (e, msg) => cb(msg)),
+  // internet outage (main/netwatch.cjs): { offline, since, targets }; resume =
+  // the API answers again, { termIds } may get `continue`; report what was done
+  netGet: () => ipcRenderer.invoke('net:get'),
+  netReport: (termId, what, why) => ipcRenderer.send('net:report', termId, what, why || ''),
+  onNetState: (cb) => ipcRenderer.on('net:state', (e, st) => cb(st)),
+  onNetResume: (cb) => ipcRenderer.on('net:resume', (e, msg) => cb(msg)),
 
   appRestart: () => ipcRenderer.invoke('app:restart'),
   ptyBusy: (wsId) => ipcRenderer.invoke('pty:busy', wsId),

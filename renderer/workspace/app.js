@@ -9,6 +9,7 @@ import { ago } from './ui/history.js';
 import * as prefs from './ui/prefs.js';
 import { applyTheme } from './ui/themes.js';
 import * as limits from './ui/limits.js';
+import * as netchip from './ui/netchip.js';
 import { pickLogo } from './ui/logopick.js';
 
 const wsId = new URLSearchParams(location.search).get('id');
@@ -407,6 +408,7 @@ async function main() {
 
   const shot = new URLSearchParams(location.search).get('shot');
   limits.init(wsId); // 5h/7d plan-limit chip (claude data feed)
+  netchip.init(); // ⚠ Offline · N waiting (internet outage, main/netwatch.cjs)
   terms.init({
     wsId,
     repoPath: ws.repoPath,

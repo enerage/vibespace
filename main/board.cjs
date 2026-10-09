@@ -32,6 +32,7 @@ function buildSummary({ wsId, name, terminals, statusOf, feedOf, reasonOf, now =
       name: t.name || t.termId,
       status: statusOf(t.termId) || null,
       failed: Boolean(f && f.failure),
+      net: Boolean(f && f.net), // failed because the internet is down: waits, continues by itself
       reason: f ? reasonOf(f) : null,
       nowDoing: f && f.nowDoing ? [f.nowDoing.tool, f.nowDoing.detail].filter(Boolean).join(' ') : null,
       contextPct: f && f.context && typeof f.context.pct === 'number' ? f.context.pct : null,

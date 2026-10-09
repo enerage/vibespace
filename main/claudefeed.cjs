@@ -80,6 +80,7 @@ function emptyState() {
     nowDoing: null, attention: null, lastMessage: null, turnStartedAt: null, turnEndedAt: null,
     failure: null, subagents: 0, compacting: null, todos: null, tasks: [],
     background: [], bgNow: null, turnOpen: false,
+    net: null, // waiting for the internet (index.cjs setNet; netwatch.cjs)
   };
 }
 
@@ -255,7 +256,7 @@ function reduceCore(state, kind, event, body, now) {
       return a && s.attention !== a ? { ...s, attention: a } : s;
     }
     case 'UserPromptSubmit':
-      return { ...s, attention: null, failure: null, turnStartedAt: now, turnOpen: true };
+      return { ...s, attention: null, failure: null, net: null, turnStartedAt: now, turnOpen: true };
     case 'SubagentStart':
       return { ...s, subagents: (s.subagents || 0) + 1 };
     case 'SubagentStop': {
@@ -275,7 +276,7 @@ function reduceCore(state, kind, event, body, now) {
       // the turn is over, but background subagents / shells may still be running
       const bg = bgRunning(body.background_tasks) || [];
       return {
-        ...s, nowDoing: null, attention: null, failure: null, lastMessage: lastMsg, turnEndedAt: now, turnOpen: false,
+        ...s, nowDoing: null, attention: null, failure: null, net: null, lastMessage: lastMsg, turnEndedAt: now, turnOpen: false,
         background: bg, bgNow: null, subagents: bg.filter(t => t.type === 'subagent').length,
       };
     }
@@ -313,6 +314,8 @@ function reduceCore(state, kind, event, body, now) {
 // strip, toast body. null when the feed has no reason (base state speaks alone).
 function attentionText(s) {
   if (!s) return null;
+  // a turn that failed because the internet is down: not a failure to act on
+  if (s.net) return 'is waiting for the internet: continues automatically when it is back';
   if (s.failure) return `turn failed: ${s.failure.reason}`;
   const what = s.nowDoing ? [s.nowDoing.tool, s.nowDoing.detail].filter(Boolean).join(' — ') : '';
   if (s.attention === 'permission') return what ? `needs permission: ${what}` : 'needs permission';
@@ -578,6 +581,19 @@ function clearRateLimits(termId) {
   if (t) t.rawLimits = null;
 }
 
+// Internet outage (index.cjs): the tab's failed turn waits for the network
+// ({ since, failedAt, tries, target }) or not (null). It rides on the feed
+// state so the renderer, the board and a reload see it like any other detail;
+// the next UserPromptSubmit / Stop clears it in the reducer.
+function setNet(termId, net) {
+  const t = terms.get(termId);
+  if (!t || !t.state) return false;
+  if (!net && !t.state.net) return false;
+  t.state = { ...t.state, net: net || null };
+  scheduleEmit(termId);
+  return true;
+}
+
 // every term state of a workspace + the account limits (renderer reload/re-attach)
 function snapshot(wsId) {
   const out = {};
@@ -593,6 +609,7 @@ module.exports = {
   stop,
   forget,
   clearRateLimits,
+  setNet,
   _becameFull: becameFull,
   snapshot,
   reduce,

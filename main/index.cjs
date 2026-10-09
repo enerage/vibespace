@@ -39,6 +39,7 @@ const attention = require('./attention.cjs');
 const bgagents = require('./bgagents.cjs');
 const presence = require('./presence.cjs');
 const accounts = require('./accounts.cjs');
+const netwatch = require('./netwatch.cjs');
 
 // ---------- CLI args ----------
 function parseArgv() {
@@ -288,6 +289,7 @@ function notifyAttention(wsId, termId, st) {
   // the toast is a user choice per event kind (⚙ Preferences → Notifications,
   // machine-wide); the taskbar badge below always shows
   if (notifyprefs.shouldToast(st)) {
+    if (st === 'failed') logger.info(`toast: failed ws=${wsId} term=${termId}`); // evidence for the outage path (net:)
     try {
       const n = new Notification({ title, body, icon: ws && ws.iconPath && fs.existsSync(ws.iconPath) ? ws.iconPath : undefined });
       n.on('click', () => {
@@ -1027,6 +1029,10 @@ function initIpc() {
   });
   // feed state for a (re)loaded renderer: meters show at once after a reload
   ipcMain.handle('feed:snapshot', (e, wsId) => claudefeed.snapshot(wsId));
+  // internet outage (netwatch.cjs): the header chip's state, and what the
+  // renderer did with each waiting agent once the API answered again
+  ipcMain.handle('net:get', () => netwatch.status());
+  ipcMain.on('net:report', (e, termId, what, why) => netReport(String(termId || ''), String(what || ''), String(why || '')));
   // agent board: other workspaces' summaries (read-only), a dir watch while a
   // board is open, and focus-a-workspace. Focusing reuses the launcher path:
   // spawning --workspace=<id> of a RUNNING workspace loses its single-instance
@@ -1181,6 +1187,7 @@ function initIpc() {
     termStatus.delete(termId);
     attnTerms.delete(termId);
     termAccount.delete(termId); // ptyhost.create clears the account file too
+    netForget(termId);
     claudefeed.forget(termId);
     for (const win of BrowserWindow.getAllWindows()) {
       if (!win.isDestroyed()) win.webContents.send('pty:exit', termId);
@@ -1224,6 +1231,7 @@ function initIpc() {
   // replace; the idle "waiting for your input" nudge stays green like before
   claudefeed.onHook((wsId, termId, event, body) => {
     noteTurnForAccount(termId, event, body);
+    noteTurnForNet(termId, event, body);
     const st = status.wordForHook(event, body);
     const file = st && ptyhost.statusFileOf(termId);
     if (!file) return;
@@ -1267,6 +1275,7 @@ function initIpc() {
     }
     board.touch(wsId);
   });
+  netwatch.onChange(onNetChange);
   // accounts.json changed (here or in another workspace process) → every window
   accounts.onChange((st) => {
     for (const win of BrowserWindow.getAllWindows()) {
@@ -1364,8 +1373,10 @@ function noteTurnForAccount(termId, event, body) {
 async function handleFailure(wsId, termId, feed) {
   const f = feed.failure;
   const t = (rendererState.get(wsId)?.terminals || []).find(x => x.termId === termId);
-  if (!((t && t.isClaude) || termAccount.has(termId))) { notifyAttention(wsId, termId, 'failed'); return; }
-  const acct = termAccount.get(termId) || accounts.LOGIN;
+  const claudeTab = Boolean((t && t.isClaude) || termAccount.has(termId));
+  // a plain tab's failure toasts at once, unless it may be the internet: that
+  // check needs the transcript's error text (netFailure below)
+  if (!claudeTab && !netwatch.netType(f.type)) { notifyAttention(wsId, termId, 'failed'); return; }
   let type = f.type;
   // always read the transcript: its error line carries quotaLimits.resetsAt, the
   // exact reset time (the feed message has at most the "resets Oct 5, 3pm" text)
@@ -1379,6 +1390,11 @@ async function handleFailure(wsId, termId, feed) {
     if (tx.error === 'rate_limit' || !type) type = tx.error;
     logger.info(`term failed: term=${termId} transcript says [error=${tx.error || '-'} quota=${quota ? `${quota.status}/${quota.type}/${quota.resetsAt}` : '-'} text=${JSON.stringify(String(tx.text || '').slice(0, 200))}]`);
   }
+  // the internet is down: no toast, no badge, no account switch; the tab
+  // waits and continues by itself once the API answers again
+  if (await netFailure(wsId, termId, feed, type, tx)) return;
+  if (!claudeTab) { notifyAttention(wsId, termId, 'failed'); return; }
+  const acct = termAccount.get(termId) || accounts.LOGIN;
   const c = accounts.classifyFailure({ type, message: f.message }, feed.rateLimits, text, Date.now(), quota);
   if (!c.usageLimit) { notifyAttention(wsId, termId, 'failed'); return; }
   accounts.markExhausted(acct, c.until, c.reason);
@@ -1410,6 +1426,136 @@ async function handleFailure(wsId, termId, feed) {
   for (const win of workspaceWindowsFor(wsId)) {
     if (!win.isDestroyed()) win.webContents.send('account:switch', msg);
   }
+}
+
+// ---------- internet outage → wait quietly, continue when it's back ----------
+// (netwatch.cjs; DECISIONS.md 2026-10-09) A turn that failed because the API
+// can't be reached gets no toast, no badge and no account switch: the tab is
+// marked `net` in its feed state (light, board, header chip), and once the
+// probe succeeds twice in a row the renderer types `continue` into it
+// (terms.js netResume), at most NET_MAX_CONTINUES times per tab until a turn
+// ends normally. After that cap a network failure is an ordinary failed turn.
+const NET_MAX_CONTINUES = 3;
+const netOutage = new Map(); // termId -> { tries, firstAt } (kept across our `continue`s)
+
+// the API this tab's claude talks to: an endpoint account's base URL, else
+// Anthropic's (VIBESPACE_NET_PROBE overrides both)
+function netTargetOf(termId) {
+  const id = termAccount.get(termId) || accounts.LOGIN;
+  let baseUrl = null;
+  try {
+    if (accounts.kindOf(id) === 'endpoint') {
+      const row = (accounts.state().accounts || []).find(a => a.id === id);
+      baseUrl = (row && row.baseUrl) || null;
+    }
+  } catch {}
+  return netwatch.targetFor(baseUrl);
+}
+
+// true = handled as an outage (nothing else may run for this failure)
+async function netFailure(wsId, termId, feed, type, tx) {
+  const f = feed.failure;
+  // this failure's own text only: feed.lastMessage may be an older reply
+  const text = [tx && tx.text, f.message].filter(s => typeof s === 'string' && s).join('\n');
+  if (!netwatch.isNetworkFailure({ error: type || '', transcriptText: text })) return false;
+  const name = termName(wsId, termId);
+  const o = netOutage.get(termId) || { tries: 0, firstAt: Date.now() };
+  if (o.tries >= NET_MAX_CONTINUES) {
+    logger.warn(`net: ${name} (${termId}) failed again after ${o.tries} automatic continues: now a normal failed turn`);
+    netOutage.delete(termId);
+    netwatch.release(termId);
+    return false;
+  }
+  const target = netTargetOf(termId);
+  // "Connection error" / ECONNRESET alone could be one bad request: the probe decides
+  if (!netwatch.unambiguous(text)) {
+    const r = await netwatch.probeOnce(target);
+    if (r.ok) {
+      logger.info(`net: ${name} (${termId}) failed with a connection error, but ${target.key} answers (${r.ms} ms): a normal failed turn`);
+      return false;
+    }
+    logger.info(`net: probe ${target.key} failed (${r.why}): the internet is down`);
+  }
+  if (!ptyhost.alive(termId)) return true; // the tab closed meanwhile: nothing to wait for
+  netOutage.set(termId, o);
+  netwatch.wait(termId, target);
+  const tgt = netwatch.status().targets.find(x => x.target === target.key);
+  claudefeed.setNet(termId, { since: (tgt && tgt.since) || Date.now(), failedAt: f.at, tries: o.tries, max: NET_MAX_CONTINUES, target: target.key });
+  logger.info(`net: ${name} (${termId}) waits for the internet (${target.key}; automatic continues so far ${o.tries}/${NET_MAX_CONTINUES}) ${JSON.stringify(text.replace(/\s+/g, ' ').slice(0, 160))}`);
+  pushNetState();
+  board.touch(wsId);
+  return true;
+}
+
+// the header chip in every workspace window of this process
+function pushNetState() {
+  const st = netwatch.status();
+  for (const [id] of winInfo) {
+    const win = BrowserWindow.fromId(id);
+    if (win && !win.isDestroyed()) win.webContents.send('net:state', st);
+  }
+}
+
+function onNetChange(ev) {
+  const iso = (ms) => new Date(ms).toISOString();
+  if (ev.kind === 'offline') logger.warn(`net: offline since ${iso(ev.since)} (${ev.target} unreachable): failed agents wait instead of toasting`);
+  else if (ev.kind === 'idle') logger.info(`net: nothing waits on ${ev.target} any more: probing stopped`);
+  else if (ev.kind === 'online') {
+    const waiting = ev.waiters.filter(id => claudefeed.stateOf(id) && claudefeed.stateOf(id).net);
+    logger.info(`net: back online after ${Math.round(ev.downMs / 1000)}s (${ev.target} answered twice): continuing ${waiting.length} agent(s)`);
+    const byWs = new Map();
+    for (const termId of waiting) {
+      const wsId = ptyhost.wsOf(termId);
+      if (!wsId) continue;
+      if (!byWs.has(wsId)) byWs.set(wsId, []);
+      byWs.get(wsId).push(termId);
+    }
+    for (const [wsId, termIds] of byWs) {
+      const wins = workspaceWindowsFor(wsId).filter(w => !w.isDestroyed());
+      if (!wins.length) {
+        // no window to check the prompt: never type blind
+        for (const termId of termIds) netReport(termId, 'skipped', 'no window');
+        continue;
+      }
+      for (const w of wins) w.webContents.send('net:resume', { termIds });
+    }
+  }
+  pushNetState();
+}
+
+// what the renderer did with a waiting agent (terms.js netResume)
+function netReport(termId, what, why) {
+  const wsId = ptyhost.wsOf(termId);
+  const name = wsId ? termName(wsId, termId) : termId;
+  const o = netOutage.get(termId);
+  if (what === 'continued') {
+    if (o) o.tries++;
+    logger.info(`net: continued ${name} (${termId}) [automatic continue ${o ? o.tries : '?'}/${NET_MAX_CONTINUES}]`);
+    return;
+  }
+  // skipped: typed since the failure, a half-typed prompt, no claude, … — it
+  // is a normal failed tab from now on (light ✕), but no toast: the user is
+  // already there (they typed) or left claude on purpose
+  logger.info(`net: skipped ${name} (${termId}) (${why || 'unknown'})`);
+  netOutage.delete(termId);
+  netwatch.release(termId);
+  claudefeed.setNet(termId, null);
+  pushNetState();
+}
+
+// a main-thread prompt restarts the turn (our `continue`, or the user typed):
+// the tab no longer waits. A turn that ENDS normally ends the outage's count.
+function noteTurnForNet(termId, event, body) {
+  if (body && body.agent_id) return;
+  if (event !== 'UserPromptSubmit' && event !== 'Stop') return;
+  if (event === 'Stop') netOutage.delete(termId);
+  if (netwatch.waitingOn(termId)) { netwatch.release(termId); pushNetState(); }
+}
+
+// the pty exited
+function netForget(termId) {
+  netOutage.delete(termId);
+  if (netwatch.waitingOn(termId)) { netwatch.release(termId); pushNetState(); }
 }
 
 // periodic state save (captures session ids discovered after the last renderer push)

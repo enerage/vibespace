@@ -1934,6 +1934,88 @@ async function runSmoke() {
     }
   }
 
+  // 25. internet outage (netwatch.cjs): failure classifier on real texts, the
+  //     probe watcher's offline → 2 successes → online cycle, the feed's `net`
+  //     state and the light it gives
+  {
+    const nw = require('./netwatch.cjs');
+    const isNet = (error, text) => nw.isNetworkFailure({ error, transcriptText: text });
+    const seen = "API Error: Can't reach the API server — check your internet or DNS (ENOTFOUND)";
+    const yes = isNet('server_error', seen) && isNet('unknown', 'API Error: Connection error.') && isNet(null, 'TypeError: fetch failed')
+      && isNet('server_error', 'getaddrinfo EAI_AGAIN api.anthropic.com') && isNet('server_error', 'connect ECONNREFUSED 127.0.0.1:443')
+      && isNet('server_error', 'read ECONNRESET') && isNet('server_error', 'connect ETIMEDOUT 160.79.104.10:443') && isNet('server_error', 'connect ENETUNREACH')
+      // seen live from claude 2.1.295 (-p, base URL refused / API_TIMEOUT_MS hit)
+      && isNet('server_error', 'API Error: Connection refused — a firewall or proxy may be blocking it (ECONNREFUSED)')
+      && isNet('server_error', 'Request timed out');
+    const no = !isNet('rate_limit', "You've hit your weekly limit · resets Oct 12, 3pm")
+      && !isNet('server_error', 'API Error: 500 {"type":"error","error":{"type":"api_error","message":"Internal server error"}}')
+      && !isNet('overloaded_error', 'API Error: Connection error.') && !isNet('server_error', 'API Error: 529 Overloaded')
+      && !isNet('authentication_failed', 'API Error: 401 network') && !isNet('server_error', 'API Error: 401 {"error":{"message":"OAuth token has expired"}}')
+      && !isNet('server_error', '') && !isNet('server_error', null);
+    const sure = nw.unambiguous(seen) && nw.unambiguous('getaddrinfo ENOTFOUND api.anthropic.com') && !nw.unambiguous('API Error: Connection error.') && !nw.unambiguous('read ECONNRESET') && !nw.unambiguous('Request timed out')
+      && !nw.unambiguous('API Error: Connection refused — a firewall or proxy may be blocking it (ECONNREFUSED)');
+    const prev = process.env.VIBESPACE_NET_PROBE;
+    delete process.env.VIBESPACE_NET_PROBE;
+    const tA = nw.targetFor(null), tZ = nw.targetFor('https://api.z.ai/api/anthropic'), tH = nw.targetFor('http://10.0.0.5:8080/x');
+    process.env.VIBESPACE_NET_PROBE = '127.0.0.1:5999';
+    const tO = nw.targetFor('https://api.z.ai/api/anthropic');
+    if (prev === undefined) delete process.env.VIBESPACE_NET_PROBE; else process.env.VIBESPACE_NET_PROBE = prev;
+    const targetsOk = tA.key === 'api.anthropic.com:443' && tZ.key === 'api.z.ai:443' && tH.key === '10.0.0.5:8080' && tO.key === '127.0.0.1:5999';
+    check('net: outage classifier (real texts) + probe targets', yes && no && sure && targetsOk, JSON.stringify({ yes, no, sure, targetsOk }));
+
+    // watcher: fake probe, short timing
+    nw._reset();
+    nw._setTiming({ offlineMs: 30, confirmMs: 10 });
+    let up = false;
+    const events = [];
+    nw._setProbe(async () => ({ ok: up, why: up ? '' : 'ENOTFOUND', ms: 1 }));
+    nw.onChange((ev) => events.push(ev.kind + (ev.waiters ? ':' + ev.waiters.join(',') : '')));
+    const tgt = nw.parseTarget('api.example.test:443');
+    nw.wait('n1', tgt);
+    nw.wait('n2', tgt);
+    const off = nw.status();
+    await new Promise(r => setTimeout(r, 120)); // several failed probes: still offline
+    const stillOff = nw.status().offline;
+    up = true;
+    await new Promise(r => setTimeout(r, 150));
+    const onAfter = nw.status();
+    nw.wait('n3', tgt);
+    nw.release('n3'); // nothing waits: probing stops, the target is forgotten
+    const idle = nw.status();
+    nw._reset();
+    nw._setProbe(null);
+    nw._setTiming({ offlineMs: 15000, confirmMs: 3000 });
+    nw.onChange(() => {});
+    check('net: watcher offline → probes → online after 2 successes → stops when nothing waits',
+      off.offline && off.targets[0].waiting === 2 && stillOff && !onAfter.offline
+      && JSON.stringify(events) === JSON.stringify(['offline', 'online:n1,n2', 'offline', 'idle']) && !idle.offline,
+      JSON.stringify({ events, off: off.offline, stillOff, on: !onAfter.offline }));
+
+    // real probe: a listening local port answers, a closed one doesn't
+    const http = require('node:http');
+    const srv = http.createServer((q, s) => s.end());
+    await new Promise(r => srv.listen(0, '127.0.0.1', r));
+    const port = srv.address().port;
+    const pOk = await nw.probeOnce(nw.parseTarget(`127.0.0.1:${port}`), 2000);
+    await new Promise(r => srv.close(r));
+    const pBad = await nw.probeOnce(nw.parseTarget(`127.0.0.1:${port}`), 2000);
+    check('net: probe = DNS + TCP connect (open port ok, closed port fails)', pOk.ok && !pBad.ok, JSON.stringify({ pOk, pBad }));
+
+    // feed state: `net` rides on the snapshot, a prompt / Stop clears it;
+    // the light says "waiting for the internet", not failed
+    const feed = require('./claudefeed.cjs');
+    let s = feed.reduce(null, 'hook', 'StopFailure', { error: 'server_error' }, 5);
+    s = { ...s, net: { since: 1, failedAt: 5, tries: 0, target: 'api.anthropic.com:443' } };
+    const txt = feed.attentionText(s);
+    const cleared = feed.reduce(s, 'hook', 'UserPromptSubmit', {}, 6).net === null && feed.reduce(s, 'hook', 'Stop', {}, 6).net === null;
+    const fu = await import(require('node:url').pathToFileURL(path.join(U.ROOT, 'renderer', 'workspace', 'ui', 'feedui.js')).href);
+    const light = fu.lightDetail({ ...s, reason: txt }, 'working');
+    const plain = fu.lightDetail({ ...s, net: null, reason: 'turn failed: server error' }, 'working');
+    check('net: feed state + light (dashed "waiting for the internet", not failed)',
+      /internet/.test(txt) && cleared && light.cls === 'net' && /continues automatically/.test(light.title) && plain.cls === 'failed',
+      JSON.stringify({ txt, cleared, light, plain: plain.cls }));
+  }
+
   // 8. pty echo (powershell)
   const echo = await ptyEchoTest();
   check('pty spawn + echo (powershell)', echo.ok, echo.detail);
