@@ -427,6 +427,11 @@ Key facts encoded in `main/sessions.cjs`:
     in `~/.claude/sessions/<pid>.json` (looked up only when the id differs from
     the tab's last accepted one). Symptoms before: the tab's session flipping
     between two ids in `tabs:` lines, and a false "out" on the tab's account.
+    Claude's daemon (`claude daemon run`) RESTARTS a killed background job
+    within minutes: stop one with `claude stop <job id>` (run in its repo),
+    never taskkill. A background job is a `--fork-session` copy, so the tab's
+    own conversation is the older id; resuming the bg id is refused ("That
+    session is running in the background").
   - **`/exit` can take longer than 15 s.** A gentle move waits up to 75 s, and
     `tab.exitSentAt` marks our own `/exit`: an empty shell found later with
     nothing typed since is relaunched (`launchOnAccount`), never treated as

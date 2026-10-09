@@ -206,6 +206,11 @@ Build in this order. Verify the statusLine and HTTP hooks live in a pty before r
 - [ ] Per-workspace notification badge when an agent finishes (taskbar overlay icon).
 
 ## Internal
+- [ ] Restore of a tab whose saved session is a running BACKGROUND job (claude
+      refuses: "running in the background"): detect `kind: "bg"` in
+      `~/.claude/sessions/*.json` before typing the resume and say so / offer
+      `claude attach` instead of a dead prompt. Since 0.6.53's feed filter a pin
+      can't flip to a bg id any more, so this only hits older saved states (S).
 - [ ] Automatic account order (0.6.53), watch live: a toast per moved tab may be
       noisy with many agents (batch them?); a token account's % only refreshes
       while one of its agents runs, so its room can be stale until its reset;
