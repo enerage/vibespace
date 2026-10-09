@@ -152,7 +152,7 @@ Key facts encoded in `main/sessions.cjs`:
 
 ## Developing VibeSpace
 
-- `npm run smoke` — 125 self-tests (as of 0.6.53) incl. pty echo and live session discovery. Run it after
+- `npm run smoke` — 129 self-tests (as of 0.6.54) incl. pty echo and live session discovery. Run it after
   touching main-process code, **from a normal shell**: inside a Claude pty the stripped
   PATH and nested ConPTY break the pty test (`powershell.exe` "File not found" /
   AttachConsole) — prepend System32 to PATH and give it its own console, or just use a
@@ -244,6 +244,18 @@ Key facts encoded in `main/sessions.cjs`:
     phase-5 script (`scratchpad/shot5.cjs`) drives a NORMAL window instead, with
     auto-resume off and `APPDATA` pointed at the throwaway home so the real Start
     Menu is never touched.
+- **Internet outages** (0.6.54, `main/netwatch.cjs` + `index.cjs` `netFailure` +
+  `terms.js` `netResume` + `ui/netchip.js`): an outage StopFailure carries only
+  `error: "server_error"`; the reason is the transcript's last API error text
+  (claude 2.1.295: "Can't reach the API server … (ENOTFOUND)", "Connection
+  refused … (ECONNREFUSED)", "Request timed out"). `isNetworkFailure` is pure;
+  ambiguous texts need the probe (DNS + TCP connect to the tab's API host,
+  never an HTTP request) to fail too. A network failure skips the toast, the
+  badge AND the account limit-switch, sets `feed.net` (derived light/board
+  state, the status words are unchanged), and main probes every 15 s; online =
+  2 successes in a row → the renderer pastes `continue` (same evidence rules
+  as an account move), max 3 per tab per outage. Live-testable with a local
+  relay as `ANTHROPIC_BASE_URL` plus `VIBESPACE_NET_PROBE=127.0.0.1:<port>`.
 - **Agent board** (0.6.19, `renderer/workspace/ui/board.js`, ▦ or Ctrl+Shift+B):
   - It is an overlay inside `#term-hosts`, so xterms are never disposed or refit
     when it opens or closes.

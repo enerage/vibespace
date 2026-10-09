@@ -2,6 +2,21 @@
 
 Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 
+## [0.6.54] — 2026-10-09
+
+### Added
+- **Internet drops no longer flood you with "turn failed" toasts.** A turn
+  that failed because the API can't be reached ("Can't reach the API server
+  (ENOTFOUND)", "Connection refused", "Request timed out", confirmed by a
+  quick reachability check) gets no toast and no badge. The tab light turns
+  into a dashed amber ring ("waiting for internet"), and the header shows
+  **⚠ Offline · N waiting**.
+- **Agents continue by themselves when the internet is back.** Once the API
+  answers twice in a row, each waiting agent gets `continue`, a few seconds
+  apart. Never over a prompt you typed since the failure, a half-typed prompt
+  or an open dialog. At most 3 automatic continues per agent per outage; after
+  that it is a normal failed turn. Every step is logged as `net:`.
+
 ## [0.6.53] — 2026-10-09
 
 ### Added

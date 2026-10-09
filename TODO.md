@@ -206,6 +206,12 @@ Build in this order. Verify the statusLine and HTTP hooks live in a pty before r
 - [ ] Per-workspace notification badge when an agent finishes (taskbar overlay icon).
 
 ## Internal
+- [ ] Internet outages (0.6.54), watch the next real drop: grep `net:` and
+      `toast: failed`. Not run live yet: the 3-continue cap and "fails again →
+      back to waiting". The dashed amber light is close to the blue background
+      ring; tell them apart better if it confuses (S).
+- [ ] Session-timing heuristic briefly gave one fresh tab another tab's
+      session in the outage test (pre-feed fallback path) — check (S).
 - [ ] Restore of a tab whose saved session is a running BACKGROUND job (claude
       refuses: "running in the background"): detect `kind: "bg"` in
       `~/.claude/sessions/*.json` before typing the resume and say so / offer
