@@ -1155,6 +1155,63 @@ async function runSmoke() {
     check('session pinned from feed session_id (/clear re-pins, heuristic never overrides)', early === false && pinA && pinB && kept,
       JSON.stringify({ early, pinA, pinB, kept }));
 
+    // C1 — feed-launched claudes are NEVER guessed by timing. Two launches in the
+    // same moment: a transcript is born at the first message, inside the LAST
+    // launch's window, so the guess used to give agent-2 agent-1's conversation
+    // (a restart then resumed it twice). The feed's own id, remembered while the
+    // file doesn't exist yet, pins each tab once its file appears (a claude that
+    // dies with no later tick keeps its conversation).
+    {
+      const r1 = 'D:' + BS + 'Repositories' + BS + 'vibespace-smoke-feedlaunch-' + U.randId(6);
+      const d1 = path.join(U.claudeProjectsDir(), U.mungeClaudeDir(r1));
+      fs.mkdirSync(d1, { recursive: true });
+      const fA = 'a1a1a1a1-0000-4000-8000-000000000011';
+      const fB = 'b2b2b2b2-0000-4000-8000-000000000012';
+      sessions.start('smoke-fl', r1);
+      sessions.trackClaudeStart('smoke-fl', 'ag1', { feedLaunch: true });
+      sessions.trackClaudeStart('smoke-fl', 'ag2', { feedLaunch: true });
+      const earlyB = sessions.pinFromFeed('smoke-fl', 'ag2', fB, path.join(d1, fB + '.jsonl')); // launch tick, no file yet
+      fs.writeFileSync(path.join(d1, fA + '.jsonl'), '{}');                                    // agent-1's first message
+      sessions._scan('smoke-fl');
+      const noGuess = sessions.getSession('smoke-fl', 'ag1') === null && sessions.getSession('smoke-fl', 'ag2') === null;
+      const pinA1 = sessions.pinFromFeed('smoke-fl', 'ag1', fA) && sessions.getSession('smoke-fl', 'ag1') === fA;
+      fs.writeFileSync(path.join(d1, fB + '.jsonl'), '{}');                                    // agent-2 writes, then no tick
+      sessions._scan('smoke-fl');
+      const pendingPinned = sessions.getSession('smoke-fl', 'ag2') === fB;
+      const announced = sessions.pinFromFeed('smoke-fl', 'ag2', fB) === true && sessions.pinFromFeed('smoke-fl', 'ag2', fB) === false;
+      const saved = sessions.enrichState('smoke-fl', { terminals: [{ termId: 'ag1' }, { termId: 'ag2' }] }).terminals.map(t => t.claudeSessionId);
+      sessions.stop('smoke-fl');
+      try { fs.rmSync(d1, { recursive: true, force: true }); } catch {}
+      check('feed launches: no timing guess, each tab pinned by its own feed id (pending until written)',
+        earlyB === false && noGuess && pinA1 && pendingPinned && announced && saved[0] === fA && saved[1] === fB,
+        JSON.stringify({ earlyB, noGuess, pinA1, pendingPinned, announced, saved }));
+
+      // C1b — a claude WITHOUT the feed still gets the timing guess, which never
+      // takes an id the feed named for another tab; a feed pin then wins over it
+      const r2 = 'D:' + BS + 'Repositories' + BS + 'vibespace-smoke-nofeed-' + U.randId(6);
+      const d2 = path.join(U.claudeProjectsDir(), U.mungeClaudeDir(r2));
+      fs.mkdirSync(d2, { recursive: true });
+      const nE = 'e5e5e5e5-0000-4000-8000-000000000015';
+      const nC = 'c3c3c3c3-0000-4000-8000-000000000013';
+      const nF = 'f6f6f6f6-0000-4000-8000-000000000016';
+      sessions.start('smoke-nf', r2);
+      sessions.trackClaudeStart('smoke-nf', 'old1');                                       // no feed
+      sessions.pinFromFeed('smoke-nf', 'typed', nE, path.join(d2, nE + '.jsonl'));         // hand-typed claude (feed, untracked launch)
+      fs.writeFileSync(path.join(d2, nE + '.jsonl'), '{}');
+      fs.writeFileSync(path.join(d2, nC + '.jsonl'), '{}');
+      sessions._scan('smoke-nf');
+      const guessed = sessions.getSession('smoke-nf', 'old1') === nC;
+      const typedOwn = sessions.getSession('smoke-nf', 'typed') === nE;
+      fs.writeFileSync(path.join(d2, nF + '.jsonl'), '{}');
+      const feedWins = sessions.pinFromFeed('smoke-nf', 'old1', nF) === true;
+      sessions._scan('smoke-nf');
+      const stays = sessions.getSession('smoke-nf', 'old1') === nF;
+      sessions.stop('smoke-nf');
+      try { fs.rmSync(d2, { recursive: true, force: true }); } catch {}
+      check('no-feed launch: timing guess still assigns, skips feed-named ids, feed pin wins',
+        guessed && typedOwn && feedWins && stays, JSON.stringify({ guessed, typedOwn, feedWins, stays }));
+    }
+
     // C2 — worktree tabs: the transcript lives in munged(<worktree>), outside
     // the repo's dir. The feed's transcript_path pins it; sessionExists finds
     // it with the tab's cwd; the timing heuristic never hands an offRepo term a

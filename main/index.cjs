@@ -215,6 +215,11 @@ const switchLog = new Map(); // termId -> [ms] of automatic account switches (lo
 const termFamily = new Map(); // termId -> family of its account when it was set
 const accountSince = new Map(); // termId -> ms its current account was set (older evidence belongs to the previous one)
 const attnTerms = new Map(); // termId -> attention.cjs arbitration state (file vs instant feed)
+// termId -> its pty's claude settings carry the data feed (written while the
+// feed server listened). Such a claude is tracked by the feed's session_id
+// only, never by the timing guess (sessions.cjs feedLaunch). Overwritten on
+// every pty create, never deleted (an old pty's late exit must not clear it).
+const feedPtys = new Map();
 
 // What the tab's `claude` wrapper reads at its next launch: the account file
 // and, for an API endpoint, the tab's own claude settings (hooks + env).
@@ -1003,6 +1008,7 @@ function initIpc() {
   // ptys
   ipcMain.handle('pty:create', (e, { termId, wsId, cwd, cols, rows, rcLabel }) => {
     const settingsPath = ensureHookSettings(wsId);
+    feedPtys.set(String(termId), Boolean(settingsPath && claudefeed.port()));
     ptyhost.create(termId, cwd, cols, rows, wsId, { settingsPath, rcLabel: typeof rcLabel === 'string' ? rcLabel : null });
     defaultTermAccount(String(termId), wsId);
     return { settingsPath };
@@ -1020,8 +1026,10 @@ function initIpc() {
   ipcMain.on('pty:resize', (e, termId, cols, rows) => ptyhost.resize(termId, cols, rows));
   ipcMain.on('pty:kill', (e, termId) => ptyhost.kill(termId));
   ipcMain.on('pty:claudeStarted', (e, wsId, termId, opts) => {
-    logger.info(`claude launch: ws=${wsId} term=${termId}${opts && opts.picker ? ' (resume picker)' : ''}`);
-    sessions.trackClaudeStart(wsId, termId, opts || {});
+    const o = opts || {};
+    const feedLaunch = feedPtys.get(String(termId)) === true;
+    logger.info(`claude launch: ws=${wsId} term=${termId}${o.picker ? ' (resume picker)' : ''}${feedLaunch ? '' : ' (no feed: timing guess)'}`);
+    sessions.trackClaudeStart(wsId, termId, { picker: Boolean(o.picker), offRepo: Boolean(o.offRepo), feedLaunch });
   });
   ipcMain.on('pty:sessionPinned', (e, wsId, termId, sessionId) => {
     logger.info(`claude resume: ws=${wsId} term=${termId} session=${sessionId}`);

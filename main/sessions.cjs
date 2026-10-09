@@ -48,11 +48,19 @@ function stop(wsId) {
 // offRepo: the tab's cwd is not the repo root (a worktree tab). Its transcript
 // lives in munged(<cwd>), so the timing heuristic (repo dir only) must never
 // hand it a repo-dir file; the feed pins it instead.
-function trackClaudeStart(wsId, termId, { picker = false, offRepo = false } = {}) {
+// feedLaunch: main says this claude got our --settings WITH the data feed in it
+// (the feed server was listening when the pty's settings were written). Such a
+// term is NEVER guessed by timing or mtime: only its own feed session_id pins
+// it. The guess is wrong whenever two agents start close together: a transcript
+// is born at the FIRST MESSAGE, so it lands in the window of whichever tab
+// launched last, and agent-2 got agent-1's conversation until the feed fixed it
+// (a restart in between = two claudes on one transcript).
+function trackClaudeStart(wsId, termId, { picker = false, offRepo = false, feedLaunch = false } = {}) {
   const state = active.get(wsId);
   if (!state) return;
   const prev = state.terms.get(termId) || {};
-  state.terms.set(termId, { startedAt: Date.now(), sessionId: prev.sessionId, picker, feed: prev.feed, offRepo: Boolean(offRepo) });
+  // a new claude: an older one's not-yet-written session will never be written
+  state.terms.set(termId, { startedAt: Date.now(), sessionId: prev.sessionId, picker, feed: prev.feed, offRepo: Boolean(offRepo), feedLaunch: Boolean(feedLaunch), pending: null });
   scheduleScan(wsId);
 }
 
@@ -73,7 +81,8 @@ function pinSession(wsId, termId, sessionId) {
   const state = active.get(wsId);
   if (!state) return;
   const prev = state.terms.get(termId) || { startedAt: 0 };
-  state.terms.set(termId, { startedAt: prev.startedAt || Date.now(), sessionId });
+  // keeps how the claude was launched (offRepo/feedLaunch); the id is exact
+  state.terms.set(termId, { startedAt: prev.startedAt || Date.now(), sessionId, offRepo: Boolean(prev.offRepo), feedLaunch: Boolean(prev.feedLaunch), pending: null });
 }
 
 // Exact mapping from the claude data feed: every statusLine/hook body carries
@@ -90,14 +99,25 @@ function transcriptMatches(sessionId, transcriptPath) {
   try { return fs.existsSync(transcriptPath); } catch { return false; }
 }
 
+// Not written yet: the id is remembered as `pending` and scan() pins it once
+// its file appears, so a claude that dies right after its first message (no
+// tick after the transcript was born) still keeps that conversation. That pin
+// is exact too (the feed named the id), just not announced with a family, so
+// the next tick (if any) still goes through the full path (feed: 'scan').
 function pinFromFeed(wsId, termId, sessionId, transcriptPath = null) {
   const state = active.get(wsId);
   if (!state || !sessionId) return false;
   const prev = state.terms.get(termId) || { startedAt: 0 };
-  if (prev.sessionId === sessionId && prev.feed) return false;
-  if (!sessionExists(wsId, sessionId) && !transcriptMatches(sessionId, transcriptPath)) return false; // not written yet — retried on the next tick
-  state.terms.set(termId, { ...prev, startedAt: prev.startedAt || Date.now(), sessionId, picker: false, feed: true });
-  return prev.sessionId !== sessionId;
+  if (prev.sessionId === sessionId && prev.feed === true) {
+    if (prev.pending) state.terms.set(termId, { ...prev, pending: null }); // back on it (/resume after a /clear never written)
+    return false;
+  }
+  if (!sessionExists(wsId, sessionId) && !transcriptMatches(sessionId, transcriptPath)) {
+    if (prev.sessionId !== sessionId) state.terms.set(termId, { ...prev, pending: { sessionId, transcriptPath: transcriptPath || null } });
+    return false; // retried on the next tick (and by scan)
+  }
+  state.terms.set(termId, { ...prev, startedAt: prev.startedAt || Date.now(), sessionId, picker: false, feed: true, pending: null });
+  return prev.sessionId !== sessionId || prev.feed === 'scan';
 }
 
 function getSession(wsId, termId) {
@@ -283,17 +303,35 @@ function scan(wsId) {
     if (state.dir) attachWatcher(state, wsId);
     dbg(`[sessions] dir re-resolved: ${state.dir}`);
   }
-  if (!state.dir) { dbg('[sessions] scan skipped: no dir yet'); return; }
+  // the feed named a session before its transcript existed: pin it once it does
+  // (exact, not a guess; works for worktree tabs too via the feed's path)
+  let changed = false;
+  for (const [termId, t] of state.terms) {
+    const p = t.pending;
+    if (!p || !p.sessionId) continue;
+    if (!sessionExists(wsId, p.sessionId) && !transcriptMatches(p.sessionId, p.transcriptPath)) continue;
+    state.terms.set(termId, { ...t, sessionId: p.sessionId, picker: false, feed: 'scan', pending: null });
+    changed = true;
+    sessionListener(wsId, termId, p.sessionId);
+  }
+  if (!state.dir) { dbg('[sessions] scan skipped: no dir yet'); return changed; }
   const files = listSessionFiles(state.dir);
   dbg(`[sessions] scan ws=${wsId} files=${files.length} dir=${state.dir}`);
-  if (files.length === 0) return;
+  if (files.length === 0) return changed;
 
+  // every id a tab already owns or that the feed named (about to be written)
+  // belongs to that tab: the guesses below must never hand it to another one
+  const takenIds = new Set();
+  for (const t of state.terms.values()) {
+    if (t.sessionId) takenIds.add(t.sessionId);
+    if (t.pending && t.pending.sessionId) takenIds.add(t.pending.sessionId);
+  }
   const terms = [...state.terms.entries()]
     .map(([termId, t]) => ({ termId, ...t }))
     .filter(t => t.startedAt && !t.offRepo) // worktree tabs: feed only (their files aren't here)
     .sort((a, b) => a.startedAt - b.startedAt);
   dbg(`[sessions] tracked terms=${terms.length} -> ${terms.map(t => `${t.termId}@${t.startedAt}${t.sessionId ? '+sess' : ''}`).join(', ')}`);
-  if (terms.length === 0) return;
+  if (terms.length === 0) return changed;
 
   // Claude Code creates the session .jsonl only when the first message is sent,
   // which can be minutes after launch. So: an unresolved terminal owns the earliest
@@ -301,10 +339,11 @@ function scan(wsId) {
   // claude launched (the last terminal's window is unbounded).
   // Picker-launched tabs are different: the user resumed an OLD conversation via
   // claude's interactive picker, so we pin the old file that came alive instead.
-  const takenIds = new Set(terms.filter(t => t.sessionId).map(t => t.sessionId));
-  let changed = false;
+  // Both guesses are only for claudes WITHOUT a feed. A feed-launched term
+  // still counts as a window boundary (a no-feed tab's window must not reach
+  // into the files born after it launched) but is never assigned here.
   for (const term of terms) {
-    if (term.sessionId) continue;
+    if (term.sessionId || term.feedLaunch) continue;
     if (term.picker) {
       const match = pickResumed(files, term.startedAt, takenIds);
       if (match) {
@@ -317,11 +356,11 @@ function scan(wsId) {
     }
   }
   terms.forEach((term, i) => {
-    if (term.sessionId || term.picker) return; // resolved, or handled above
+    if (term.sessionId || term.picker || term.feedLaunch) return; // resolved, handled above, or feed-only
     const windowStart = term.startedAt - 2000;
     const windowEnd = i + 1 < terms.length ? terms[i + 1].startedAt - 2000 : Infinity;
     const candidates = files
-      .filter(f => f.born >= windowStart && f.born < windowEnd)
+      .filter(f => f.born >= windowStart && f.born < windowEnd && !takenIds.has(f.id))
       .sort((a, b) => a.born - b.born);
     const match = candidates[0];
     if (match) {
