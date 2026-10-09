@@ -157,7 +157,14 @@
       </div>
 
       <div class="prefs-label" style="margin-top: 14px;">Accounts</div>
-      <div class="prefs-hint">New agents start on the first available account; when one runs out, its agents continue on the next.</div>
+      <div class="prefs-row">
+        <div>
+          <div class="prefs-label">Automatic order (use the account that resets soonest first)</div>
+          <div class="prefs-hint">A weekly allowance not used before its reset is lost. New agents start on the Claude account whose 7-day limit resets soonest; idle agents move there once their prompt cache is cold. An account at 95 % passes its agents to the next one until it resets. All workspaces.</div>
+        </div>
+        <label class="toggle"><input type="checkbox" id="acct-auto" checked /></label>
+      </div>
+      <div id="acct-order-hint" class="prefs-hint">New agents start on the first available account; when one runs out, its agents continue on the next.</div>
       <div id="acct-list"></div>
       <div class="acct-tools"><button id="acct-open-add" class="btn small">+ Add account</button></div>
       <!-- "+ Add account": pick a provider, then paste one key (prefs.js) -->

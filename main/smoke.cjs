@@ -1355,6 +1355,40 @@ async function runSmoke() {
     };
     check('accounts.classifyFailure (weekly limit, credits, 529, rate_limits 100 %)', Object.values(cf).every(Boolean), JSON.stringify(cf));
 
+    // automatic order (rankRows, pure): soonest weekly reset first among the
+    // Claude accounts with room; endpoints keep their manual slots
+    {
+      const T = L(2026, 9, 9, 12); // Fri Oct 9 2026, 12:00 local
+      const S = (ms) => Math.floor(ms / 1000);
+      const mon = S(L(2026, 9, 12, 15)), thu = S(L(2026, 9, 15, 15));
+      const row = (id, limits, extra = {}) => ({ id, family: 'anthropic', usable: true, exhaustedUntil: null, limits, ...extra });
+      const w = (pct, resetsAt) => ({ used_percentage: pct, resets_at: resetsAt });
+      const real = acc.rankRows([row('login', { seven_day: w(71, thu) }), row('main', { seven_day: w(18, mon) })], T);
+      const passedAt = S(T) - 86400;
+      const proj = acc.rankRows([row('a', { seven_day: w(99, passedAt) }), row('b', { seven_day: w(50, S(T) + 3 * 86400) })], T);
+      const five = { seven_day: w(18, mon), five_hour: w(97, S(T) + 2 * 3600) };
+      const capped = acc.rankRows([row('login', { seven_day: w(71, thu) }), row('main', five)], T);
+      const back = acc.rankRows([row('login', { seven_day: w(71, thu) }), row('main', five)], T + 2 * 3600e3 + 1000);
+      const unknown = acc.rankRows([row('u1', null), row('k', { seven_day: w(30, thu) }), row('u2', null)], T);
+      const ep = (id) => ({ id, family: 'endpoint:api.z.ai', usable: true, exhaustedUntil: null, limits: null });
+      const mixed = acc.rankRows([ep('z1'), row('login', { seven_day: w(71, thu) }), ep('z2'), row('main', { seven_day: w(18, mon) })], T);
+      const out = acc.rankRows([row('x', null, { usable: false }), row('o', { seven_day: w(5, mon) }, { usable: false, exhaustedUntil: T + 3600e3 }), row('k', { seven_day: w(40, thu) })], T);
+      const rk = {
+        realCase: real.ranked.join() === 'main,login' && real.info.main.room && real.info.main.weeklyResetAt === mon,
+        projected: proj.ranked.join() === 'b,a' && proj.info.a.weeklyResetAt === passedAt + 7 * 86400 && proj.info.a.weeklyPct === 0 && proj.info.a.room,
+        fiveCapDrops: capped.ranked.join() === 'login,main' && capped.info.main.blockedBy === '5h' && capped.info.main.roomAt === S(T) + 2 * 3600 && !capped.info.main.room,
+        fiveCapReturns: back.ranked.join() === 'main,login' && back.info.main.room && back.info.main.fivePct === 0,
+        unknownAfterKnown: unknown.ranked.join() === 'k,u1,u2',
+        endpointsKeepSlots: mixed.ranked.join() === 'z1,main,z2,login' && mixed.info.z1.weeklyResetAt === null,
+        outAndUnavailableLast: out.ranked.join() === 'k,o,x' && out.info.o.blockedBy === 'out' && out.info.x.blockedBy === 'unavailable',
+        weekFull: acc.rankRows([row('a', { seven_day: w(96, mon) }), row('b', { seven_day: w(10, thu) })], T).ranked.join() === 'b,a',
+        nextChange: acc._nextRankChange(capped, T) === (S(T) + 2 * 3600) * 1000,
+      };
+      check('accounts.rankRows (automatic order: soonest weekly reset, 5h spill/return, projection, endpoints)', Object.values(rk).every(Boolean), JSON.stringify(rk));
+    }
+    // the checks below are the manual order's ("Move all here", ↑/↓): automatic off
+    acc.setAuto(false);
+
     // store + DPAPI: add → blob → PowerShell decrypt gives the same token back
     const fakeToken = 'sk-ant-oat01-' + 'SmokeFakeToken_' + U.randId(24) + '-x';
     const s0 = acc.state();
@@ -1434,6 +1468,32 @@ async function runSmoke() {
       acc.setLimits(id2, { five_hour: { used_percentage: 42, resets_at: 1790693400 } });
       st.limits = acc.state().accounts[1].limits && acc.state().accounts[1].limits.five_hour.used_percentage === 42;
       check('accounts store (pick, exhaustion only extends, expiry, order/move, rename, limits)', Object.values(st).every(Boolean), JSON.stringify(st));
+
+      // automatic order through the store: its own file (default on), pick and
+      // state follow the ranking, "Move all here" refused while it is on
+      {
+        const au = {};
+        const sNow = Math.floor(Date.now() / 1000);
+        const loginOk = acc.state().accounts.find(a => a.id === 'login').available;
+        au.offInFile = acc.readAuto() === false && JSON.parse(fs.readFileSync(acc._files().auto, 'utf8')).auto === false
+          && !fs.readFileSync(acc._files().accounts, 'utf8').includes('"auto"');
+        acc.setLimits(id2, { seven_day: { used_percentage: 18, resets_at: sNow + 120 } });
+        au.offManual = acc.state().ranked.join() === `login,${id2}` && (!loginOk || acc.pick() === 'login');
+        const sOn = acc.setAuto(true);
+        au.on = sOn.auto === true && sOn.ranked[0] === id2 && acc.pick() === id2 && sOn.accounts.find(a => a.id === id2).weeklyResetAt === sNow + 120;
+        let refused = false;
+        try { acc.switchAll(id2); } catch { refused = true; }
+        au.switchAllRefused = refused && acc.state().switchAll === null;
+        acc.setLimits(id2, { seven_day: { used_percentage: 18, resets_at: sNow + 120 }, five_hour: { used_percentage: 97, resets_at: sNow + 3600 } });
+        const sCap = acc.state();
+        au.fiveCap = sCap.accounts.find(a => a.id === id2).blockedBy === '5h' && sCap.accounts.find(a => a.id === id2).room === false
+          && (!loginOk || (sCap.ranked[0] === 'login' && acc.pick() === 'login'));
+        fs.rmSync(acc._files().auto, { force: true });
+        fs.rmSync(acc._files().auto + '.bak', { force: true });
+        au.defaultOn = acc.readAuto() === true;
+        acc.setAuto(false);
+        check('accounts automatic order (own file, default on, pick follows rank, 5h cap, no Move all)', Object.values(au).every(Boolean), JSON.stringify(au));
+      }
 
       // wrapper dry-run with an account file: login keeps --remote-control, a token
       // account gets none, a missing blob says so. The pty start clears a stale file.

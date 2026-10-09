@@ -5,6 +5,7 @@ import * as feedui from './feedui.js';
 import * as board from './board.js';
 import * as parked from './parked.js';
 import * as inputsel from './inputsel.js';
+import * as automove from './automove.js';
 
 // terminal tabs: each hosts a PowerShell pty; "claude" tabs run Claude Code and
 // get their session id tracked (main process) so they can be resumed after updates.
@@ -188,13 +189,18 @@ function followModel(tab, f) {
   persist();
 }
 
-// ---- "move all agents here" ----------------------------------------------------
+// ---- "move all agents here" / automatic order ---------------------------------
 // A tab still owes a move when the request is newer than its account choice.
 // Only tabs with a known conversation move: without a session id there is
 // nothing to resume, and a relaunch could strand an untracked conversation.
 // A target of another family never moves it (nor shows the "→ X" chip).
+// With the automatic order on (accounts.state().auto), the target is the
+// top-ranked account of the tab's family instead (ui/automove.js), and the
+// move also waits for a cold prompt cache (autoWaitUntil).
+const autoOn = () => Boolean(accountsState && accountsState.auto);
 function pendingMove(tab) {
   if (!tab || !tab.isClaude || tab.dead || !tab.sessionId) return null;
+  if (autoOn()) return automove.autoTarget(tab, accountsState, Date.now(), { family: tabFamily(tab), usable: accountUsable });
   const cur = tab.account || 'login';
   const to = switchTarget(tab.accountAt, tabFamily(tab));
   return to && to !== cur ? to : null;
@@ -206,13 +212,17 @@ function pendingMove(tab) {
 // since the last Enter, also unknown after a reload). A running turn, an open
 // dialog, a compaction, background work the turn left running (exiting claude
 // would kill it) and a claude that is still starting all wait.
-const MOVE_SETTLE_MS = 20000;
+const MOVE_SETTLE_MS = automove.MOVE_SETTLE_MS;
 function busyForMove(tab) {
-  if (tab.switching || tab.status !== 'done' || !tab.doneAt || tab.draft) return true;
-  if (Date.now() - (tab.launchedAt || 0) < MOVE_SETTLE_MS) return true;
   const f = feeds.get(tab.id);
-  if (f && (f.compacting || f.attention)) return true;
-  return feedui.bgTasks(f, 'done').length > 0;
+  return automove.busyForMove(tab, f, Date.now(), feedui.bgTasks(f, 'done').length);
+}
+// automatic order only: when the tab's prompt cache is cold (ms; 0 = it is;
+// Infinity = can't tell yet). "Move all here" and the limit switch never wait.
+function autoWaitUntil(tab) {
+  if (!autoOn()) return 0;
+  const at = automove.cacheColdAt(feeds.get(tab.id), tab.doneAt);
+  return at === null ? Infinity : (at <= Date.now() ? 0 : at);
 }
 
 // one agent at a time: every relaunch stops and starts a claude
@@ -223,8 +233,18 @@ function drainLater(ms) {
   if (moveRetry) return;
   moveRetry = setTimeout(() => { moveRetry = null; drainMoves(); }, ms);
 }
+// automatic order: one wake-up at the earliest cache expiry of a waiting tab
+// (a reset passing comes from main as accounts:changed)
+let autoWake = null;
+function armAutoWake(at) {
+  clearTimeout(autoWake);
+  autoWake = null;
+  if (!Number.isFinite(at)) return;
+  autoWake = setTimeout(() => { autoWake = null; drainMoves(); }, Math.min(Math.max(at - Date.now() + 2000, 5000), 6 * 3600 * 1000));
+}
 function drainMoves() {
-  if (!accountsState || !accountsState.switchAll) return;
+  if (!accountsState || !(accountsState.switchAll || accountsState.auto)) { armAutoWake(Infinity); return; }
+  let wakeAt = Infinity;
   for (const tab of tabs.values()) {
     if (tab.moveQueued || !pendingMove(tab)) continue;
     if (busyForMove(tab)) {
@@ -232,26 +252,36 @@ function drainMoves() {
       if (tab.status === 'done' && tab.doneAt && !tab.draft && !tab.switching) drainLater(MOVE_SETTLE_MS + 1000);
       continue;
     }
+    const cold = autoWaitUntil(tab);
+    if (cold) { wakeAt = Math.min(wakeAt, cold); continue; } // warm cache (Infinity: no finished turn seen)
     tab.moveQueued = true;
     moveChain = moveChain.then(() => moveOne(tab)).catch((e) => console.warn('account move failed', e && e.message));
   }
+  armAutoWake(wakeAt);
 }
 
 async function moveOne(tab) {
   tab.moveQueued = false;
   const id = tab.id;
   let to = pendingMove(tab);
-  if (!to || !tabs.has(id) || busyForMove(tab)) return;
+  if (!to || !tabs.has(id) || busyForMove(tab) || autoWaitUntil(tab)) return;
   // The user may have left claude by hand: then this shell could be running
   // anything (a REPL, an editor), and nothing must be typed into it.
   const running = await vs.claudeRunning(id);
   to = pendingMove(tab);
-  if (!to || !tabs.has(id) || busyForMove(tab)) return; // typed or started meanwhile
+  if (!to || !tabs.has(id) || busyForMove(tab) || autoWaitUntil(tab)) return; // typed or started meanwhile
+  const auto = autoOn();
+  const from = tab.account || 'login';
+  const why = auto ? autoReason(from, to) : '';
   if (running === false) {
     try {
       const used = await vs.setTermAccount(id, to); // the next `claude` typed here uses it
       tab.account = typeof used === 'string' ? used : to;
       tab.accountAt = Date.now();
+      if (auto) {
+        tab.autoMovedAt = Date.now();
+        console.warn(`account auto: ${tab.name} (${id}) ${from} -> ${tab.account}, no claude running: account set without a relaunch (${why})`);
+      }
       console.warn(`account move: ${id} has no claude running, account set to ${tab.account} without a relaunch`);
       renderTabBar();
       persist();
@@ -265,8 +295,26 @@ async function moveOne(tab) {
   if ((tab.account || 'login') !== to) {
     // couldn't tell, or claude didn't leave: one retry, then leave the tab alone
     tab.moveFails = (tab.moveFails || 0) + 1;
-    if (tab.moveFails >= 2) { tab.accountAt = Date.now(); renderTabBar(); persist(); } else drainLater(30000);
+    if (auto) console.warn(`account auto: ${tab.name} (${id}) ${from} -> ${to} failed (attempt ${tab.moveFails})`);
+    if (tab.moveFails >= 2) {
+      tab.accountAt = Date.now();
+      if (auto) tab.autoHoldUntil = Date.now() + automove.AUTO_COOLDOWN_MS; // the automatic order ignores accountAt
+      renderTabBar();
+      persist();
+    } else drainLater(30000);
+  } else if (auto) {
+    tab.autoMovedAt = Date.now(); // no ping-pong: stays for 30 min unless its account runs out of room
+    console.warn(`account auto: ${tab.name} (${id}) ${from} -> ${to} (${why})`);
+    toast(`${tab.name} moved to ${accountLabel(to)} (automatic order: ${why})`);
   }
+}
+
+// why the automatic order moves a tab, for the log line and the toast
+function autoReason(from, to) {
+  const a = accountById(from);
+  const t = accountById(to);
+  if (a && a.room === false) return `${a.label}: ${automove.roomText(a)}, cache cold`;
+  return t && t.weeklyResetAt ? `${t.label} resets sooner (${automove.resetText(t.weeklyResetAt)}), cache cold` : 'top account, cache cold';
 }
 
 const TERM_OPTS = {
@@ -1442,7 +1490,9 @@ function acctChip(tab) {
     const target = accountById(to);
     const toName = target ? target.label : to;
     const p = el('span', 'acct-pill switching', '→ ' + (toName.length > 9 ? toName.slice(0, 8) + '…' : toName));
-    p.title = `On ${name}. Moves to ${toName} after its next finished turn, while the prompt is empty. Right-click → Continue on ${toName} moves it now.`;
+    p.title = autoOn()
+      ? `On ${name}. Automatic order: moves to ${toName} (${automove.roomText(target)}) once it is idle with an empty prompt and its prompt cache is cold. Right-click → Continue on ${toName} moves it now.`
+      : `On ${name}. Moves to ${toName} after its next finished turn, while the prompt is empty. Right-click → Continue on ${toName} moves it now.`;
     return p;
   }
   const c = el('span', 'acct-pill', name.length > 10 ? name.slice(0, 9) + '…' : name);

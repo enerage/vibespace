@@ -544,6 +544,7 @@ body { margin: 0; background: var(--bg); color: var(--text); font: 13.5px/1.45 "
 .acct-row .acct-name { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .acct-row .acct-name .prefs-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .acct-row .acct-out { color: var(--danger); }
+.acct-row .acct-rank.top { color: var(--accent-text); }
 .acct-actions { display: flex; align-items: center; gap: 4px; flex: none; }
 .acct-actions .btn.small { padding: 2px 7px; }
 .acct-row input.acct-rename, .acct-add input {
@@ -738,6 +739,8 @@ body.dragging #split-v, body.dragging #split-h { background: color-mix(in srgb, 
 .lim-label { color: var(--accent-text); font-weight: 600; }
 .lim-none { color: var(--dim); }
 .lim-out { color: var(--danger); font-weight: 600; }
+/* automatic order: the account new agents start on */
+.lim-top { color: var(--accent); margin-right: -4px; }
 /* top bar too narrow: countdowns go first, then the bars */
 #limits-chip.no-cd .lim-cd, #limits-chip.no-bar .lim-bar { display: none; }
 

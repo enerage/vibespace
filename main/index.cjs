@@ -1110,6 +1110,8 @@ function initIpc() {
   ipcMain.handle('accounts:move', (e, id, delta) => accounts.move(String(id || ''), delta));
   ipcMain.handle('accounts:switchAll', (e, id) => accounts.switchAll(String(id || '')));
   ipcMain.handle('accounts:clear', (e, id) => accounts.clear(String(id || '')));
+  // automatic order on/off (machine-wide, its own file)
+  ipcMain.handle('accounts:setAuto', (e, on) => accounts.setAuto(Boolean(on)));
   // never a fallback to the /login: an unknown account, or an API endpoint whose
   // settings can't be decrypted, REJECTS (the renderer then types no claude).
   // An endpoint's env goes into this tab's own claude settings file (the

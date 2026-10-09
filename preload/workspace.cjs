@@ -64,6 +64,7 @@ contextBridge.exposeInMainWorld('vs', {
   accountsMove: (id, delta) => ipcRenderer.invoke('accounts:move', id, delta),
   accountsSwitchAll: (id) => ipcRenderer.invoke('accounts:switchAll', id),
   accountsClear: (id) => ipcRenderer.invoke('accounts:clear', id),
+  accountsSetAuto: (on) => ipcRenderer.invoke('accounts:setAuto', on),
   onAccountsChanged: (cb) => ipcRenderer.on('accounts:changed', (e, state) => cb(state)),
   setTermAccount: (termId, accountId) => ipcRenderer.invoke('accounts:setTerm', termId, accountId),
   sessionFamily: (sessionId) => ipcRenderer.invoke('accounts:sessionFamily', sessionId),

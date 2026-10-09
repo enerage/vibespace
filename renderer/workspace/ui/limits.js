@@ -1,6 +1,7 @@
 import { $, el } from './common.js';
 
-// Plan-limit chip in the top bar: `5h ▰▰▱ 42% · 1h12m   7d ▰▱▱ 18%`.
+// Plan-limit chip in the top bar: `5h ▰▰▱ 42% · 1h12m   7d ▰▱▱ 18% · 3d12h`.
+// With the automatic account order on, ▸ marks the account new agents start on.
 // With several Claude accounts (the /login + `claude setup-token` accounts,
 // main/accounts.cjs) one labelled group per account, in preference order:
 // `Main 5h ▰▱ 32% · 2h06m 7d ▰▱ 11% │ Work 5h …`. Endpoint accounts (z.ai…)
@@ -125,8 +126,19 @@ function tooltip(r) {
 function appendWindows(box, lim) {
   const five = lim && lim.fiveHour, seven = lim && lim.sevenDay;
   if (five) box.append(segment('5h', five, true));
-  if (seven) box.append(segment('7d', seven, false));
+  if (seven) box.append(segment('7d', seven, true)); // time left until the weekly reset
   return Boolean(five || seven);
+}
+
+// automatic order (main/accounts.cjs rankRows): the Claude account new agents
+// start on = the first ranked one with room; null when the order is manual
+function topAccount() {
+  if (!accts || !accts.auto || !Array.isArray(accts.ranked)) return null;
+  for (const id of accts.ranked) {
+    const a = (accts.accounts || []).find(x => x.id === id);
+    if (a && (a.kind === 'login' || a.kind === 'token') && a.room !== false && a.available !== false) return id;
+  }
+  return null;
 }
 
 function render() {
@@ -145,10 +157,16 @@ function render() {
   } else {
     chip.title = '';
     let allHot = true;
+    const top = topAccount();
     for (const r of list) {
       const g = el('span', 'lim-acct');
       g.title = tooltip(r);
       const short = r.label.length > LABEL_MAX ? r.label.slice(0, LABEL_MAX - 1) + '…' : r.label;
+      if (r.id === top) {
+        g.classList.add('top');
+        g.append(el('span', 'lim-top', '▸'));
+        g.title += '\n\n▸ Automatic order: new agents start here; idle agents move here once their cache is cold';
+      }
       g.append(el('span', 'lim-label', short));
       const wins = r.lim ? [r.lim.fiveHour, r.lim.sevenDay].filter(fresh) : [];
       if (r.outUntil) {

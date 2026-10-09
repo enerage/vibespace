@@ -1,6 +1,7 @@
 import { $, el, toast, confirmBox } from './common.js';
 import { THEMES, applyTheme, currentTheme } from './themes.js';
 import { openSetupTokenTab } from './terms.js';
+import { roomText } from './automove.js';
 
 // Preferences modal (⚙ in the top bar). Absorbs the header controls that
 // cluttered it — terminal layout, logs folder, auto-resume — and owns the
@@ -46,6 +47,13 @@ export function init(opts) {
     e.classList.toggle('hidden', !msg);
   };
   const acctErr = (msg) => msgIn('#acct-error', msg);
+  // automatic order (main/accounts.cjs rankRows): machine-wide, its own file
+  $('#acct-auto').addEventListener('change', (e) => {
+    vs.accountsSetAuto(e.target.checked).then(renderAccounts).catch((err) => {
+      toast('Could not save the account order setting: ' + (err.message || err), 'err');
+      loadAccounts();
+    });
+  });
 
   // "+ Add account" panel: step 1 picks the provider, step 2 asks for one key.
   // Every secret field is emptied after each try, on Back, Cancel and close.
@@ -222,7 +230,18 @@ export function init(opts) {
     if (list.querySelector('.acct-rename')) return; // mid-rename: a change push would kill the input
     list.innerHTML = '';
     const act = (p) => p.then((s) => renderAccounts(s)).catch((e) => toast('Accounts: ' + (e.message || e), 'err'));
-    st.accounts.forEach((a, i) => {
+    // automatic order: rows in ranked order, each with its reason; the manual
+    // controls (↑/↓, Move all here) are off while it decides
+    const auto = st.auto === true;
+    $('#acct-auto').checked = auto;
+    const ranked = auto && Array.isArray(st.ranked) ? st.ranked : null;
+    const rows = ranked ? ranked.map(id => st.accounts.find(a => a.id === id)).filter(Boolean) : st.accounts;
+    const top = ranked ? rows.find(a => a.family === 'anthropic' && a.room !== false && a.available !== false) : null;
+    $('#acct-order-hint').textContent = auto
+      ? 'Order set automatically (soonest weekly reset first, then the order below). Automatic order is on: turn it off to reorder by hand or move all agents.'
+      : 'New agents start on the first available account; when one runs out, its agents continue on the next.';
+    const AUTO_OFF_HINT = 'Automatic order is on: turn it off to choose by hand';
+    rows.forEach((a, i) => {
       const row = el('div', 'prefs-row acct-row');
       const info = el('div');
       info.style.minWidth = '0';
@@ -275,6 +294,14 @@ export function init(opts) {
         hint.append(status);
       }
       info.append(nameLine, hint);
+      if (auto) {
+        const why = el('div', 'prefs-hint acct-rank' + (a === top ? ' top' : ''),
+          (a === top ? '▸ new agents start here · ' : '') + roomText(a));
+        why.title = a.kind === 'endpoint'
+          ? 'API endpoints keep the manual order and never take over Claude conversations'
+          : 'Claude accounts with room come first, the one whose 7-day limit resets soonest on top. An account at 95 % (5-hour or 7-day) goes last until that window resets.';
+        info.append(why);
+      }
 
       const actions = el('div', 'acct-actions');
       if (out) {
@@ -285,22 +312,22 @@ export function init(opts) {
       }
       if (st.accounts.length >= 2) {
         const all = el('button', 'btn small ghost', 'Move all here');
-        all.title = out
-          ? 'This account is out of usage right now'
+        all.title = auto ? AUTO_OFF_HINT
+          : out ? 'This account is out of usage right now'
           : missing ? 'This account is unavailable on this PC'
             : 'Make this the first choice and move every open agent to it, in all workspaces.\nIdle agents move now, one at a time. Busy ones move when their turn ends. Nothing is interrupted.'
               + '\nOnly agents of the same provider move: a conversation never moves between Claude and an API endpoint.';
-        all.disabled = Boolean(out || missing);
+        all.disabled = Boolean(auto || out || missing);
         all.onclick = () => act(vs.accountsSwitchAll(a.id));
         actions.append(all);
       }
       const up = el('button', 'btn small ghost', '↑');
-      up.title = 'Prefer this account';
-      up.disabled = i === 0;
+      up.title = auto ? AUTO_OFF_HINT : 'Prefer this account';
+      up.disabled = auto || i === 0;
       up.onclick = () => act(vs.accountsMove(a.id, -1));
       const down = el('button', 'btn small ghost', '↓');
-      down.title = 'Prefer it less';
-      down.disabled = i === st.accounts.length - 1;
+      down.title = auto ? AUTO_OFF_HINT : 'Prefer it less';
+      down.disabled = auto || i === rows.length - 1;
       down.onclick = () => act(vs.accountsMove(a.id, +1));
       actions.append(up, down);
       if (a.kind === 'token' || a.kind === 'endpoint') {

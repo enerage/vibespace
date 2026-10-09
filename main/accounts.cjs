@@ -214,10 +214,12 @@ function isExhausted(d, id, now) {
 
 // the logged-in account's limits are the shared <dataRoot>/limits.json copy
 // (claudefeed's); token accounts keep theirs here. Raw statusLine window shape,
-// plus `at` (ms, when the reading last changed).
-function loginLimits(now) {
+// plus `at` (ms, when the reading last changed). maxAgeMs: the chip hides a
+// reading older than 6 h; the ranking keeps it (a reset time stays true, and a
+// passed one is projected forward).
+function loginLimits(now, maxAgeMs = 6 * 3600 * 1000) {
   const j = U.readJson(path.join(U.dataRoot(), 'limits.json'), null);
-  if (!j || !j.limits || typeof j.at !== 'number' || now - j.at > 6 * 3600 * 1000) return null;
+  if (!j || !j.limits || typeof j.at !== 'number' || now - j.at > maxAgeMs) return null;
   const w = (x) => (x && typeof x.pct === 'number' ? { used_percentage: x.pct, resets_at: x.resetsAt ?? null } : undefined);
   const out = {};
   if (w(j.limits.fiveHour)) out.five_hour = w(j.limits.fiveHour);
@@ -266,12 +268,175 @@ function familyIn(d, id) {
 }
 const familyOf = (id) => familyIn(read(), id);
 
+// ---------- automatic order ("use what expires first") ----------
+// A weekly allowance not used before its reset is lost, so with the automatic
+// order on, the Claude account (login + token) whose 7-day window resets
+// SOONEST is preferred, as long as it has room. Manual order is only the
+// tie-breaker; endpoint accounts keep their manual order (they report no plan
+// limits), and every account keeps its family's SLOT in the manual order, so
+// the preference between Claude and an endpoint stays the user's.
+// The switch is machine-wide in its OWN file, <dataRoot>/accounts-auto.json
+// ({ auto: bool }, default on): a window on older main code rewrites
+// accounts.json without keys it doesn't know (same reason as accounts-switch.json).
+const ROOM_MAX_PCT = 95; // a window at or above this % = no room
+const WEEK_S = 7 * 86400;
+const autoFile = () => path.join(U.dataRoot(), 'accounts-auto.json');
+let autoCache = null; // { key, value }
+function readAuto() {
+  const key = fileKey(autoFile());
+  if (autoCache && autoCache.key === key) return autoCache.value;
+  const j = key || fs.existsSync(autoFile() + '.bak') ? U.readJson(autoFile(), null) : null;
+  const value = j && typeof j.auto === 'boolean' ? j.auto : true;
+  autoCache = { key, value };
+  return value;
+}
+function setAuto(on) {
+  writeFile(autoFile(), { auto: Boolean(on), at: Date.now() });
+  autoCache = null;
+  // a standing "move all" is a manual choice: the automatic order replaces it
+  if (on && readSwitch()) writeSwitch(null);
+  logger.info(`account auto: automatic order ${on ? 'on' : 'off'}`);
+  return state();
+}
+
+// A 7-day reading at `nowS`: a passed reset is projected forward by whole
+// weeks and that window's % is unknown-but-fresh = 0.
+function weekWindow(w, nowS) {
+  if (!w || typeof w.used_percentage !== 'number') return null;
+  let resetsAt = typeof w.resets_at === 'number' ? w.resets_at : null;
+  let pct = w.used_percentage;
+  if (resetsAt !== null && resetsAt <= nowS) {
+    resetsAt += (Math.floor((nowS - resetsAt) / WEEK_S) + 1) * WEEK_S;
+    pct = 0;
+  }
+  return { pct, resetsAt };
+}
+// A 5-hour reading: a passed reset just means its % is stale → 0.
+function fiveWindow(w, nowS) {
+  if (!w || typeof w.used_percentage !== 'number') return null;
+  const r = typeof w.resets_at === 'number' ? w.resets_at : null;
+  if (r !== null && r <= nowS) return { pct: 0, resetsAt: null };
+  return { pct: w.used_percentage, resetsAt: r };
+}
+
+// PURE. rows (manual order): [{ id, family, usable, exhaustedUntil (ms|null),
+// limits: { five_hour, seven_day } | null }] → { ranked: [ids], info: { id: {
+// room, weeklyResetAt (s, projected), weeklyPct, fivePct, fiveResetAt,
+// blockedBy: 'out'|'7d'|'5h'|'unavailable'|null, roomAt (s|null) } } }.
+// Claude accounts: has-room first (soonest weekly reset, then unknown reset,
+// then manual order); no-room last (soonest time it regains room first,
+// unavailable ones at the very end).
+function rankRows(rows, now = Date.now()) {
+  const nowS = now / 1000;
+  const info = {};
+  rows.forEach((r, idx) => {
+    const exhausted = Boolean(r.exhaustedUntil && r.exhaustedUntil > now);
+    const lim = r.limits || {};
+    const w7 = r.family === 'anthropic' ? weekWindow(lim.seven_day, nowS) : null;
+    const w5 = r.family === 'anthropic' ? fiveWindow(lim.five_hour, nowS) : null;
+    let blockedBy = null;
+    let roomAt = null;
+    if (exhausted) { blockedBy = 'out'; roomAt = r.exhaustedUntil / 1000; }
+    else if (!r.usable) blockedBy = 'unavailable';
+    else {
+      const full = [];
+      if (w7 && w7.pct >= ROOM_MAX_PCT) full.push(['7d', w7.resetsAt]);
+      if (w5 && w5.pct >= ROOM_MAX_PCT) full.push(['5h', w5.resetsAt]);
+      if (full.length) {
+        // the later reset gates it (an unknown reset = never known)
+        full.sort((a, b) => (b[1] === null ? Infinity : b[1]) - (a[1] === null ? Infinity : a[1]));
+        [blockedBy, roomAt] = full[0];
+      }
+    }
+    info[r.id] = {
+      idx,
+      family: r.family,
+      room: blockedBy === null,
+      weeklyResetAt: w7 ? w7.resetsAt : null,
+      weeklyPct: w7 ? w7.pct : null,
+      fivePct: w5 ? w5.pct : null,
+      fiveResetAt: w5 ? w5.resetsAt : null,
+      blockedBy,
+      roomAt,
+    };
+  });
+  const inf = (v) => (v === null || v === undefined ? Infinity : v);
+  const cmp = (a, b) => {
+    const A = info[a], B = info[b];
+    if (A.room !== B.room) return A.room ? -1 : 1;
+    if (A.room) {
+      const d = inf(A.weeklyResetAt) - inf(B.weeklyResetAt);
+      if (d) return d;
+    } else {
+      const ua = A.blockedBy === 'unavailable', ub = B.blockedBy === 'unavailable';
+      if (ua !== ub) return ua ? 1 : -1;
+      const d = inf(A.roomAt) - inf(B.roomAt);
+      if (d) return d;
+    }
+    return A.idx - B.idx;
+  };
+  const claude = rows.filter(r => r.family === 'anthropic').map(r => r.id).sort(cmp);
+  let k = 0;
+  const ranked = rows.map(r => (r.family === 'anthropic' ? claude[k++] : r.id));
+  for (const v of Object.values(info)) { delete v.idx; delete v.family; }
+  return { ranked, info };
+}
+
+// the store's rows for rankRows; login limits from limits.json at any age
+function rankInputs(d, now) {
+  return d.order.map((id) => {
+    const reading = id === LOGIN ? loginLimits(now, Infinity) : (d.limits[id] || null);
+    return {
+      id,
+      family: familyIn(d, id),
+      usable: usable(d, id, now),
+      exhaustedUntil: isExhausted(d, id, now) ? d.exhausted[id].until : null,
+      limits: (reading && reading.limits) || null,
+    };
+  });
+}
+const rank = (now = Date.now()) => rankRows(rankInputs(read(), now), now);
+
+// "resets Mon 15:00 · 82 % left" for the log (local time)
+function rankReason(i) {
+  if (!i) return '?';
+  const t = (s) => new Date(s * 1000).toLocaleString('en-GB', { weekday: 'short', hour: '2-digit', minute: '2-digit' });
+  if (i.blockedBy === 'out') return `out until ${t(i.roomAt)}`;
+  if (i.blockedBy === 'unavailable') return 'unavailable';
+  if (i.blockedBy) return `${i.blockedBy} full` + (i.roomAt ? ` until ${t(i.roomAt)}` : '');
+  if (i.weeklyResetAt) return `resets ${t(i.weeklyResetAt)} · ${Math.round(100 - (i.weeklyPct || 0))} % left`;
+  return 'no reading yet';
+}
+
+// one `account auto:` line per process when the top Claude account changes
+let lastTop;
+function noteTop(r, d) {
+  const top = r.ranked.find(id => familyIn(d, id) === 'anthropic') || null;
+  if (top === lastTop) return;
+  const prev = lastTop;
+  lastTop = top;
+  if (top) logger.info(`account auto: top account ${prev === undefined ? 'is' : `${prev || '-'} ->`} ${top} (${rankReason(r.info[top])})`);
+}
+
+// The next moment the ranking can change without any file changing: a 5-hour
+// or 7-day reset, or an exhaustion running out (epoch ms, or null).
+function nextRankChange(r, now = Date.now()) {
+  let next = Infinity;
+  for (const i of Object.values(r.info)) {
+    for (const s of [i.weeklyResetAt, i.fiveResetAt, i.roomAt]) {
+      if (typeof s === 'number' && Number.isFinite(s) && s * 1000 > now) next = Math.min(next, s * 1000);
+    }
+  }
+  return Number.isFinite(next) ? next : null;
+}
+
 // first account (in preference order) usable now, other than excludeId;
 // { family } keeps it to accounts of that family (a conversation never
-// crosses providers)
+// crosses providers). With the automatic order on, preference = the ranking.
 function pick(excludeId = null, now = Date.now(), { family = null } = {}) {
   const d = read();
-  for (const id of d.order) {
+  const order = readAuto() ? rankRows(rankInputs(d, now), now).ranked : d.order;
+  for (const id of order) {
     if (id === excludeId || (family && familyIn(d, id) !== family)) continue;
     if (usable(d, id, now)) return id;
   }
@@ -280,6 +445,9 @@ function pick(excludeId = null, now = Date.now(), { family = null } = {}) {
 
 function state(now = Date.now()) {
   const d = read();
+  const auto = readAuto();
+  const r = rankRows(rankInputs(d, now), now);
+  if (auto) noteTop(r, d);
   const accounts = d.order.map((id) => {
     const a = d.accounts[id];
     const ex = isExhausted(d, id, now) ? d.exhausted[id] : null; // expired entries drop out
@@ -294,6 +462,14 @@ function state(now = Date.now()) {
       reason: ex ? ex.reason : null,
       limits: (reading && reading.limits) || null,
       limitsAt: (reading && reading.at) || null, // ms; the top-bar chip's "updated … ago"
+      // the automatic order's view (rankRows): s, projected past resets
+      room: r.info[id].room,
+      weeklyResetAt: r.info[id].weeklyResetAt,
+      weeklyPct: r.info[id].weeklyPct,
+      fivePct: r.info[id].fivePct,
+      fiveResetAt: r.info[id].fiveResetAt,
+      blockedBy: r.info[id].blockedBy,
+      roomAt: r.info[id].roomAt,
     };
     if (id === LOGIN && !loggedIn()) row.note = 'not logged in';
     if (a.kind === 'endpoint') {
@@ -304,7 +480,16 @@ function state(now = Date.now()) {
     }
     return row;
   });
-  return { accounts, pick: pick(null, now), switchAll: readSwitch(now) };
+  // auto: the automatic order is on; ranked: every id in its preference order
+  // (manual order when off); nextChangeAt: ms when a reset may reorder it
+  return {
+    accounts,
+    pick: pick(null, now),
+    switchAll: auto ? null : readSwitch(now),
+    auto,
+    ranked: auto ? r.ranked : [...d.order],
+    nextChangeAt: auto ? nextRankChange(r, now) : null,
+  };
 }
 
 const has = (id) => Boolean(read().accounts[id]);
@@ -803,6 +988,7 @@ function move(id, delta) {
 function switchAll(id) {
   const d0 = read();
   if (!d0.accounts[id]) throw new Error('Unknown account');
+  if (readAuto()) throw new Error('Automatic order is on: turn it off to move agents by hand');
   if (isExhausted(d0, id, Date.now())) throw new Error(`${d0.accounts[id].label} is out of usage right now`);
   // a token account whose token file is gone would stop every agent at a shell
   if (!usable(d0, id, Date.now())) {
@@ -903,13 +1089,28 @@ function setLimits(id, rateLimits) {
 const listeners = [];
 let watching = false;
 let lastKey = null;
-const watchKey = () => `${statKey()}|${fileKey(switchFile())}`;
+let rankTimer = null;
+const watchKey = () => `${statKey()}|${fileKey(switchFile())}|${fileKey(autoFile())}`;
+function emit() {
+  const s = state();
+  for (const fn of listeners) { try { fn(s); } catch (e) { logger.warn('accounts listener: ' + e.message); } }
+  armRankTimer(s);
+}
 function onFileChange() {
   const key = watchKey();
   if (key === lastKey) return;
   lastKey = key;
-  const s = state();
-  for (const fn of listeners) { try { fn(s); } catch (e) { logger.warn('accounts listener: ' + e.message); } }
+  emit();
+}
+// A reset passing reorders the automatic ranking although no file changes:
+// push the new state at that moment (one timer, at least 60 s apart).
+function armRankTimer(s) {
+  clearTimeout(rankTimer);
+  rankTimer = null;
+  if (!watching || !s || !s.nextChangeAt) return;
+  const ms = Math.min(Math.max(s.nextChangeAt - Date.now() + 2000, 60000), 6 * 3600 * 1000);
+  rankTimer = setTimeout(() => { rankTimer = null; emit(); }, ms);
+  if (rankTimer.unref) rankTimer.unref();
 }
 
 function onChange(fn) {
@@ -920,14 +1121,19 @@ function onChange(fn) {
   fs.watchFile(file(), { interval: 1000 }, onFileChange);
   fs.watchFile(endpointsFile(), { interval: 1000 }, onFileChange); // an endpoint rename touches only this one
   fs.watchFile(switchFile(), { interval: 1000 }, onFileChange);
+  fs.watchFile(autoFile(), { interval: 1000 }, onFileChange);
+  try { armRankTimer(state()); } catch (e) { logger.warn('accounts rank timer: ' + e.message); }
 }
 
 function unwatch() {
   if (!watching) return;
   watching = false;
+  clearTimeout(rankTimer);
+  rankTimer = null;
   try { fs.unwatchFile(file(), onFileChange); } catch {}
   try { fs.unwatchFile(endpointsFile(), onFileChange); } catch {}
   try { fs.unwatchFile(switchFile(), onFileChange); } catch {}
+  try { fs.unwatchFile(autoFile(), onFileChange); } catch {}
 }
 
 // ---------- limit detection ----------
@@ -1040,8 +1246,13 @@ module.exports = {
   LOGIN,
   LIMIT_TEXT_RE,
   DECRYPT_PS,
+  ROOM_MAX_PCT,
   state,
   pick,
+  rank,
+  rankRows,
+  readAuto,
+  setAuto,
   familyOf,
   has,
   labelOf,
@@ -1081,7 +1292,9 @@ module.exports = {
   _setFamiliesMax: (n) => { familiesMax = Number(n) > 0 ? Number(n) : 2000; },
   _forgetEnv: (id) => { envCache.delete(id); },
   _decryptSpawns: () => decryptSpawns,
-  _files: () => ({ accounts: file(), endpoints: endpointsFile(), families: familiesFile(), tokenBlob: tokenBlobPath, endpointBlob: endpointBlobPath }),
+  _files: () => ({ accounts: file(), endpoints: endpointsFile(), families: familiesFile(), auto: autoFile(), tokenBlob: tokenBlobPath, endpointBlob: endpointBlobPath }),
+  _rankReason: rankReason,
+  _nextRankChange: nextRankChange,
   _psExe: psExe,
   _psEnv: psEnv,
 };
