@@ -2,6 +2,29 @@
 
 Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 
+## [0.6.55] — 2026-10-09
+
+### Fixed
+- **Two agents started a few seconds apart can no longer swap conversations.**
+  The launch-timing guess gave the second tab the first tab's conversation
+  until the data feed corrected it, so a restart in between would have put two
+  agents on one conversation. Agents with the data feed (all of them since
+  0.6.16) are now tracked only by their own session id; the guess stays for
+  old agents only and can no longer take an id another tab owns. An agent that
+  crashes right after its first message still keeps its conversation.
+- **A tab whose conversation runs in Claude's background** no longer ends at a
+  refused resume ("That session is running in the background"): it opens as a
+  plain terminal with a note and an **Attach** button, and keeps the
+  conversation id so a later restart resumes it once the job is stopped.
+- **One toast per batch of automatic account moves** ("Moved 4 agents to
+  MAIN …") instead of one per agent.
+- **Worktree setup commands may contain `#`, quotes or several lines**, and a
+  setup that fails or doesn't even parse still starts claude (with the yellow
+  warning). Before, a `#` commented out the claude command.
+- **A `/model` switch survives a restart even before you send a message**: the
+  resume then passes that model, and the tab's model tag always follows what
+  claude actually reports.
+
 ## [0.6.54] — 2026-10-09
 
 ### Added
