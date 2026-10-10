@@ -206,6 +206,9 @@ Build in this order. Verify the statusLine and HTTP hooks live in a pty before r
 - [ ] Per-workspace notification badge when an agent finishes (taskbar overlay icon).
 
 ## Internal
+- [ ] Subagent outage nudge (0.6.57): not seen live yet; check `net: nudged` /
+      `subagent failed:` on the next drop. The board text still says
+      "continues automatically" for a nudged tab (S).
 - [ ] Internet outages (0.6.54), watch the next real drop: grep `net:` and
       `toast: failed`. Not run live yet: the 3-continue cap and "fails again →
       back to waiting". The dashed amber light is close to the blue background

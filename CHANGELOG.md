@@ -2,6 +2,19 @@
 
 Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 
+## [0.6.57] — 2026-10-10
+
+### Fixed
+- **A subagent that fails no longer toasts "failed" on its tab.** In the
+  2026-10-10 drop, background subagents failed while their main agents were
+  idle: each one toasted, and nothing waited for the internet because a
+  subagent writes its error into its own transcript. Now a subagent failure
+  never marks the tab as failed. If the internet caused it, the tab waits
+  ("⚠ Offline · N waiting"), and once the API answers again the idle main
+  agent gets ONE message: "The internet is back. Continue, and restart any
+  agent that failed because of the outage." It is skipped when the main agent
+  is already working (it restarted things itself) or is asking you something.
+
 ## [0.6.56] — 2026-10-10
 
 ### Added

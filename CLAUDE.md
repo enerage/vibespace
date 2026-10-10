@@ -158,7 +158,7 @@ Key facts encoded in `main/sessions.cjs`:
 
 ## Developing VibeSpace
 
-- `npm run smoke` — 133 self-tests (as of 0.6.56) incl. pty echo and live session discovery. Run it after
+- `npm run smoke` — 135 self-tests (as of 0.6.57) incl. pty echo and live session discovery. Run it after
   touching main-process code, **from a normal shell**: inside a Claude pty the stripped
   PATH and nested ConPTY break the pty test (`powershell.exe` "File not found" /
   AttachConsole) — prepend System32 to PATH and give it its own console, or just use a
@@ -266,6 +266,15 @@ Key facts encoded in `main/sessions.cjs`:
   2 successes in a row → the renderer pastes `continue` (same evidence rules
   as an account move), max 3 per tab per outage. Live-testable with a local
   relay as `ANTHROPIC_BASE_URL` plus `VIBESPACE_NET_PROBE=127.0.0.1:<port>`.
+  **Subagent failures** (0.6.57): a StopFailure with `agent_id` is a
+  SUBAGENT's (twice per agent, one with `agent_type`). It never sets
+  `feed.failure` (no ✕, no toast, the main turn stays open); index.cjs
+  `handleSubagentFailure` reads the error from
+  `<transcript dir>/<session>/subagents/agent-<agent_id>.jsonl`
+  (`sessions.subagentTranscriptPath`; it can be missing, then the probe alone
+  decides). A network one sets `feed.net` with `kind: 'subagent'`; a
+  `<task-notification>` wake keeps it; when the API is back the renderer sends
+  ONE nudge to the idle main agent, or skips if it is working / in a dialog.
 - **Agent board** (0.6.19, `renderer/workspace/ui/board.js`, ▦ or Ctrl+Shift+B):
   - It is an overlay inside `#term-hosts`, so xterms are never disposed or refit
     when it opens or closes.
