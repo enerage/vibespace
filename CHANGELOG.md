@@ -2,6 +2,14 @@
 
 Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 
+## [0.6.56] — 2026-10-10
+
+### Added
+- **The status bar under the terminal shows the reasoning effort next to the
+  model**: `Opus 5 · high` (also in the tab's peek card). It comes from
+  claude's own status line (`effort.level`) and follows `/effort` or `/model`
+  changes; a subagent's different effort never replaces the main one.
+
 ## [0.6.55] — 2026-10-09
 
 ### Fixed

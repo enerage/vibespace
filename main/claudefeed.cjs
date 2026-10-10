@@ -75,7 +75,7 @@ function readLimits(rl) {
 
 function emptyState() {
   return {
-    model: null, context: null, cost: null, linesAdded: 0, linesRemoved: 0,
+    model: null, effort: null, context: null, cost: null, linesAdded: 0, linesRemoved: 0,
     sessionId: null, transcriptPath: null, sessionName: null, promptCache: null, rateLimits: null,
     nowDoing: null, attention: null, lastMessage: null, turnStartedAt: null, turnEndedAt: null,
     failure: null, subagents: 0, compacting: null, todos: null, tasks: [],
@@ -148,6 +148,13 @@ function failureOf(body, now) {
   return { reason: failureReason(body), at: now, type, message: clip(message, 1000) || null };
 }
 
+// The reasoning effort level: the statusLine sends { level: "medium" }, hook
+// bodies a plain "high" (captured 2.1.294). One short lower-case word or null.
+function readEffort(v) {
+  const x = v && typeof v === 'object' ? v.level : v;
+  return typeof x === 'string' && /^[a-z]{1,12}$/.test(x) ? x : null;
+}
+
 // reduce(state, 'sl', null, body) | reduce(state, 'hook', '<Event>', body)
 // Returns the SAME object when nothing changed, so callers can skip the push.
 // Every hook body carries session_id too: it is the exact termId → session map
@@ -158,8 +165,10 @@ function reduce(state, kind, event, body, now = Date.now()) {
   if (kind !== 'hook' || !body) return next;
   const sid = typeof body.session_id === 'string' && body.session_id ? body.session_id : null;
   const tp = typeof body.transcript_path === 'string' && body.transcript_path ? body.transcript_path : null;
-  if ((sid && next.sessionId !== sid) || (tp && next.transcriptPath !== tp)) {
-    return { ...next, sessionId: sid || next.sessionId, transcriptPath: tp || next.transcriptPath };
+  // a subagent's events (agent_id) carry ITS effort, not the main thread's
+  const eff = body.agent_id ? null : readEffort(body.effort);
+  if ((sid && next.sessionId !== sid) || (tp && next.transcriptPath !== tp) || (eff && next.effort !== eff)) {
+    return { ...next, sessionId: sid || next.sessionId, transcriptPath: tp || next.transcriptPath, effort: eff || next.effort };
   }
   return next;
 }
@@ -181,6 +190,7 @@ function reduceCore(state, kind, event, body, now) {
     return {
       ...s,
       model: body.model ? { id: body.model.id || null, name: body.model.display_name || body.model.id || null } : s.model,
+      effort: readEffort(body.effort) || s.effort || null,
       context: pct === null ? null : { pct, used, size: num(cw.context_window_size) },
       cost: num(cost.total_cost_usd),
       linesAdded: num(cost.total_lines_added) || 0,
@@ -622,6 +632,7 @@ function snapshot(wsId) {
 }
 
 module.exports = {
+  readEffort, // smoke
   fromBackground, // smoke
   backgroundSession,
   _setSessionsDir: (d) => { sessionsDirOverride = d; kindScan = { at: 0, kinds: new Map(), pids: new Map() }; acceptedSid.clear(); },

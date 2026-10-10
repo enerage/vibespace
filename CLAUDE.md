@@ -158,7 +158,7 @@ Key facts encoded in `main/sessions.cjs`:
 
 ## Developing VibeSpace
 
-- `npm run smoke` — 132 self-tests (as of 0.6.55) incl. pty echo and live session discovery. Run it after
+- `npm run smoke` — 133 self-tests (as of 0.6.56) incl. pty echo and live session discovery. Run it after
   touching main-process code, **from a normal shell**: inside a Claude pty the stripped
   PATH and nested ConPTY break the pty test (`powershell.exe` "File not found" /
   AttachConsole) — prepend System32 to PATH and give it its own console, or just use a
@@ -230,6 +230,10 @@ Key facts encoded in `main/sessions.cjs`:
   via `<dataRoot>/limits.json` (adopted when newer and < 6 h old). Screenshot
   testing: delete the throwaway home's log first, or a script grepping it for the
   feed port picks up a stale port from an earlier run.
+  **Effort** (0.6.56): the statusLine body has `effort: { level }` and hook
+  bodies a plain `effort: "high"` (2.1.294); `claudefeed.readEffort` takes
+  both, and hooks with `agent_id` are skipped (a subagent's own effort).
+  The body also carries `fast_mode` and `thinking.enabled` if ever needed.
   **0.6.20:**
   - **Instant attention.** PermissionRequest or the AskUserQuestion PreToolUse
     flips the base status to `waiting` through `main/attention.cjs`: an in-memory

@@ -1325,6 +1325,21 @@ async function runSmoke() {
       Object.values(r).every(v => v === true), JSON.stringify(r) + (got.every(Boolean) ? '' : ' out=' + out.slice(0, 400)));
   }
 
+  // 22d. reasoning effort (statusLine { level }, hook string; subagents ignored)
+  {
+    const feed = require('./claudefeed.cjs');
+    let s = feed.reduce(null, 'sl', null, { model: { id: 'claude-opus-5', display_name: 'Opus 5' }, effort: { level: 'medium' } });
+    const fromSl = s.effort === 'medium';
+    s = feed.reduce(s, 'hook', 'PreToolUse', { session_id: 'x', effort: 'high', agent_id: 'sub1' });
+    const subIgnored = s.effort === 'medium';
+    s = feed.reduce(s, 'hook', 'Stop', { session_id: 'x', effort: 'high' });
+    const fromHook = s.effort === 'high';
+    s = feed.reduce(s, 'sl', null, { model: { id: 'm' } });
+    const kept = s.effort === 'high';
+    const r = { fromSl, subIgnored, fromHook, kept, junk: feed.readEffort('<b>') === null };
+    check('feed keeps the reasoning effort level (strip: "Opus 5 · high")', Object.values(r).every(Boolean), JSON.stringify(r));
+  }
+
   // 23. agent board summary (main/board.cjs): shape, write, other-workspace read
   //     with freshness filter, delete on close
   {

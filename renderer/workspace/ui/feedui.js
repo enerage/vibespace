@@ -243,7 +243,12 @@ export function refresh() {
     stripEl.append(hint);
   }
   if (f.context && typeof f.context.pct === 'number') stripEl.append(ctxBar(f.context));
-  if (f.model && f.model.name) stripEl.append(el('span', 'ts-model', f.model.name));
+  if (f.model && f.model.name) {
+    // "Opus 5 · high": the model and its reasoning effort (/effort, /model)
+    const m = el('span', 'ts-model', f.model.name + (f.effort ? ` · ${f.effort}` : ''));
+    if (f.effort) m.title = `${f.model.name}, reasoning effort: ${f.effort}`;
+    stripEl.append(m);
+  }
   const items = taskItems(f);
   if (items.length) {
     const done = items.filter(t => t.status === 'completed').length;
@@ -317,7 +322,7 @@ function renderPeek() {
   peekEl.append(head);
   if (tab.worktree) peekEl.append(el('div', 'fu-wt', wtText(tab.worktree)));
   const meta = el('div', 'fu-meta');
-  if (f.model && f.model.name) meta.append(el('span', '', f.model.name));
+  if (f.model && f.model.name) meta.append(el('span', '', f.model.name + (f.effort ? ` · ${f.effort}` : '')));
   if (f.context && typeof f.context.pct === 'number') meta.append(ctxBar(f.context));
   if (typeof f.cost === 'number') meta.append(el('span', '', '$' + f.cost.toFixed(2)));
   const pchip = cacheChip(f, line.cls === 'working' || line.cls === 'waiting');
