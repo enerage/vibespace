@@ -1893,9 +1893,14 @@ function syncClaudeName(tab) {
 // move: never over anything typed since the failure, never into a half-typed
 // prompt, an open dialog, a compaction or a shell claude has left. A skipped tab
 // becomes a normal failed tab. Every decision goes back to main's log (`net:`).
+// Only a SUBAGENT failed (f.net.kind 'subagent', DECISIONS.md 2026-10-10): the
+// main agent gets ONE nudge instead, and only while it is idle. Working = it
+// already carries on (it saw the failure), a dialog = it asked the user: both
+// skip silently, and the skip clears the wait.
 const NET_STAGGER_MS = 3000;
+const NET_NUDGE = 'The internet is back. Continue, and restart any agent that failed because of the outage.';
 let netChain = Promise.resolve();
-// why this tab must not get `continue` now ('' = it may)
+// why this tab must not get `continue` (or the nudge) now ('' = it may)
 function netSkipWhy(tab, f) {
   if (!tab || tab.dead) return 'tab closed';
   if (!f || !f.net) return 'no longer waiting';
@@ -1904,6 +1909,9 @@ function netSkipWhy(tab, f) {
   if (tab.switching) return 'switching account';
   if (f.attention || tab.status === 'waiting') return 'dialog open';
   if (f.compacting) return 'compacting';
+  if (f.net.kind === 'subagent' && tab.status !== 'done') {
+    return tab.status === 'working' ? 'main agent working (it carries on by itself)' : `main agent not idle (${tab.status || 'no status'})`;
+  }
   return '';
 }
 function netResume(ids) {
@@ -1918,9 +1926,10 @@ function netResume(ids) {
       try { running = await vs.claudeRunning(id); } catch {}
       why = netSkipWhy(tabs.get(id), feeds.get(id)) || (running === true ? '' : running === false ? 'no claude running' : "can't tell if claude runs");
       if (why) { vs.netReport(id, 'skipped', why); continue; }
-      if (!sendToAgent(id, 'continue')) { vs.netReport(id, 'skipped', 'paste failed'); continue; }
+      const nudge = feeds.get(id).net.kind === 'subagent';
+      if (!sendToAgent(id, nudge ? NET_NUDGE : 'continue')) { vs.netReport(id, 'skipped', 'paste failed'); continue; }
       sent++;
-      vs.netReport(id, 'continued');
+      vs.netReport(id, nudge ? 'nudged' : 'continued');
     }
   }).catch((e) => console.warn('net resume failed', e && e.message));
 }

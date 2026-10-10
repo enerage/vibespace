@@ -1258,6 +1258,12 @@ function initIpc() {
   claudefeed.onHook((wsId, termId, event, body) => {
     noteTurnForAccount(termId, event, body);
     noteTurnForNet(termId, event, body);
+    // a SUBAGENT's failure is never the tab's (no feed.failure, no toast): it is
+    // handled here, straight from its hook, since the main agent's own
+    // <task-notification> turn can start ~0.3 s later
+    if (event === 'StopFailure' && body && body.agent_id) {
+      handleSubagentFailure(wsId, termId, body).catch((err) => logger.warn('subagent failure check failed: ' + err.message));
+    }
     const st = status.wordForHook(event, body);
     const file = st && ptyhost.statusFileOf(termId);
     if (!file) return;
@@ -1513,6 +1519,105 @@ async function netFailure(wsId, termId, feed, type, tx) {
   return true;
 }
 
+// ---------- a SUBAGENT failed (DECISIONS.md 2026-10-10) ----------
+// Never the tab's failure: no toast, no badge, no relaunch, no account move.
+// A usage limit still marks the account (the main thread's own failure moves
+// the tab). An internet outage makes the tab wait (feed.net kind 'subagent');
+// when the API answers again the renderer nudges the main agent ONCE, only if
+// it is idle (terms.js netResume). Its error text is in the subagent's own
+// transcript, not the main one (seen 2026-10-10, see sessions.subagentTranscriptPath).
+const SUBAGENT_NUDGE_MAX = 1;
+const mainTurnAt = new Map(); // termId -> ms of the last user prompt / normal Stop on the main thread
+
+// the subagent's API error line, only if it belongs to THIS failure
+async function subagentErrorText(wsId, termId, body, at) {
+  const agentId = body.agent_id;
+  const feed = claudefeed.stateOf(termId);
+  const sid = typeof body.session_id === 'string' && body.session_id ? body.session_id : null;
+  const mains = [body.transcript_path, transcriptOf(wsId, termId, sid ? { sessionId: sid } : feed)];
+  let file = null;
+  for (const m of mains) {
+    const p = sessions.subagentTranscriptPath(m, agentId);
+    if (p && fs.existsSync(p)) { file = p; break; }
+  }
+  if (!file) return { file: null, tx: null };
+  const since = Math.max(at - 20000, accountSince.get(termId) || 0, Date.now() - TRANSCRIPT_MAX_AGE_MS);
+  for (let i = 0; i < 2; i++) {
+    if (i) await new Promise(r => setTimeout(r, 1500));
+    const tx = accounts.lastApiErrorText(file);
+    if (tx && tx.timestamp && tx.timestamp >= since) return { file, tx };
+  }
+  return { file, tx: null };
+}
+
+async function handleSubagentFailure(wsId, termId, body) {
+  const at = Date.now();
+  const f = claudefeed.failureOf(body, at);
+  const agentId = String(body.agent_id);
+  const agentType = typeof body.agent_type === 'string' && body.agent_type ? body.agent_type : '-';
+  const name = termName(wsId, termId);
+  const { file, tx } = await subagentErrorText(wsId, termId, body, at);
+  let type = f.type;
+  if (tx && (tx.error === 'rate_limit' || !type)) type = tx.error;
+  const text = [tx && tx.text, f.message].filter(s => typeof s === 'string' && s).join('\n');
+  logger.info(`subagent failed: ${name} (${termId}) agent=${agentId} type=${agentType} error=${type || '-'} text=${JSON.stringify(text.replace(/\s+/g, ' ').slice(0, 200))}${file ? '' : ' (no subagent transcript)'}`);
+  // a usage limit: the account is out, but the tab stays where it is
+  if (type === 'rate_limit') {
+    const c = accounts.classifyFailure({ type, message: f.message }, null, tx && tx.text, Date.now(), tx && tx.quota);
+    if (c.usageLimit) {
+      const acct = termAccount.get(termId) || accounts.LOGIN;
+      accounts.markExhausted(acct, c.until, c.reason);
+      logger.info(`subagent failed: ${name} (${termId}) hit a usage limit on ${acct} (${c.reason}): account marked, the tab stays`);
+    }
+    return;
+  }
+  if (await subagentNetFailure(wsId, termId, f, type, text, agentId)) return;
+  logger.info(`subagent failed: ${name} (${termId}) agent=${agentId}: not the internet, no toast (the main agent got the failure)`);
+}
+
+// true = an outage (waits, or already covered); false = not the internet
+async function subagentNetFailure(wsId, termId, f, type, text, agentId) {
+  const name = termName(wsId, termId);
+  const verdict = netwatch.subagentVerdict(type || '', text);
+  if (verdict === 'other') return false;
+  const target = netTargetOf(termId);
+  if (verdict === 'probe') {
+    const r = await netwatch.probeOnce(target);
+    if (r.ok) {
+      logger.info(`net: ${name} (${termId}) subagent ${agentId} failed${text ? ' with a connection error' : ' without an error text'}, but ${target.key} answers (${r.ms} ms): not an outage`);
+      return false;
+    }
+    logger.info(`net: probe ${target.key} failed (${r.why}): the internet is down`);
+  }
+  if (!ptyhost.alive(termId)) return true;
+  const net = (claudefeed.stateOf(termId) || {}).net;
+  if (net && net.kind !== 'subagent') {
+    logger.info(`net: ${name} (${termId}) subagent ${agentId} failed in the outage; the main thread already waits (it gets \`continue\`)`);
+    return true;
+  }
+  // the main agent ended a turn (or the user typed) after the failure: the API
+  // answered and the main agent has seen the failure
+  if ((mainTurnAt.get(termId) || 0) > f.at) {
+    logger.info(`net: ${name} (${termId}) subagent ${agentId} failed, but the main agent finished a turn since: no wait`);
+    return true;
+  }
+  const o = netOutage.get(termId) || { tries: 0, firstAt: Date.now() };
+  if ((o.nudges || 0) >= SUBAGENT_NUDGE_MAX) {
+    logger.info(`net: ${name} (${termId}) subagent ${agentId} failed again after the nudge: no second nudge this outage`);
+    return true;
+  }
+  netOutage.set(termId, o);
+  netwatch.wait(termId, target);
+  const tgt = netwatch.status().targets.find(x => x.target === target.key);
+  // a second subagent failure keeps the first one's time: typing in between counts
+  const failedAt = net && net.kind === 'subagent' && net.failedAt ? Math.min(net.failedAt, f.at) : f.at;
+  claudefeed.setNet(termId, { since: (tgt && tgt.since) || Date.now(), failedAt, tries: o.tries, max: NET_MAX_CONTINUES, target: target.key, kind: 'subagent', agent: agentId });
+  logger.info(`net: ${name} (${termId}) waits for the internet: subagent ${agentId} failed (${target.key}); the main agent gets one nudge when it's back, if idle`);
+  pushNetState();
+  board.touch(wsId);
+  return true;
+}
+
 // the header chip in every workspace window of this process
 function pushNetState() {
   const st = netwatch.status();
@@ -1559,6 +1664,12 @@ function netReport(termId, what, why) {
     logger.info(`net: continued ${name} (${termId}) [automatic continue ${o ? o.tries : '?'}/${NET_MAX_CONTINUES}]`);
     return;
   }
+  if (what === 'nudged') {
+    // a subagent failed in the outage and the main agent was idle: asked once
+    if (o) o.nudges = (o.nudges || 0) + 1;
+    logger.info(`net: nudged ${name} (${termId}): the internet is back, asked the idle main agent to continue and restart failed agents`);
+    return;
+  }
   // skipped: typed since the failure, a half-typed prompt, no claude, … — it
   // is a normal failed tab from now on (light ✕), but no toast: the user is
   // already there (they typed) or left claude on purpose
@@ -1571,9 +1682,15 @@ function netReport(termId, what, why) {
 
 // a main-thread prompt restarts the turn (our `continue`, or the user typed):
 // the tab no longer waits. A turn that ENDS normally ends the outage's count.
+// A subagent-outage wait (kind 'subagent') ignores claude waking itself with a
+// <task-notification> prompt: that is neither the user nor proof the API answers.
 function noteTurnForNet(termId, event, body) {
   if (body && body.agent_id) return;
   if (event !== 'UserPromptSubmit' && event !== 'Stop') return;
+  const selfWake = event === 'UserPromptSubmit' && claudefeed.isTaskNotification(body && body.prompt);
+  if (!selfWake) mainTurnAt.set(termId, Date.now());
+  const net = (claudefeed.stateOf(termId) || {}).net;
+  if (selfWake && net && net.kind === 'subagent') return;
   if (event === 'Stop') netOutage.delete(termId);
   if (netwatch.waitingOn(termId)) { netwatch.release(termId); pushNetState(); }
 }
@@ -1581,6 +1698,7 @@ function noteTurnForNet(termId, event, body) {
 // the pty exited
 function netForget(termId) {
   netOutage.delete(termId);
+  mainTurnAt.delete(termId);
   if (netwatch.waitingOn(termId)) { netwatch.release(termId); pushNetState(); }
 }
 

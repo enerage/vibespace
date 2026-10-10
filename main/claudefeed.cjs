@@ -141,6 +141,9 @@ function failureReason(body) {
   return clip(det && det !== base ? `${base}: ${det}` : base, 200);
 }
 
+// claude's own wake-up prompt for a finished/failed background task
+const isTaskNotification = (p) => typeof p === 'string' && /^\s*<task-notification>/.test(p);
+
 // the raw failure kind + text (accounts.classifyFailure tells a usage limit apart)
 function failureOf(body, now) {
   const type = (typeof body.error === 'string' && body.error) || (typeof body.error_type === 'string' && body.error_type) || null;
@@ -265,8 +268,13 @@ function reduceCore(state, kind, event, body, now) {
       const a = NOTIFY_ATTENTION[body.notification_type];
       return a && s.attention !== a ? { ...s, attention: a } : s;
     }
-    case 'UserPromptSubmit':
-      return { ...s, attention: null, failure: null, net: null, turnStartedAt: now, turnOpen: true };
+    case 'UserPromptSubmit': {
+      // claude waking itself (<task-notification>, e.g. "agent X failed") is not
+      // the user and proves nothing about the API: a wait for a SUBAGENT's
+      // outage stays (index.cjs nudges the main agent once the API is back)
+      const keepNet = Boolean(s.net && s.net.kind === 'subagent' && isTaskNotification(body.prompt));
+      return { ...s, attention: null, failure: null, net: keepNet ? s.net : null, turnStartedAt: now, turnOpen: true };
+    }
     case 'SubagentStart':
       return { ...s, subagents: (s.subagents || 0) + 1 };
     case 'SubagentStop': {
@@ -291,6 +299,15 @@ function reduceCore(state, kind, event, body, now) {
       };
     }
     case 'StopFailure': {
+      // a SUBAGENT failed (agent_id; seen 2026-10-10 in an internet drop): not
+      // the tab's failure, and the main turn (if any) goes on. index.cjs handles
+      // it straight from the hook (handleSubagentFailure); here the agent only
+      // leaves the background list. No `failure`, so no ✕ light and no toast.
+      if (body.agent_id) {
+        const prev = s.background || [];
+        const bg = prev.filter(t => t.id !== String(body.agent_id));
+        return bg.length === prev.length ? s : { ...s, background: bg };
+      }
       const bg = bgRunning(body.background_tasks) || [];
       return {
         ...s, nowDoing: null, attention: null, lastMessage: lastMsg, turnEndedAt: now, turnOpen: false,
@@ -611,9 +628,11 @@ function clearRateLimits(termId) {
 }
 
 // Internet outage (index.cjs): the tab's failed turn waits for the network
-// ({ since, failedAt, tries, target }) or not (null). It rides on the feed
-// state so the renderer, the board and a reload see it like any other detail;
-// the next UserPromptSubmit / Stop clears it in the reducer.
+// ({ since, failedAt, tries, target, kind? }) or not (null). kind 'subagent' =
+// only a subagent failed: the renderer nudges the idle main agent instead of
+// typing `continue`. It rides on the feed state so the renderer, the board and
+// a reload see it like any other detail; the next UserPromptSubmit / Stop
+// clears it in the reducer (a <task-notification> prompt keeps a subagent wait).
 function setNet(termId, net) {
   const t = terms.get(termId);
   if (!t || !t.state) return false;
@@ -644,6 +663,8 @@ module.exports = {
   _becameFull: becameFull,
   snapshot,
   reduce,
+  failureOf,
+  isTaskNotification,
   attentionText,
   addSettings,
   stateOf: (termId) => (terms.get(termId) || {}).state || null,

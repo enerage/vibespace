@@ -99,6 +99,21 @@ function transcriptMatches(sessionId, transcriptPath) {
   try { return fs.existsSync(transcriptPath); } catch { return false; }
 }
 
+// A subagent's own transcript (verified 2026-10-10, claude 2.1.295): the hook's
+// agent_id names the file next to the conversation's transcript:
+//   <dir>/<session>.jsonl → <dir>/<session>/subagents/agent-<agent_id>.jsonl
+// (its lines carry "agentId": the same id; a .meta.json sits beside it).
+// Accepts the subagent's file itself too. Pure; null for anything else.
+function subagentTranscriptPath(transcriptPath, agentId) {
+  const id = typeof agentId === 'string' ? agentId : (agentId == null ? '' : String(agentId));
+  if (!/^[A-Za-z0-9_-]{1,64}$/.test(id)) return null; // never a path piece from outside
+  if (typeof transcriptPath !== 'string' || !/\.jsonl$/i.test(transcriptPath)) return null;
+  const base = path.basename(transcriptPath);
+  if (base.toLowerCase() === `agent-${id}.jsonl`.toLowerCase()) return transcriptPath;
+  if (/^agent-/i.test(base)) return null; // another agent's file
+  return path.join(path.dirname(transcriptPath), base.slice(0, -'.jsonl'.length), 'subagents', `agent-${id}.jsonl`);
+}
+
 // Not written yet: the id is remembered as `pending` and scan() pins it once
 // its file appears, so a claude that dies right after its first message (no
 // tick after the transcript was born) still keeps that conversation. That pin
@@ -383,4 +398,4 @@ function sessionIdsFor(wsId) {
   return out;
 }
 
-module.exports = { start, stop, trackClaudeStart, pinSession, pinFromFeed, getSession, sessionExists, transcriptFile, lastReply, lastReplyOf, titlesOf, tabNameFrom, tabNameFor, enrichState, sessionIdsFor, onData, _scan: scan, _pickResumed: pickResumed };
+module.exports = { start, stop, trackClaudeStart, pinSession, pinFromFeed, getSession, sessionExists, transcriptFile, subagentTranscriptPath, lastReply, lastReplyOf, titlesOf, tabNameFrom, tabNameFor, enrichState, sessionIdsFor, onData, _scan: scan, _pickResumed: pickResumed };

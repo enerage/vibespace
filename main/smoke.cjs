@@ -2129,6 +2129,51 @@ async function runSmoke() {
     check('net: feed state + light (dashed "waiting for the internet", not failed)',
       /internet/.test(txt) && cleared && light.cls === 'net' && /continues automatically/.test(light.title) && plain.cls === 'failed',
       JSON.stringify({ txt, cleared, light, plain: plain.cls }));
+
+    // 25b. a SUBAGENT's failure (agent_id; real body shape + text, 2026-10-10)
+    //      is never the tab's: no feed.failure (= no toast, no ✕), the main
+    //      turn stays open, the agent leaves the background list. Offline text
+    //      → 'net' (wait), ambiguous/none → probe, other errors → no wait.
+    const subBody = { session_id: 's1', transcript_path: 'C:\\x\\s1.jsonl', cwd: 'C:\\x', prompt_id: 'p', agent_id: 'a6f083dd57828c487', agent_type: 'builder-opus', effort: 'high', hook_event_name: 'StopFailure', error: 'server_error', last_assistant_message: '' };
+    let m = feed.reduce(null, 'hook', 'UserPromptSubmit', { prompt: 'go' }, 10);
+    m = { ...m, nowDoing: { tool: 'Bash', detail: 'x' }, background: [{ id: 'a6f083dd57828c487', type: 'subagent', status: 'running' }, { id: 'b2', type: 'shell', status: 'running' }] };
+    const afterSub = feed.reduce(m, 'hook', 'StopFailure', subBody, 11);
+    const subQuiet = !afterSub.failure && afterSub.turnOpen === true && afterSub.nowDoing && afterSub.background.length === 1
+      && afterSub.background[0].id === 'b2' && feed.attentionText(afterSub) === null;
+    const vNet = nw.subagentVerdict('server_error', seen);
+    const vProbe = nw.subagentVerdict('server_error', 'API Error: Connection error.');
+    const vNone = nw.subagentVerdict('server_error', '');
+    const vOther = nw.subagentVerdict('server_error', 'API Error: 500 {"type":"error","error":{"type":"api_error","message":"Internal server error"}}');
+    const vRate = nw.subagentVerdict('rate_limit', "You've hit your weekly limit");
+    const verdicts = vNet === 'net' && vProbe === 'probe' && vNone === 'probe' && vOther === 'other' && vRate === 'other';
+    // a subagent-outage wait survives claude waking itself, not the user / a normal Stop
+    const w = { ...afterSub, turnOpen: false, net: { since: 1, failedAt: 11, kind: 'subagent', target: 't' } };
+    const keepsOnWake = feed.reduce(w, 'hook', 'UserPromptSubmit', { prompt: '<task-notification>\n<task-id>a6f</task-id>\n<status>failed</status>' }, 12).net !== null;
+    const userClears = feed.reduce(w, 'hook', 'UserPromptSubmit', { prompt: 'hi' }, 12).net === null && feed.reduce(w, 'hook', 'Stop', {}, 12).net === null;
+    const mainWakeClears = feed.reduce({ ...w, net: { ...w.net, kind: undefined } }, 'hook', 'UserPromptSubmit', { prompt: '<task-notification>x' }, 12).net === null;
+    check('net: subagent failure → no feed failure/toast, turn stays open; verdicts (offline text = wait, none = probe, other = no wait); wake keeps the wait',
+      subQuiet && verdicts && keepsOnWake && userClears && mainWakeClears,
+      JSON.stringify({ subQuiet, vNet, vProbe, vNone, vOther, vRate, keepsOnWake, userClears, mainWakeClears }));
+
+    // 25c. the subagent's own transcript, next to the conversation's
+    const sess = require('./sessions.cjs');
+    const mainT = path.join('C:\\Users\\u\\.claude\\projects\\D--Repo', '415b8132-a884-45a7-ae4e-42a2dd05a039.jsonl');
+    const want = path.join('C:\\Users\\u\\.claude\\projects\\D--Repo', '415b8132-a884-45a7-ae4e-42a2dd05a039', 'subagents', 'agent-a6f083dd57828c487.jsonl');
+    const pMain = sess.subagentTranscriptPath(mainT, 'a6f083dd57828c487');
+    const pSelf = sess.subagentTranscriptPath(want, 'a6f083dd57828c487');
+    const pBadIds = [sess.subagentTranscriptPath(mainT, '..\\..\\evil'), sess.subagentTranscriptPath(mainT, ''), sess.subagentTranscriptPath(null, 'a1'),
+      sess.subagentTranscriptPath(path.join('C:\\x', 'agent-other.jsonl'), 'a1'), sess.subagentTranscriptPath('C:\\x\\s1.txt', 'a1')];
+    // and the real error line is found there (accounts.lastApiErrorText on a written copy)
+    const subDir = path.join(U.dataRoot(), 'smoke-subagent', 's1', 'subagents');
+    fs.mkdirSync(subDir, { recursive: true });
+    const subFile = path.join(subDir, 'agent-a6f083dd57828c487.jsonl');
+    fs.writeFileSync(subFile, JSON.stringify({ isSidechain: true, agentId: 'a6f083dd57828c487', type: 'assistant', timestamp: '2026-10-10T10:19:16.994Z', message: { model: '<synthetic>', role: 'assistant', content: [{ type: 'text', text: seen }] }, error: 'server_error', isApiErrorMessage: true }) + '\n');
+    const found = sess.subagentTranscriptPath(path.join(U.dataRoot(), 'smoke-subagent', 's1.jsonl'), 'a6f083dd57828c487');
+    const txSub = found === subFile ? require('./accounts.cjs').lastApiErrorText(found) : null;
+    check('net: subagent transcript = <session>/subagents/agent-<agent_id>.jsonl (+ its API error line)',
+      pMain === want && pSelf === want && pBadIds.every(x => x === null) && txSub && txSub.error === 'server_error' && txSub.text === seen
+      && nw.subagentVerdict(txSub.error, txSub.text) === 'net',
+      JSON.stringify({ pMain, pSelf, pBadIds, found, txSub }));
   }
 
   // 8. pty echo (powershell)

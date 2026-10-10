@@ -44,6 +44,18 @@ function isNetworkFailure({ error, transcriptText } = {}) {
 // by a probe first
 const unambiguous = (text) => typeof text === 'string' && SURE_RE.test(text) && !NOT_NET_RE.test(text);
 
+// A SUBAGENT's failed run (DECISIONS.md 2026-10-10). Its error text is in its
+// own transcript (subagents/agent-<id>.jsonl), and some agents have none at all.
+// 'net' = the text proves the outage, 'probe' = a probe decides (an ambiguous
+// text, or no text: the probe ALONE decides), 'other' = not the internet.
+function subagentVerdict(error, text) {
+  const type = typeof error === 'string' ? error.trim().toLowerCase() : '';
+  if (!NET_TYPES.has(type)) return 'other';
+  if (typeof text !== 'string' || !text.trim()) return 'probe';
+  if (!isNetworkFailure({ error: type, transcriptText: text })) return 'other';
+  return unambiguous(text) ? 'net' : 'probe';
+}
+
 // ---------- targets ----------
 const DEFAULT_HOST = 'api.anthropic.com';
 // "host:port" | "host" → { host, port, key }; VIBESPACE_NET_PROBE overrides every
@@ -185,6 +197,7 @@ module.exports = {
   netType: (error) => NET_TYPES.has(typeof error === 'string' ? error.trim().toLowerCase() : ''),
   isNetworkFailure,
   unambiguous,
+  subagentVerdict,
   parseTarget,
   targetFor,
   probeOnce,
