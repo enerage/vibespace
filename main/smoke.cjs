@@ -1340,6 +1340,89 @@ async function runSmoke() {
     check('feed keeps the reasoning effort level (strip: "Opus 5 · high")', Object.values(r).every(Boolean), JSON.stringify(r));
   }
 
+  // 22e. Send to cloud (0.6.58): the typed line runs the REAL claude through
+  //      Process.Start with a command line built by crtQuote, so a task with
+  //      quotes / # / $ / line breaks arrives as ONE unchanged argument (checked
+  //      with electron-as-node standing in for claude.exe), CLAUDE_CONFIG_DIR is
+  //      set and the token/endpoint variables are absent for the call only;
+  //      the session id/URL is found in ANSI-laden output; main's state merge
+  //      and tablog keep the `cloud` list; cloud readiness = credentials file
+  {
+    const sc = await import(require('node:url').pathToFileURL(path.join(U.ROOT, 'renderer', 'workspace', 'ui', 'shellcmd.js')).href);
+    const cm = await import(require('node:url').pathToFileURL(path.join(U.ROOT, 'renderer', 'workspace', 'ui', 'cloud.js')).href);
+    const cloudMain = require('./cloud.cjs');
+    const os = require('node:os');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-cloud-'));
+    const cfg = path.join(dir, 'cloud', 'max-2');
+    const tasks = [
+      `fix "the" login bug # not a comment, $env:USERNAME stays text`,
+      `line one\nline two\twith a tab\nC:\\path\\ends\\`,
+      `it's ‘smart’ and \`ticked\` and \\"escaped\\"`,
+    ];
+    // the stand-in for claude.exe: electron as node prints its argv + the env it got
+    const probe = "process.stdout.write('VSARGS[' + Buffer.from(JSON.stringify({ a: process.argv.slice(1), cfg: process.env.CLAUDE_CONFIG_DIR || null, tok: process.env.CLAUDE_CODE_OAUTH_TOKEN || null, base: process.env.ANTHROPIC_BASE_URL || null })).toString('base64') + ']')";
+    const lines = tasks.map((t, i) => `Write-Output 'CASE-${i}'; `
+      + sc.realClaudeLine(['-e', probe, '--', '--cloud', sc.cloudTask(t)], { exe: process.execPath, configDir: i === 1 ? null : cfg })
+      + `; Write-Output ('AFTER[' + $env:CLAUDE_CODE_OAUTH_TOKEN + '|' + $env:CLAUDE_CONFIG_DIR + '|' + $env:ANTHROPIC_BASE_URL + ']')`);
+    const file = path.join(dir, 'cloud.ps1');
+    fs.writeFileSync(file, '\ufeff' + lines.join('\r\n') + '\r\n', 'utf8');
+    const ps = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+    const env = { ...process.env, ELECTRON_RUN_AS_NODE: '1', CLAUDE_CODE_OAUTH_TOKEN: 'tok-smoke', ANTHROPIC_BASE_URL: 'http://smoke.invalid' };
+    delete env.CLAUDE_CONFIG_DIR;
+    const run = require('node:child_process').spawnSync(ps, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', file], { encoding: 'utf8', timeout: 60000, windowsHide: true, env });
+    const out = String(run.stdout || '') + String(run.stderr || '');
+    const got = tasks.map((t, i) => {
+      const seg = (out.split(`CASE-${i}`)[1] || '').split(`CASE-${i + 1}`)[0];
+      const m = /VSARGS\[([A-Za-z0-9+/=]+)\]/.exec(seg);
+      let r = null;
+      try { r = JSON.parse(Buffer.from(m[1], 'base64').toString('utf8')); } catch {}
+      const after = /AFTER\[([^\]]*)\]/.exec(seg);
+      return Boolean(r && r.a.length === 2 && r.a[0] === '--cloud' && r.a[1] === t.trim()
+        && r.cfg === (i === 1 ? null : cfg) && r.tok === null && r.base === null
+        && after && after[1] === 'tok-smoke||http://smoke.invalid');
+    });
+    const ansi = "PS D:\\Repos\\x> \x1b[?25l\x1b[32m✓\x1b[0m Created cloud session\r\n  \x1b]8;;https://claude.ai/code/session_01ABCdefGHIjklMNOpqrSTuv\x07\x1b[4mhttps://claude.ai/code/session_01ABCdefGHIjklMNOpqrSTuv\x1b[24m\x1b]8;;\x07.\r\n";
+    const hit = sc.cloudSession(ansi);
+    const echoed = 'see https://claude.ai/code/session_AAAAbbbbCCCC1111';
+    const parse = Boolean(hit && hit.id === 'session_01ABCdefGHIjklMNOpqrSTuv' && hit.url === 'https://claude.ai/code/session_01ABCdefGHIjklMNOpqrSTuv')
+      && sc.cloudSession(`--cloud '${echoed}'\r\n\x1b[2mclaude --teleport \x1b[0msession_ZZZZyyyyXXXX9999\r\n`, { exclude: echoed })?.id === 'session_ZZZZyyyyXXXX9999'
+      && sc.cloudSession('Opening https://claude.ai/code in your browser') === null;
+    let junk = false;
+    try { sc.teleportLine('session_x; Remove-Item'); } catch { junk = true; }
+    const noEnc = !/EncodedCommand/i.test(sc.cloudSendLine('x')) && !/[\r\n]/.test(sc.cloudSendLine('a\nb'));
+
+    const entry = cm.makeEntry({ id: 'session_01ABCdefGHIjklMNOpqrSTuv', url: hit && hit.url, task: 'fix it', account: 'max-2', branch: 'main', now: 7 });
+    const merged = sessions.enrichState('smk-cloud', { terminals: [], parked: [], cloud: [entry] });
+    const kept = sessions.enrichState('smk-cloud', { terminals: [], parked: [] }, null, [entry]); // a snapshot without the key
+    const fresh = sessions.enrichState('smk-cloud', { terminals: [] });
+    const tl = require('./tablog.cjs');
+    const l0 = tl.diff('smkc', [], 0, [], [entry]);
+    const l1 = tl.diff('smkc', [], 1, [], []);
+    tl.forget('smkc');
+    const merge = JSON.stringify(merged.cloud) === JSON.stringify([entry]) && JSON.stringify(kept.cloud) === JSON.stringify([entry])
+      && Array.isArray(fresh.cloud) && fresh.cloud.length === 0
+      && cm.normalizeCloud([entry, { id: 'nope' }, { ...entry, startedAt: 1 }]).length === 1
+      && l0[0] === 'open: 0 tabs, 1 cloud' && l0[1].includes('cloud session_01ABCdefGHIjklMNOpqrSTuv "fix it" account=max-2')
+      && l1.some(l => l.startsWith('cloud - session_01ABCdefGHIjklMNOpqrSTuv'));
+
+    cloudMain._setRoot(path.join(dir, 'cloud'));
+    const before = cloudMain.readiness('max-2').ready;
+    fs.mkdirSync(cfg, { recursive: true });
+    fs.writeFileSync(path.join(cfg, '.claude.json'), JSON.stringify({ oauthAccount: { emailAddress: 'max2@example.com' } }));
+    const viaJson = cloudMain.readiness('max-2');
+    fs.writeFileSync(path.join(cfg, '.credentials.json'), '{}');
+    const ready = before === false && viaJson.ready && viaJson.email === 'max2@example.com' && cloudMain.readiness('max-2').ready
+      && cloudMain.dirFor('login') === null && cloudMain.dirFor('max-2') === cfg && !cloudMain.readinessFrom({ claudeJson: { primaryApiKey: 'x' } }).ready
+      && cloudMain.isWebUrl('https://claude.ai/code/x') && !cloudMain.isWebUrl('file:///C:/x') && !cloudMain.isWebUrl('javascript:alert(1)');
+    cloudMain._setRoot(null);
+    const gh = require('./githistory.cjs');
+    const dirty = gh._parseDirty('M  a.txt\0R  new.txt\0old.txt\0 D gone.txt\0') === 3 && gh._parseDirty('') === 0;
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+    const r = { quoting: got.every(Boolean) ? true : got.join(','), parse, junk, noEnc, merge, ready, dirty };
+    check('send to cloud: real claude via Process.Start (task = one arg, env cleared + restored), id/URL parse, state merge + tablog keep `cloud`, readiness',
+      Object.values(r).every(v => v === true), JSON.stringify(r) + (got.every(Boolean) ? '' : ' out=' + out.slice(0, 600)));
+  }
+
   // 23. agent board summary (main/board.cjs): shape, write, other-workspace read
   //     with freshness filter, delete on close
   {
