@@ -16,13 +16,13 @@ must check these before merging (details in the branch summary / CLAUDE.md):
       needs ELECTRON_RUN_AS_NODE to work in the packaged binary.
 - [x] (smoke: no new detection; still to watch on a real send) `Get-MpThreatDetection` doesn't grow during smoke / a cloud send (the typed
       line is new PowerShell text, no -EncodedCommand).
-- [ ] One-time sign-in: ⚙ → Accounts → **Set up cloud…** on a token account →
+- [x] (live 2026-10-12, MAIN: `.credentials.json` + `.claude.json` written) One-time sign-in: ⚙ → Accounts → **Set up cloud…** on a token account →
       the ☁ sign-in tab runs claude in `<dataRoot>\cloud\<id>`, sign in, `/exit`
       → toast "ready for cloud sessions" and the row shows **Cloud ready ✓**
       (email in the tooltip). Confirm the files claude wrote there
       (`.credentials.json`, `.claude.json`); adjust `cloud.cjs` readiness if
       claude 2.1.296 names them differently.
-- [ ] Send a tiny task (+ ▾ → Send to cloud…, e.g. "add a line to README"):
+- [x] (live 2026-10-12: session_01884… created on MAIN, link picked up, saved) Send a tiny task (+ ▾ → Send to cloud…, e.g. "add a line to README"):
       branch line + push warning correct, the ☁ tab runs `claude --cloud`, and
       the session link is picked up (toast "Cloud session started", entry under
       + ▾ → Cloud sessions). If nothing is picked up in the tab, copy claude's
@@ -34,7 +34,7 @@ must check these before merging (details in the branch summary / CLAUDE.md):
       on the same account and continues the session.
 - [ ] `tabs:` log lines show `cloud + <id>` / `cloud - <id>`; a restart keeps the
       list and restores ☁ tabs as plain terminals (tooltip note kept).
-- [ ] Follow-ups: does `claude --cloud` exit after creating the session or stay
+- [ ] Follow-ups (answered: `claude --cloud` exits by itself ~5 s after creating the session) does `claude --cloud` exit after creating the session or stay
       attached? (the tab shows it; nothing depends on it). `--environment <id>`
       is supported by `realClaudeLine` args but has no UI yet. A teleported
       token-account conversation can't be resumed by normal tabs (it lives in

@@ -28,6 +28,11 @@ Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 - Your own `~/.claude` (settings, skills, MCP servers) doesn't travel to a
   cloud session; the repo's `.claude/` does.
 
+### Verified
+- **Live on MAIN (2026-10-12):** cloud sign-in, then + ▾ → Send to cloud…
+  created a real cloud session; VibeSpace picked up its link and listed it.
+
+
 ## [0.6.57] — 2026-10-10
 
 ### Fixed

@@ -508,6 +508,13 @@ Key facts encoded in `main/sessions.cjs`:
     `parked`. tablog logs `cloud +/-` lines. Teleport needs a clean tree, the
     same repo and the same account: `cloud:gitInfo` counts changed TRACKED
     files (untracked ones don't block) and Bring back refuses first.
+  - **Verified live 2026-10-12 (claude 2.1.296, MAIN token account):** the
+    cloud sign-in writes `.credentials.json` + `.claude.json` into
+    `<dataRoot>/cloud/<id>`; `claude --cloud "<task>"` prints `Created cloud
+    session: <title>` / `View: https://claude.ai/code/session_<id>?from=cli&m=0`
+    / `Resume with: claude --teleport session_<id>` and EXITS (~5 s), and
+    `cloudSession` parses that output as-is. Cloud work bills the account's
+    cloud credit while it lasts, not its 5h/7d limits.
 - **Keyboard selection in claude's prompt** (0.6.39, `renderer/workspace/ui/inputsel.js`,
   RESEARCH-INPUT-SELECTION.md). Claude has no keyboard-started selection, so
   Shift(+Ctrl)+←/→ and Shift+Home/End are turned into: a synthetic two-cell SGR
