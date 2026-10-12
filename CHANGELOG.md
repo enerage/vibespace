@@ -28,6 +28,11 @@ Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 - Your own `~/.claude` (settings, skills, MCP servers) doesn't travel to a
   cloud session; the repo's `.claude/` does.
 
+### Added (2026-10-12)
+- `assets/ps/cloud-send.ps1`: lets an AGENT start a cloud session on an
+  account's cloud login by itself (it opens its own console window, because
+  `claude --cloud` needs a real terminal).
+
 ### Verified
 - **Live on MAIN (2026-10-12):** cloud sign-in, then + ▾ → Send to cloud…
   created a real cloud session; VibeSpace picked up its link and listed it.

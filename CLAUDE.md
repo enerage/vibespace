@@ -515,6 +515,13 @@ Key facts encoded in `main/sessions.cjs`:
     / `Resume with: claude --teleport session_<id>` and EXITS (~5 s), and
     `cloudSession` parses that output as-is. Cloud work bills the account's
     cloud credit while it lasts, not its 5h/7d limits.
+  - **`claude --cloud` needs an interactive terminal** ("--cloud requires an
+    interactive terminal"): an agent's own tool shell can't run it. Agents start
+    cloud sessions through `assets/ps/cloud-send.ps1` (task in a file, repo path,
+    account id), opened in a NEW console window (`Start-Process pwsh -NoExit
+    -File …`), which is a real TTY. pwsh 7 passes the task as one argument
+    (quotes intact). Verified 2026-10-12 from inside an agent. The agent can't
+    read the link back (claude keeps no local record); claude.ai/code lists it.
 - **Keyboard selection in claude's prompt** (0.6.39, `renderer/workspace/ui/inputsel.js`,
   RESEARCH-INPUT-SELECTION.md). Claude has no keyboard-started selection, so
   Shift(+Ctrl)+←/→ and Shift+Home/End are turned into: a synthetic two-cell SGR
