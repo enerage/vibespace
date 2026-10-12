@@ -2,6 +2,17 @@
 
 Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 
+## [0.6.59] — 2026-10-12
+
+### Added
+- **"auto-compacted 15:09 · 975k → 134k" after Claude compacts a
+  conversation.** The status bar and the tab's hover card show it for 30
+  minutes, so a context meter that drops from red to 13 % explains itself.
+  Seen on PlacementFlow's VIDEO tab: it looked like a VibeSpace restart had
+  dropped context, but Claude had auto-compacted at the user's next message
+  (975,307 tokens before). Restarts never shorten a conversation: they resume
+  the same id with its full history. The log gets a `compact:` line too.
+
 ## [0.6.58] — 2026-10-12
 
 ### Added

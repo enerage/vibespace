@@ -1286,6 +1286,10 @@ function initIpc() {
   claudefeed.onHook((wsId, termId, event, body) => {
     noteTurnForAccount(termId, event, body);
     noteTurnForNet(termId, event, body);
+    if (event === 'PreCompact' || event === 'PostCompact') {
+      const ctx = claudefeed.stateOf ? claudefeed.stateOf(termId) : null;
+      logger.info(`compact: ${event} ws=${wsId} term=${termId} trigger=${(body && body.trigger) || '-'}${ctx && ctx.context ? ` context=${ctx.context.used}` : ''}`);
+    }
     // a SUBAGENT's failure is never the tab's (no feed.failure, no toast): it is
     // handled here, straight from its hook, since the main agent's own
     // <task-notification> turn can start ~0.3 s later

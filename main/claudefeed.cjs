@@ -78,7 +78,7 @@ function emptyState() {
     model: null, effort: null, context: null, cost: null, linesAdded: 0, linesRemoved: 0,
     sessionId: null, transcriptPath: null, sessionName: null, promptCache: null, rateLimits: null,
     nowDoing: null, attention: null, lastMessage: null, turnStartedAt: null, turnEndedAt: null,
-    failure: null, subagents: 0, compacting: null, todos: null, tasks: [],
+    failure: null, subagents: 0, compacting: null, lastCompact: null, todos: null, tasks: [],
     background: [], bgNow: null, turnOpen: false,
     net: null, // waiting for the internet (index.cjs setNet; netwatch.cjs)
   };
@@ -151,6 +151,19 @@ function failureOf(body, now) {
   return { reason: failureReason(body), at: now, type, message: clip(message, 1000) || null };
 }
 
+// A finished compaction (2026-10-12: a tab's meter dropped from 95 % to 13 % and
+// looked like lost context; it was claude's auto-compact). `after` is filled by
+// the first statusLine reading with a context % afterwards. The renderer shows
+// it for a while (feedui COMPACT_NOTE_MS).
+function compactEntry(c, ctx) {
+  return {
+    trigger: (c && c.trigger) || null,
+    at: (c && c.at) || null,
+    before: (c && typeof c.before === 'number') ? c.before : (ctx && typeof ctx.used === 'number' ? ctx.used : null),
+    after: null,
+  };
+}
+
 // The reasoning effort level: the statusLine sends { level: "medium" }, hook
 // bodies a plain "high" (captured 2.1.294). One short lower-case word or null.
 function readEffort(v) {
@@ -208,6 +221,10 @@ function reduceCore(state, kind, event, body, now) {
       rateLimits: readLimits(body.rate_limits) || s.rateLimits,
       // a context % again means the compaction is over (PostCompact may not come)
       compacting: pct === null ? s.compacting : null,
+      // the first reading after a compaction is its "after" size
+      lastCompact: pct !== null && (s.compacting || (s.lastCompact && s.lastCompact.after === null))
+        ? { ...(s.lastCompact && s.lastCompact.after === null ? s.lastCompact : compactEntry(s.compacting, s.context)), after: used }
+        : s.lastCompact,
     };
   }
   if (kind !== 'hook') return s;
@@ -327,11 +344,12 @@ function reduceCore(state, kind, event, body, now) {
         }),
       };
     }
-    // compaction payloads are unverified live: only trigger is read, defensively
+    // compaction payloads are unverified live: only trigger is read, defensively.
+    // `before` = the last context size seen (the statusLine's, just before it)
     case 'PreCompact':
-      return { ...s, compacting: { trigger: typeof body.trigger === 'string' ? body.trigger : null, at: now } };
+      return { ...s, compacting: { trigger: typeof body.trigger === 'string' ? body.trigger : null, at: now, before: s.context ? s.context.used : null } };
     case 'PostCompact':
-      return s.compacting ? { ...s, compacting: null } : s;
+      return s.compacting ? { ...s, compacting: null, lastCompact: compactEntry(s.compacting, s.context) } : s;
     default:
       return s; // collected but not modeled
   }

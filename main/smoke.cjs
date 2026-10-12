@@ -1423,6 +1423,24 @@ async function runSmoke() {
       Object.values(r).every(v => v === true), JSON.stringify(r) + (got.every(Boolean) ? '' : ' out=' + out.slice(0, 600)));
   }
 
+  // 22e. compaction note: before (last context) / after (first reading after it)
+  {
+    const feed = require('./claudefeed.cjs');
+    const sl = (used, pct) => ({ context_window: { used_percentage: pct, context_window_size: 1000000, current_usage: { input_tokens: used } } });
+    let s = feed.reduce(null, 'sl', null, sl(950791, 95));
+    s = feed.reduce(s, 'hook', 'PreCompact', { trigger: 'auto' }, 1000);
+    s = feed.reduce(s, 'hook', 'PostCompact', { trigger: 'auto' });
+    s = feed.reduce(s, 'sl', null, sl(133517, 13));
+    let t = feed.reduce(null, 'sl', null, sl(900000, 90));
+    t = feed.reduce(t, 'hook', 'PreCompact', { trigger: 'manual' }, 5);
+    t = feed.reduce(t, 'sl', null, sl(120000, 12)); // no PostCompact
+    const r = {
+      auto: JSON.stringify(s.lastCompact) === JSON.stringify({ trigger: 'auto', at: 1000, before: 950791, after: 133517 }),
+      noPost: t.lastCompact && t.lastCompact.after === 120000 && t.lastCompact.before === 900000 && t.compacting === null,
+    };
+    check('feed remembers a compaction (auto-compacted · 951k → 134k note)', Object.values(r).every(Boolean), JSON.stringify(r));
+  }
+
   // 23. agent board summary (main/board.cjs): shape, write, other-workspace read
   //     with freshness filter, delete on close
   {

@@ -158,7 +158,7 @@ Key facts encoded in `main/sessions.cjs`:
 
 ## Developing VibeSpace
 
-- `npm run smoke` — 136 self-tests (as of 0.6.58) incl. pty echo and live session discovery. Run it after
+- `npm run smoke` — 137 self-tests (as of 0.6.59) incl. pty echo and live session discovery. Run it after
   touching main-process code, **from a normal shell**: inside a Claude pty the stripped
   PATH and nested ConPTY break the pty test (`powershell.exe` "File not found" /
   AttachConsole) — prepend System32 to PATH and give it its own console, or just use a
@@ -234,6 +234,13 @@ Key facts encoded in `main/sessions.cjs`:
   bodies a plain `effort: "high"` (2.1.294); `claudefeed.readEffort` takes
   both, and hooks with `agent_id` are skipped (a subagent's own effort).
   The body also carries `fast_mode` and `thinking.enabled` if ever needed.
+  **Compaction** (0.6.59, verified on a real transcript): the `.jsonl` gets a
+  `compact_boundary` system line with `trigger` (`auto`/`manual`) and
+  `preTokens`. The feed keeps `lastCompact { trigger, at, before, after }`:
+  `before` = the last context size before PreCompact, `after` = the first
+  statusLine reading with a % afterwards (PostCompact may not come). A context
+  meter that drops sharply is a compaction, never a restart: a resume reloads
+  the full history under the same id.
   **0.6.20:**
   - **Instant attention.** PermissionRequest or the AskUserQuestion PreToolUse
     flips the base status to `waiting` through `main/attention.cjs`: an in-memory

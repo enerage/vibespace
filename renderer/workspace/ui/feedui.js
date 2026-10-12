@@ -174,7 +174,24 @@ if (typeof document !== 'undefined') { // (smoke imports the pure helpers in mai
 }
 
 // idle + context ≥ 85 %: claude will auto-compact (summarise) soon
-export function compactSoon(f, working) {
+export // "auto-compacted 15:09 · 975k → 134k" for a while after claude compacted the
+// conversation, so the context meter's sudden drop explains itself
+const COMPACT_NOTE_MS = 30 * 60 * 1000;
+const kTok = (n) => (typeof n === 'number' ? `${Math.round(n / 1000)}k` : '?');
+function compactNote(f) {
+  const c = f && f.lastCompact;
+  if (!c || !c.at || Date.now() - c.at > COMPACT_NOTE_MS) return null;
+  const t = new Date(c.at);
+  const hhmm = `${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}`;
+  const sizes = c.before !== null || c.after !== null ? ` · ${kTok(c.before)} → ${kTok(c.after)}` : '';
+  const what = c.trigger === 'auto' ? 'auto-compacted' : 'compacted';
+  return {
+    text: `${what} ${hhmm}${sizes}`,
+    title: `Claude ${c.trigger === 'auto' ? 'automatically ' : ''}summarised this conversation at ${hhmm} to make room` + (sizes ? ` (${kTok(c.before)} → ${kTok(c.after)} tokens)` : '') + '. The conversation is the same; older turns are now a summary.',
+  };
+}
+
+function compactSoon(f, working) {
   return Boolean(!working && f && !f.compacting && f.context && f.context.pct >= 85);
 }
 
@@ -241,6 +258,12 @@ export function refresh() {
     const hint = el('span', 'ts-hint', 'auto-compact soon');
     hint.title = 'Context is 85 %+ full: claude will soon compact it automatically (summarises the conversation so far)';
     stripEl.append(hint);
+  }
+  const cn = compactNote(f);
+  if (cn) {
+    const n = el('span', 'ts-hint', cn.text);
+    n.title = cn.title;
+    stripEl.append(n);
   }
   if (f.context && typeof f.context.pct === 'number') stripEl.append(ctxBar(f.context));
   if (f.model && f.model.name) {
@@ -324,6 +347,8 @@ function renderPeek() {
   const meta = el('div', 'fu-meta');
   if (f.model && f.model.name) meta.append(el('span', '', f.model.name + (f.effort ? ` · ${f.effort}` : '')));
   if (f.context && typeof f.context.pct === 'number') meta.append(ctxBar(f.context));
+  const cnp = compactNote(f);
+  if (cnp) meta.append(el('span', '', cnp.text));
   if (typeof f.cost === 'number') meta.append(el('span', '', '$' + f.cost.toFixed(2)));
   const pchip = cacheChip(f, line.cls === 'working' || line.cls === 'waiting');
   if (pchip) meta.append(pchip);
