@@ -524,6 +524,14 @@ Key facts encoded in `main/sessions.cjs`:
     `-NoExit`: it closes itself); each run appends `exit=<code>` to
     `~/.vibespace/cloud/sent.log`, exit 0 = created. Verified 2026-10-12 from
     inside an agent. The link itself isn't recorded locally; claude.ai/code lists it.
+    **A hidden launch can't answer claude's folder-trust prompt**: in a repo the
+    cloud config never trusted it hung forever, with no log line (found by the
+    FlexIQ agent, 2026-10-12). So the script sets
+    `projects["<repo with />"].hasTrustDialogAccepted = true` in the cloud dir's
+    `.claude.json` first, stops claude after 120 s (`exit=timeout`), and keeps
+    claude's stderr of any non-0 run in `~/.vibespace/cloud/logs/`. It uses
+    `ProcessStartInfo.ArgumentList` (pwsh 7), so a long task with quotes is one
+    argument.
 - **Keyboard selection in claude's prompt** (0.6.39, `renderer/workspace/ui/inputsel.js`,
   RESEARCH-INPUT-SELECTION.md). Claude has no keyboard-started selection, so
   Shift(+Ctrl)+←/→ and Shift+Home/End are turned into: a synthetic two-cell SGR
