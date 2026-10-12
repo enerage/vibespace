@@ -241,6 +241,15 @@ Build in this order. Verify the statusLine and HTTP hooks live in a pty before r
 - [ ] Per-workspace notification badge when an agent finishes (taskbar overlay icon).
 
 ## Internal
+- [ ] Cloud handoffs of 2026-10-12 (FlexIQ ×3, PlacementFlow
+      `wip/review-filters-sim-copy`, JustLinked `wip/provider-balances`): after
+      they finish, each repo's local agent pulls its `wip/` branch, verifies and
+      merges by that repo's rules (S each).
+- [ ] Idea: tab right-click → "Hand off to cloud" that sends the handoff prompt
+      to the agent itself (pushes `wip/`, writes the task, runs cloud-send.ps1),
+      instead of pasting it by hand. Only if handoffs become routine (S/M).
+- [ ] VibeSpace's own Send to cloud tab is visible, so claude's folder-trust
+      prompt can be answered there; consider pre-trusting like cloud-send.ps1 (S).
 - [ ] Subagent outage nudge (0.6.57): not seen live yet; check `net: nudged` /
       `subagent failed:` on the next drop. The board text still says
       "continues automatically" for a nudged tab (S).

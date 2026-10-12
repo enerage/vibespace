@@ -31,7 +31,11 @@ Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 ### Added (2026-10-12)
 - `assets/ps/cloud-send.ps1`: lets an AGENT start a cloud session on an
   account's cloud login by itself (it opens its own console window, because
-  `claude --cloud` needs a real terminal).
+  `claude --cloud` needs a real terminal). It runs hidden and closes itself,
+  marks the repo as trusted first (a hidden launch in a repo the cloud login
+  had never trusted hung forever on claude's trust prompt; found by the FlexIQ
+  agent), stops after 2 min, and logs every run to `~/.vibespace/cloud/sent.log`
+  (claude's error text of a failed run goes to `~/.vibespace/cloud/logs/`).
 
 ### Verified
 - **Live on MAIN (2026-10-12):** cloud sign-in, then + ▾ → Send to cloud…
