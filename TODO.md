@@ -5,16 +5,16 @@ Everything here is fair game for an agent working from inside a VibeSpace worksp
 read CLAUDE.md first, and set `VIBESPACE_NO_WATCH=1` if you'll be editing VibeSpace
 itself while an agent runs in the same window.
 
-## Send to cloud (0.6.58, branch `cloud/send-to-cloud`, built on Linux)
+## Send to cloud (0.6.58, built on Linux by a cloud session, merged 2026-10-12)
 Written by a cloud session that could not run the app or smoke. A Windows agent
 must check these before merging (details in the branch summary / CLAUDE.md):
-- [ ] `node --check main/*.cjs`, then `npm run smoke` (136 checks; the new one is
+- [x] (2026-10-12: 136/136 on Windows) `node --check main/*.cjs`, then `npm run smoke` (136 checks; the new one is
       "send to cloud: real claude via Process.Start …"). It runs Windows
       PowerShell with electron-as-node standing in for claude.exe; if it fails,
       read its `out=` text first (quoting vs. ELECTRON_RUN_AS_NODE).
 - [ ] Packaged smoke (`dist\win-unpacked\VibeSpace.exe --smoke`): the same check
       needs ELECTRON_RUN_AS_NODE to work in the packaged binary.
-- [ ] `Get-MpThreatDetection` doesn't grow during smoke / a cloud send (the typed
+- [x] (smoke: no new detection; still to watch on a real send) `Get-MpThreatDetection` doesn't grow during smoke / a cloud send (the typed
       line is new PowerShell text, no -EncodedCommand).
 - [ ] One-time sign-in: ⚙ → Accounts → **Set up cloud…** on a token account →
       the ☁ sign-in tab runs claude in `<dataRoot>\cloud\<id>`, sign in, `/exit`
