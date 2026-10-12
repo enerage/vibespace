@@ -241,8 +241,27 @@ async function branch(repoPath) {
   return b;
 }
 
+// Changed tracked files (staged or not; untracked files don't count), or null
+// when git can't tell. `claude --teleport` needs a clean tree (Send to cloud).
+function parseDirty(out) {
+  const parts = String(out).split('\0').filter(Boolean);
+  let n = 0;
+  for (let i = 0; i < parts.length; i++) {
+    if (parts[i].length < 4) continue;
+    if (parts[i][0] === 'R' || parts[i][0] === 'C') i++; // the old-path record
+    n++;
+  }
+  return n;
+}
+
+async function dirty(repoPath) {
+  const out = await git(repoPath, ['status', '--porcelain=v1', '-z', '--untracked-files=no'], { timeout: 5000 });
+  return out === null ? null : parseDirty(out);
+}
+
 module.exports = {
   readOnlyGitEnv,
-  log, commit, fileAt, commitFileDiff, branch, gitDir,
+  log, commit, fileAt, commitFileDiff, branch, gitDir, dirty,
+  _parseDirty: parseDirty,
   _parseLog: parseLog, _parseNameStatus: parseNameStatus, _parseNumstat: parseNumstat, _parseBranch: parseBranch,
 };

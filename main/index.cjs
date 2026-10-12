@@ -26,6 +26,7 @@ const status = require('./status.cjs');
 const gitstatus = require('./gitstatus.cjs');
 const gitdiff = require('./gitdiff.cjs');
 const githistory = require('./githistory.cjs');
+const cloud = require('./cloud.cjs');
 const textsearch = require('./textsearch.cjs');
 const gitfetch = require('./gitfetch.cjs');
 const worktrees = require('./worktrees.cjs');
@@ -324,15 +325,21 @@ function loadState(wsId) {
 
 const lastStateJson = new Map(); // wsId -> last JSON written (skip identical writes)
 const knownParked = new Map(); // wsId -> last parked list saved (a snapshot without `parked` keeps it)
+const knownCloud = new Map(); // wsId -> last cloud session list saved (same rule as parked)
 let stateFrozen = false; // set on session-end / before-quit: the final save already happened
 
 function persistState(wsId) {
   if (stateFrozen) return;
   const state = rendererState.get(wsId);
   if (!state) return;
-  if (!knownParked.has(wsId)) knownParked.set(wsId, loadState(wsId).parked || null);
-  const enriched = sessions.enrichState(wsId, state, knownParked.get(wsId));
+  if (!knownParked.has(wsId) || !knownCloud.has(wsId)) {
+    const disk = loadState(wsId);
+    if (!knownParked.has(wsId)) knownParked.set(wsId, disk.parked || null);
+    if (!knownCloud.has(wsId)) knownCloud.set(wsId, disk.cloud || null);
+  }
+  const enriched = sessions.enrichState(wsId, state, knownParked.get(wsId), knownCloud.get(wsId));
   knownParked.set(wsId, enriched.parked);
+  knownCloud.set(wsId, enriched.cloud);
   // the renderer pushes every ~5 s; only touch the disk when something changed —
   // fewer writes = fewer chances for a reboot to catch one mid-flight
   const json = JSON.stringify(enriched);
@@ -348,7 +355,7 @@ function persistState(wsId) {
   // audit trail: which tab holds which conversation, and tabs that look like
   // agents but would NOT resume on restart (main/tablog.cjs)
   try {
-    for (const l of tablog.diff(wsId, enriched.terminals, Date.now(), enriched.parked)) logger.info(`tabs: ws=${wsId} ${l}`);
+    for (const l of tablog.diff(wsId, enriched.terminals, Date.now(), enriched.parked, enriched.cloud)) logger.info(`tabs: ws=${wsId} ${l}`);
     const opts = { hasFeed: (id) => Boolean(claudefeed.stateOf(id)), alive: (id) => ptyhost.alive(id) };
     for (const l of tablog.audit(wsId, enriched.terminals, opts)) logger.warn(`tabs: ws=${wsId} ${l}`);
   } catch (e) {
@@ -1165,6 +1172,27 @@ function initIpc() {
   });
   // the provider a conversation belongs to (accounts.sessionFamily), or null
   ipcMain.handle('accounts:sessionFamily', (e, sid) => accounts.sessionFamily(String(sid || '')));
+  // Send to cloud (main/cloud.cjs): per-account cloud readiness, the config dir
+  // a cloud tab uses (created for a token account's sign-in), the sender's repo
+  // state for the send dialog / teleport check, and web links only
+  ipcMain.handle('cloud:state', () => cloud.state());
+  ipcMain.handle('cloud:prepare', (e, accountId, opts) => {
+    const r = cloud.prepare(String(accountId || ''), { create: Boolean(opts && opts.create) });
+    logger.info(`cloud: prepare ${accountId}${opts && opts.create ? ' (sign-in)' : ''} -> ${r.ok ? (r.ready ? 'ready' : 'not signed in') : r.error}`);
+    return r;
+  });
+  ipcMain.handle('cloud:gitInfo', async (e) => {
+    const root = repoFor(e);
+    if (!root) return null;
+    const [b, dirty] = await Promise.all([githistory.branch(root), githistory.dirty(root)]);
+    if (!b) return null;
+    return { head: b.head, detached: b.detached, upstream: b.upstream, ahead: b.ahead, behind: b.behind, operation: b.operation, dirty };
+  });
+  ipcMain.handle('cloud:openUrl', (e, url) => {
+    if (!cloud.isWebUrl(url)) return false;
+    shell.openExternal(url);
+    return true;
+  });
   ipcMain.handle('pty:waitClaudeExit', (e, termId, timeoutMs, noKill) => ptyhost.waitClaudeExit(String(termId), Number(timeoutMs) || 15000, { kill: !noKill }));
   ipcMain.handle('pty:claudeRunning', (e, termId) => ptyhost.claudeRunning(String(termId)));
 

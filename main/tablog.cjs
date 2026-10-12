@@ -6,23 +6,28 @@
 // a tab showed a live claude conversation that was never recorded, and a
 // restart reopened it as a plain terminal (2026-09-29).
 //
-//   diff(wsId, terminals, now, parked)
+//   diff(wsId, terminals, now, parked, cloud)
 //                                  → info lines (open snapshot, +tab, -tab,
 //                                    session/name/kind changes, parked /
-//                                    unparked / forgot shelf entries)
+//                                    unparked / forgot shelf entries, cloud
+//                                    sessions started / forgotten)
 //   audit(wsId, terminals, opts)   → warn lines, once per tab: looks like a
 //                                    claude agent but has no conversation id
 
 const last = new Map();   // wsId -> Map(termId -> { name, sid, claude, firstSeen })
 const lastParked = new Map(); // wsId -> Map(parked id -> { name, sid })
+const lastCloud = new Map(); // wsId -> Map(cloud session id -> { task, account })
 const warned = new Set(); // `${wsId}|${termId}|${reason}` already warned
 const UNTRACKED_AFTER_MS = 3 * 60 * 1000;
 
 const q = (s) => JSON.stringify(String(s ?? ''));
 const sidText = (s) => s || '—';
 
+const taskText = (t) => q(String(t || '').replace(/\s+/g, ' ').slice(0, 60));
+
 // parked: the shelf of stopped agents (state.parked), or null = not tracked
-function diff(wsId, terminals, now = Date.now(), parked = null) {
+// cloud: cloud sessions started from this workspace (state.cloud), or null
+function diff(wsId, terminals, now = Date.now(), parked = null, cloud = null) {
   const lines = [];
   const prev = last.get(wsId);
   const next = new Map();
@@ -39,11 +44,18 @@ function diff(wsId, terminals, now = Date.now(), parked = null) {
   for (const e of Array.isArray(parked) ? parked : []) {
     if (e && e.id) nextParked.set(e.id, { name: e.name, sid: e.claudeSessionId || null });
   }
+  const prevCloud = lastCloud.get(wsId);
+  const nextCloud = new Map();
+  for (const e of Array.isArray(cloud) ? cloud : []) {
+    if (e && e.id) nextCloud.set(e.id, { task: e.task, account: e.account || 'login' });
+  }
   if (!prev) {
     // first flush after the window opened = what the restore produced
-    lines.push(`open: ${next.size} tab${next.size === 1 ? '' : 's'}` + (nextParked.size ? `, ${nextParked.size} parked` : ''));
+    lines.push(`open: ${next.size} tab${next.size === 1 ? '' : 's'}` + (nextParked.size ? `, ${nextParked.size} parked` : '')
+      + (nextCloud.size ? `, ${nextCloud.size} cloud` : ''));
     for (const [id, t] of next) lines.push(`  ${q(t.name)} (${id}) ${t.claude ? 'claude' : 'plain'} session=${sidText(t.sid)}`);
     for (const [, e] of nextParked) lines.push(`  parked ${q(e.name)} session=${sidText(e.sid)}`);
+    for (const [id, e] of nextCloud) lines.push(`  cloud ${id} ${taskText(e.task)} account=${e.account}`);
   } else {
     for (const [id, t] of next) {
       const p = prev.get(id);
@@ -62,9 +74,13 @@ function diff(wsId, terminals, now = Date.now(), parked = null) {
       if (nextParked.has(id)) continue;
       lines.push(`${e.sid && tabSids.has(e.sid) ? 'unparked' : 'forgot'} ${q(e.name)} session=${sidText(e.sid)}`);
     }
+    const beforeCloud = prevCloud || new Map();
+    for (const [id, e] of nextCloud) if (!beforeCloud.has(id)) lines.push(`cloud + ${id} ${taskText(e.task)} account=${e.account}`);
+    for (const [id, e] of beforeCloud) if (!nextCloud.has(id)) lines.push(`cloud - ${id} ${taskText(e.task)} (forgotten)`);
   }
   last.set(wsId, next);
   lastParked.set(wsId, nextParked);
+  lastCloud.set(wsId, nextCloud);
   return lines;
 }
 
@@ -91,6 +107,7 @@ function audit(wsId, terminals, opts = {}, now = Date.now()) {
 function forget(wsId) {
   last.delete(wsId);
   lastParked.delete(wsId);
+  lastCloud.delete(wsId);
   for (const k of [...warned]) if (k.startsWith(wsId + '|')) warned.delete(k);
 }
 

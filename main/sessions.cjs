@@ -272,9 +272,10 @@ function tabNameFor(wsId, sessionId, cwd = null, wsName = '', taken = []) {
 }
 
 // main's state merge: the renderer snapshot + tracked session ids. `parked`
-// (stopped agents on the shelf) is carried as-is; a snapshot without the key
-// (a renderer that predates it) keeps the previous list instead of wiping it.
-function enrichState(wsId, state, prevParked = null) {
+// (stopped agents on the shelf) and `cloud` (cloud sessions started from this
+// workspace, 0.6.58) are carried as-is; a snapshot without the key (a renderer
+// that predates it) keeps the previous list instead of wiping it.
+function enrichState(wsId, state, prevParked = null, prevCloud = null) {
   const enriched = { ...state };
   if (Array.isArray(enriched.terminals)) {
     enriched.terminals = enriched.terminals.map(t => ({
@@ -283,6 +284,7 @@ function enrichState(wsId, state, prevParked = null) {
     }));
   }
   if (!Array.isArray(enriched.parked)) enriched.parked = Array.isArray(prevParked) ? prevParked : [];
+  if (!Array.isArray(enriched.cloud)) enriched.cloud = Array.isArray(prevCloud) ? prevCloud : [];
   return enriched;
 }
 

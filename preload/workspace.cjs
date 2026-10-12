@@ -69,6 +69,12 @@ contextBridge.exposeInMainWorld('vs', {
   onAccountsChanged: (cb) => ipcRenderer.on('accounts:changed', (e, state) => cb(state)),
   setTermAccount: (termId, accountId) => ipcRenderer.invoke('accounts:setTerm', termId, accountId),
   sessionFamily: (sessionId) => ipcRenderer.invoke('accounts:sessionFamily', sessionId),
+  // Send to cloud (main/cloud.cjs): { [accountId]: { ready, email, own } };
+  // prepare → { ok, configDir, ready, email, label } (create: make the sign-in dir)
+  cloudState: () => ipcRenderer.invoke('cloud:state'),
+  cloudPrepare: (accountId, opts) => ipcRenderer.invoke('cloud:prepare', accountId, opts || {}),
+  cloudGitInfo: () => ipcRenderer.invoke('cloud:gitInfo'),
+  cloudOpenUrl: (url) => ipcRenderer.invoke('cloud:openUrl', url),
   waitClaudeExit: (termId, timeoutMs, noKill) => ipcRenderer.invoke('pty:waitClaudeExit', termId, timeoutMs, Boolean(noKill)),
   claudeRunning: (termId) => ipcRenderer.invoke('pty:claudeRunning', termId),
   onAccountSwitch: (cb) => ipcRenderer.on('account:switch', (e, msg) => cb(msg)),
