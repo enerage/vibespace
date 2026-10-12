@@ -2,6 +2,32 @@
 
 Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 
+## [0.6.58] — 2026-10-12
+
+### Added
+- **Send to cloud.** + ▾ → **Send to cloud…** starts a Claude Code cloud
+  session (`claude --cloud`) on the account you pick: write the task, choose
+  the account (only accounts signed in for cloud are listed; the one new
+  agents start on is preselected), and the dialog shows the branch the cloud
+  will clone. Cloud sessions clone the repo from GitHub, so unpushed commits
+  get a warning ("cloud clones GitHub at main: push first"). The session runs
+  in a visible ☁ tab; its link is picked up from the output and kept.
+- **Cloud sessions list** in the + ▾ menu: age, task and account per session.
+  Click opens it on claude.ai, **↩ Bring back** continues it here in a new tab
+  (`claude --teleport`; refused with a message while you have uncommitted
+  changes), **✕** forgets it (it stays on claude.ai).
+- **Cloud sign-in per account.** ⚙ Preferences → Accounts: each Claude
+  account shows **Set up cloud…** or **Cloud ready ✓**. Extra (token)
+  accounts can't start cloud sessions with their token, so Set up opens a tab
+  with Claude's own sign-in for that account, kept in a cloud-only folder that
+  normal agents never use. The logged-in account just uses its normal login.
+
+### Notes
+- Cloud tabs are plain terminals: no status lights, feed, resume on restart
+  or account moves. The tab's tooltip says so.
+- Your own `~/.claude` (settings, skills, MCP servers) doesn't travel to a
+  cloud session; the repo's `.claude/` does.
+
 ## [0.6.57] — 2026-10-10
 
 ### Fixed

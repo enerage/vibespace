@@ -158,7 +158,7 @@ Key facts encoded in `main/sessions.cjs`:
 
 ## Developing VibeSpace
 
-- `npm run smoke` — 135 self-tests (as of 0.6.57) incl. pty echo and live session discovery. Run it after
+- `npm run smoke` — 136 self-tests (as of 0.6.58) incl. pty echo and live session discovery. Run it after
   touching main-process code, **from a normal shell**: inside a Claude pty the stripped
   PATH and nested ConPTY break the pty test (`powershell.exe` "File not found" /
   AttachConsole) — prepend System32 to PATH and give it its own console, or just use a
@@ -479,6 +479,35 @@ Key facts encoded in `main/sessions.cjs`:
   - Claude repeats its last `rate_limits` reading on every statusLine tick until
     its next API response. Only a reading that just became full marks an account
     (`becameFull`), or an idle tab's stale 100 % re-marks it after a reset.
+  - **Cloud sessions use a cloud-only config dir per account** (0.6.58,
+    `main/cloud.cjs` + `ui/cloud.js` + `shellcmd.js` `realClaudeLine`).
+    `claude --cloud` / `--teleport` need a real claude.ai login: a setup-token
+    can't, and `CLAUDE_CODE_OAUTH_TOKEN` overrides a login. So a token account
+    signs in once (claude's own login, browser OAuth) with
+    `CLAUDE_CONFIG_DIR=<dataRoot>/cloud/<accountId>`, and ONLY cloud tabs ever
+    set that variable. Normal agent tabs keep the one shared `~/.claude` (see
+    the `CLAUDE_CONFIG_DIR` rule above). The /login account has no cloud dir:
+    it reuses its normal config, so no second sign-in. Ready = that dir's
+    `.credentials.json`, or an `oauthAccount` in its `.claude.json` (an
+    `ANTHROPIC_API_KEY` is not a claude.ai login).
+  - Cloud tabs type the REAL claude (`Get-Command claude.exe`, never the
+    tab's `claude` function: it would add `--settings`, `--remote-control` and
+    the tab's token) and start it with `[Diagnostics.Process]::Start` on a
+    command line built by `crtQuote`. Windows PowerShell 5.1's `& exe 'arg'`
+    does not escape embedded `"`, so a task with quotes would arrive split.
+    For the call, `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`,
+    `ANTHROPIC_AUTH_TOKEN` and `ANTHROPIC_BASE_URL` are cleared (a global
+    z.ai env would otherwise send the login elsewhere) and restored in a
+    `finally`, so the tab is a normal shell afterwards.
+  - Cloud tabs are plain tabs (no `--settings`, no feed, no tracking). A
+    teleported conversation of a token account lives in its cloud dir's
+    `projects/`, so normal tabs can't resume it; the /login account's lands
+    in `~/.claude` like any other. The session id/URL comes from the send
+    tab's output (`shellcmd.cloudSession`, ids inside the echoed task are
+    ignored) and goes to state.json `cloud`, kept by main's merge exactly like
+    `parked`. tablog logs `cloud +/-` lines. Teleport needs a clean tree, the
+    same repo and the same account: `cloud:gitInfo` counts changed TRACKED
+    files (untracked ones don't block) and Bring back refuses first.
 - **Keyboard selection in claude's prompt** (0.6.39, `renderer/workspace/ui/inputsel.js`,
   RESEARCH-INPUT-SELECTION.md). Claude has no keyboard-started selection, so
   Shift(+Ctrl)+←/→ and Shift+Home/End are turned into: a synthetic two-cell SGR

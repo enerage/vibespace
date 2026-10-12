@@ -5,6 +5,41 @@ Everything here is fair game for an agent working from inside a VibeSpace worksp
 read CLAUDE.md first, and set `VIBESPACE_NO_WATCH=1` if you'll be editing VibeSpace
 itself while an agent runs in the same window.
 
+## Send to cloud (0.6.58, branch `cloud/send-to-cloud`, built on Linux)
+Written by a cloud session that could not run the app or smoke. A Windows agent
+must check these before merging (details in the branch summary / CLAUDE.md):
+- [ ] `node --check main/*.cjs`, then `npm run smoke` (136 checks; the new one is
+      "send to cloud: real claude via Process.Start …"). It runs Windows
+      PowerShell with electron-as-node standing in for claude.exe; if it fails,
+      read its `out=` text first (quoting vs. ELECTRON_RUN_AS_NODE).
+- [ ] Packaged smoke (`dist\win-unpacked\VibeSpace.exe --smoke`): the same check
+      needs ELECTRON_RUN_AS_NODE to work in the packaged binary.
+- [ ] `Get-MpThreatDetection` doesn't grow during smoke / a cloud send (the typed
+      line is new PowerShell text, no -EncodedCommand).
+- [ ] One-time sign-in: ⚙ → Accounts → **Set up cloud…** on a token account →
+      the ☁ sign-in tab runs claude in `<dataRoot>\cloud\<id>`, sign in, `/exit`
+      → toast "ready for cloud sessions" and the row shows **Cloud ready ✓**
+      (email in the tooltip). Confirm the files claude wrote there
+      (`.credentials.json`, `.claude.json`); adjust `cloud.cjs` readiness if
+      claude 2.1.296 names them differently.
+- [ ] Send a tiny task (+ ▾ → Send to cloud…, e.g. "add a line to README"):
+      branch line + push warning correct, the ☁ tab runs `claude --cloud`, and
+      the session link is picked up (toast "Cloud session started", entry under
+      + ▾ → Cloud sessions). If nothing is picked up in the tab, copy claude's
+      exact output into a `cloudSession` test: the URL/id format is a guess
+      (`https://claude.ai/code/session_…`).
+- [ ] Task with quotes, `#`, `$x` and two lines arrives unchanged on claude.ai.
+- [ ] Click the entry → the browser opens it. ↩ Bring back with a dirty tree →
+      refused toast; with a clean tree → ☁↩ tab runs `claude --teleport <id>`
+      on the same account and continues the session.
+- [ ] `tabs:` log lines show `cloud + <id>` / `cloud - <id>`; a restart keeps the
+      list and restores ☁ tabs as plain terminals (tooltip note kept).
+- [ ] Follow-ups: does `claude --cloud` exit after creating the session or stay
+      attached? (the tab shows it; nothing depends on it). `--environment <id>`
+      is supported by `realClaudeLine` args but has no UI yet. A teleported
+      token-account conversation can't be resumed by normal tabs (it lives in
+      the cloud dir); decide whether that matters.
+
 ## Packaging & distribution
 - [x] **electron-builder packaging** (0.5.0) — NSIS installer + unpacked build
       validated end-to-end (16/16 packaged smoke, clean workspace boot). npmRebuild
