@@ -1,6 +1,6 @@
 import { $, el, toast, confirmBox } from './common.js';
 import { THEMES, applyTheme, currentTheme } from './themes.js';
-import { openSetupTokenTab } from './terms.js';
+import { openSetupTokenTab, openCloudSetupTab, onCloudReadyChanged } from './terms.js';
 import { roomText } from './automove.js';
 
 // Preferences modal (⚙ in the top bar). Absorbs the header controls that
@@ -38,8 +38,12 @@ export function init(opts) {
   modal.addEventListener('mousedown', (e) => { if (e.target === modal) close(); });
   modal.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
 
-  // accounts: machine-wide (main/accounts.cjs) — loaded on open, live while open
-  const loadAccounts = () => vs.accountsList().then(renderAccounts).catch(() => {});
+  // accounts: machine-wide (main/accounts.cjs) — loaded on open, live while open.
+  // Cloud sign-in per account (main/cloud.cjs) is read with them: a file check.
+  let cloudReady = {}; // accountId -> { ready, email, own }
+  const loadCloud = () => vs.cloudState().then((c) => { cloudReady = c || {}; }).catch(() => {});
+  const loadAccounts = () => Promise.all([vs.accountsList(), loadCloud()]).then(([st]) => renderAccounts(st)).catch(() => {});
+  onCloudReadyChanged(() => { if (!modal.classList.contains('hidden')) loadAccounts(); });
   vs.onAccountsChanged((st) => { if (!modal.classList.contains('hidden')) renderAccounts(st); });
   const msgIn = (sel, msg) => {
     const e = $(sel);
@@ -304,6 +308,20 @@ export function init(opts) {
       }
 
       const actions = el('div', 'acct-actions');
+      // cloud sessions need a claude.ai sign-in: the /login is one; a token
+      // account signs in once in its own cloud-only config (never used by agents)
+      if (a.kind === 'login' || a.kind === 'token') {
+        const c = cloudReady[a.id];
+        const ok = Boolean(c && c.ready);
+        const cb = el('button', 'btn small ghost acct-cloud' + (ok ? ' ready' : ''), ok ? 'Cloud ready ✓' : 'Set up cloud…');
+        cb.title = ok
+          ? `Send to cloud signs in as ${c.email || 'this account'}${c.own ? " (this account's own cloud sign-in)" : ' (the normal login)'}.\nClick to sign in again.`
+          : a.kind === 'login'
+            ? "Cloud sessions (+ ▾ → Send to cloud…) use this login. It isn't signed in to claude.ai yet: opens a tab where you type /login."
+            : "Cloud sessions can't use a setup-token. Opens a tab with claude's own sign-in for this account, kept in a cloud-only config that agents never use.";
+        cb.onclick = () => { close(); openCloudSetupTab(a.id); };
+        actions.append(cb);
+      }
       if (out) {
         const reset = el('button', 'btn small ghost', 'reset');
         reset.title = 'Forget the limit — agents may use this account again';

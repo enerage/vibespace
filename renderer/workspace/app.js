@@ -22,6 +22,7 @@ function persistNow() {
   return vs.saveState(wsId, {
     terminals: terms.snapshot(),
     parked: terms.parkedSnapshot() || state.parked || [], // before terms.init: the saved shelf as is
+    cloud: terms.cloudSnapshot() || state.cloud || [], // cloud sessions (+ ▾ → Cloud sessions), same rule
     activeTerm: terms.activeTermId(),
     autoResume: $('#auto-resume').checked,
     phoneRemote: $('#phone-remote').checked,
@@ -415,6 +416,7 @@ async function main() {
     openFile: (p, n, l) => viewer.openAt(p, n, l), // file:line links → preview
     savedTerminals: state.terminals,
     savedParked: state.parked,
+    savedCloud: state.cloud,
     persistNow, // park: the entry is on disk before the agent is stopped
     autoResume: $('#auto-resume').checked,
     remote: () => $('#phone-remote').checked, // read at each launch: applies to new agents

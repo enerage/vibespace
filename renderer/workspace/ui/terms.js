@@ -4,9 +4,10 @@ import { openTabMenu } from './tabmenu.js';
 import * as feedui from './feedui.js';
 import * as board from './board.js';
 import * as parked from './parked.js';
+import * as cloud from './cloud.js';
 import * as inputsel from './inputsel.js';
 import * as automove from './automove.js';
-import { setupPrefix, setupLines, bgRefusal, JOB_ID } from './shellcmd.js';
+import { setupPrefix, setupLines, bgRefusal, JOB_ID, cloudSendLine, teleportLine, cloudLoginLine, cloudSession, shortTask, CLOUD_ID } from './shellcmd.js';
 
 // terminal tabs: each hosts a PowerShell pty; "claude" tabs run Claude Code and
 // get their session id tracked (main process) so they can be resumed after updates.
@@ -26,6 +27,8 @@ let counter = 0;
 // parked agents (ui/parked.js): stopped, conversation kept; null until init
 // loaded them, so an early snapshot can't save an empty shelf
 let shelf = null;
+// cloud sessions started from this workspace (ui/cloud.js): null until init
+let clouds = null;
 let persistNow = async () => persist();
 
 // ---- accounts (main/accounts.cjs) --------------------------------------------
@@ -476,6 +479,7 @@ export function init(opts) {
   openFile = opts.openFile || openFile;
   shelf = parked.normalizeParked(opts.savedParked);
   parked.init({ list: () => shelf || [], unpark: unparkAgent, forget: forgetParked });
+  clouds = cloud.normalizeCloud(opts.savedCloud);
   remote = opts.remote || remote;
   wtPrefs = opts.wtPrefs || wtPrefs;
   wsName = opts.wsName || '';
@@ -489,6 +493,7 @@ export function init(opts) {
     const tab = tabs.get(termId);
     if (!tab) return;
     if (tab.resumeWatch) watchResume(tab, chunk);
+    if (tab.cloudWatch) watchCloud(tab, chunk);
     const t0 = tab.lagT0;
     if (t0 == null) { tab.term.write(chunk); return; }
     // first output after a typed key: time key → parsed (+ next paint)
@@ -654,6 +659,7 @@ export function init(opts) {
           model: t.model || null,
           modelSwitch: Boolean(t.modelSwitch),
           family: t.claudeSessionId ? await conversationFamily(t.claudeSessionId, t) : null,
+          cloudTab: t.cloudTab || null,
         });
       } else if (t.worktree && !(await worktreeAlive(t.worktree))) {
         // the worktree folder is gone: a plain terminal at the repo root, never
@@ -678,6 +684,7 @@ export function init(opts) {
           accountAt: t.accountAt || 0,
           worktree: t.worktree || null,
           model: t.model || null,
+          cloudTab: t.cloudTab || null,
         });
       }
     }
@@ -781,6 +788,7 @@ async function openClaudeMenu() {
     { label: 'New agent', run: () => createTab({ name: nextName('agent'), cwd: repoPath, claude: true }) },
     { label: 'New agent in a worktree', hint: "Its own git worktree and branch vs/<name>: parallel agents never touch each other's files", run: () => newWorktreeAgent() },
     { label: 'New terminal', hint: 'A plain PowerShell terminal', run: () => createTab({ name: nextName('term'), cwd: repoPath }) },
+    { label: 'Send to cloud…', hint: 'Start a Claude Code cloud session on a chosen account: it works on a GitHub clone of this repo and keeps running when this PC sleeps', run: () => sendToCloud() },
     ...newAgentModelItems(),
     ...newAgentOnItems(),
     { sep: true },
@@ -789,6 +797,10 @@ async function openClaudeMenu() {
     { label: 'All conversations…', hint: "Claude's own resume picker in a new tab; the pick is saved to that tab", run: resumePicker },
   ];
   if (kept.length) items.push({ label: `Kept worktrees (${kept.length}) ▸`, hint: 'Worktrees kept after their tab closed, or held by a parked agent', run: () => worktreesMenu(r, kept) });
+  if (clouds && clouds.length) {
+    items.push({ sep: true }, { section: 'Cloud sessions' },
+      ...cloud.menuItems(clouds, cloudCtx, { max: cloud.MENU_MAX, more: () => openCloudList(r) }));
+  }
   showMenu(r.left, r.bottom + 4, items);
 }
 
@@ -986,6 +998,184 @@ export function forgetParked(id) {
   toast(`forgot ${e.name} — still in All conversations`, 'ok');
 }
 
+// ---- Send to cloud (ui/cloud.js, main/cloud.cjs) ------------------------------
+// `claude --cloud "<task>"` in a visible PLAIN tab on the chosen account, with
+// the real claude.exe (never the tab's `claude` function). The session id/URL
+// it prints is saved to state.json `cloud`; + ▾ → Cloud sessions lists them:
+// click opens claude.ai, ↩ teleports one back into a new plain tab, ✕ forgets.
+// Cloud tabs are never tracked as agents: no hooks, feed, resume or moves.
+const CLOUD_WATCH_MS = 10 * 60 * 1000; // how long a send tab's output is searched for the id
+const CLOUD_SETUP_POLL_MS = 4000;
+const CLOUD_SETUP_MAX_MS = 20 * 60 * 1000;
+
+export function cloudSnapshot() { return clouds ? clouds.map(e => ({ ...e })) : null; }
+export function cloudList() { return clouds || []; }
+
+const cloudCtx = {
+  open: (id) => openCloudSession(id),
+  bringBack: (id) => bringBackCloud(id),
+  forget: (id) => forgetCloud(id),
+  accountLabel: (id) => accountLabel(id),
+};
+
+function openCloudList(r) {
+  if (!clouds || !clouds.length) return;
+  showMenu(r.left, r.bottom + 4, [{ section: `Cloud sessions · ${clouds.length}` }, ...cloud.menuItems(clouds, cloudCtx)]);
+}
+
+// prefs (✓ Cloud ready) follows a sign-in that finished in a setup tab
+const cloudListeners = [];
+export function onCloudReadyChanged(fn) { cloudListeners.push(fn); }
+const cloudChanged = () => { for (const fn of cloudListeners) { try { fn(); } catch {} } };
+
+const cloudTabName = (prefix, task) => parked.uniqueName(`${prefix} ${shortTask(task)}`, new Set([...tabs.values()].map(t => t.name)));
+
+export async function sendToCloud() {
+  let ready = {};
+  let git = null;
+  try { [ready, git] = await Promise.all([vs.cloudState(), vs.cloudGitInfo()]); } catch (e) { console.warn('cloud: state failed', e && e.message); }
+  try { await setAccounts(await vs.accountsList()); } catch {}
+  const list = cloud.readyAccounts(accountsState, ready || {});
+  // nothing signed in: offer the sign-in of the account new agents start on
+  const eligible = ((accountsState && accountsState.accounts) || []).filter(a => a.kind === 'login' || a.kind === 'token');
+  const top = eligible.find(a => a.id === (accountsState && accountsState.pick)) || eligible[0] || null;
+  const pick = await cloud.openSendDialog({
+    accounts: list,
+    selected: cloud.defaultAccount(accountsState, ready || {}),
+    git,
+    ready: ready || {},
+    setupFor: top ? { id: top.id, label: top.label } : null,
+    onSetup: (id) => openCloudSetupTab(id),
+  });
+  if (!pick) return null;
+  let p;
+  try { p = await vs.cloudPrepare(pick.account); } catch (e) { p = { ok: false, error: ipcMsg(e) }; }
+  if (!p || !p.ok) { toast(`Can't send to cloud: ${(p && p.error) || 'unknown error'}`, 'err'); return null; }
+  if (!p.ready) {
+    toast(`${p.label || accountLabel(pick.account)} isn't signed in for cloud`, 'err', { action: { label: 'Set up', run: () => openCloudSetupTab(pick.account) } });
+    return null;
+  }
+  const task = pick.task.trim();
+  const tab = createTab({
+    name: cloudTabName('☁', task),
+    cwd: repoPath,
+    run: cloudSendLine(task, { configDir: p.configDir }),
+    cloudTab: { kind: 'send', account: pick.account },
+  });
+  tab.cloudWatch = { until: Date.now() + CLOUD_WATCH_MS, tail: '', task, account: pick.account, branch: (git && !git.detached && git.head) || null };
+  console.warn(`cloud: sending from ${tab.name} (${tab.id}) on ${pick.account}, branch ${(git && git.head) || '?'}${git && git.ahead ? `, ${git.ahead} unpushed` : ''}`);
+  setTimeout(() => {
+    if (!tabs.has(tab.id) || !tab.cloudWatch) return;
+    tab.cloudWatch = null;
+    toast(`${tab.name}: no cloud session link seen in 10 min. If claude printed one, it is in the tab.`, 'err');
+  }, CLOUD_WATCH_MS + 1000);
+  return tab;
+}
+
+// the send tab's output, until the session id shows up (the task itself is
+// echoed by the shell: ids inside it don't count)
+function watchCloud(tab, chunk) {
+  const w = tab.cloudWatch;
+  if (Date.now() > w.until) { tab.cloudWatch = null; return; }
+  w.tail = (w.tail + chunk).slice(-16000);
+  if (!/session_|cse_/.test(w.tail)) return;
+  const hit = cloudSession(w.tail, { exclude: w.task });
+  if (!hit) return;
+  tab.cloudWatch = null;
+  tab.cloudTab = { ...(tab.cloudTab || { kind: 'send' }), id: hit.id };
+  const entry = cloud.makeEntry({ id: hit.id, url: hit.url, task: w.task, account: w.account, branch: w.branch });
+  clouds = cloud.normalizeCloud([entry, ...(clouds || []).filter(e => e.id !== hit.id)]);
+  console.warn(`cloud: ${tab.name} started ${hit.id} on ${w.account}`);
+  renderTabBar();
+  persist();
+  toast(`☁ Cloud session started: ${shortTask(w.task, 40)}. It's under + ▾ → Cloud sessions.`, 'ok', { action: { label: 'Open', run: () => openCloudSession(hit.id) } });
+}
+
+async function openCloudSession(id) {
+  const e = (clouds || []).find(x => x.id === id);
+  if (!e) return;
+  const ok = await vs.cloudOpenUrl(e.url).catch(() => false);
+  if (!ok) toast(`Couldn't open ${e.url}`, 'err');
+}
+
+// claude --teleport <id> in a new plain tab, same account (its cloud config).
+// Teleport needs a clean tree in the same repo: refused here first, with the
+// reason, instead of claude failing inside the tab.
+export async function bringBackCloud(id) {
+  const e = (clouds || []).find(x => x.id === id);
+  if (!e || !CLOUD_ID.test(e.id)) return null;
+  const git = await vs.cloudGitInfo().catch(() => null);
+  const why = cloud.teleportBlocker(git);
+  if (why) { toast(`Can't bring "${shortTask(e.task)}" back: ${why}`, 'err'); return null; }
+  let p;
+  try { p = await vs.cloudPrepare(e.account); } catch (err) { p = { ok: false, error: ipcMsg(err) }; }
+  if (!p || !p.ok) { toast(`Can't bring it back on ${accountLabel(e.account)}: ${(p && p.error) || 'unknown error'}`, 'err'); return null; }
+  if (!p.ready) {
+    toast(`${p.label || accountLabel(e.account)} isn't signed in for cloud: teleport needs the account that started it`, 'err', { action: { label: 'Set up', run: () => openCloudSetupTab(e.account) } });
+    return null;
+  }
+  const tab = createTab({
+    name: cloudTabName('☁↩', e.task),
+    cwd: repoPath,
+    run: teleportLine(e.id, { configDir: p.configDir }),
+    cloudTab: { kind: 'teleport', id: e.id, account: e.account },
+  });
+  console.warn(`cloud: bringing back ${e.id} in ${tab.name} (${tab.id}) on ${e.account}`);
+  return tab;
+}
+
+// off the list only; the session stays on claude.ai. No confirm: nothing is lost.
+export function forgetCloud(id) {
+  const e = (clouds || []).find(x => x.id === id);
+  if (!e) return;
+  clouds = clouds.filter(x => x.id !== id);
+  persist();
+  toast(`Forgot the cloud session "${shortTask(e.task)}": still on claude.ai`, 'ok');
+}
+
+// ⚙ Preferences → Accounts → Set up cloud…: claude's own sign-in for THAT
+// account in its cloud-only config dir (the /login account: its normal one),
+// in a plain tab. Watched until the credentials appear, then prefs repaints.
+export async function openCloudSetupTab(accountId) {
+  let p;
+  try { p = await vs.cloudPrepare(accountId, { create: true }); } catch (e) { p = { ok: false, error: ipcMsg(e) }; }
+  if (!p || !p.ok) { toast(`Can't set up cloud: ${(p && p.error) || 'unknown error'}`, 'err'); return null; }
+  const label = p.label || accountLabel(accountId);
+  const tab = createTab({
+    name: parked.uniqueName(`☁ sign-in ${label}`, new Set([...tabs.values()].map(t => t.name))),
+    cwd: repoPath,
+    run: cloudLoginLine({ configDir: p.configDir }),
+    cloudTab: { kind: 'setup', account: accountId },
+  });
+  toast(p.configDir
+    ? `Sign in to ${label}'s claude.ai account in this tab (claude's sign-in, or type /login), then /exit. Use the same claude.ai account its token came from.`
+    : `Type /login in this tab and sign in to ${label}'s claude.ai account, then /exit.`, '');
+  const until = Date.now() + CLOUD_SETUP_MAX_MS;
+  const poll = async () => {
+    if (!tabs.has(tab.id) || Date.now() > until) return;
+    const st = await vs.cloudState().catch(() => null);
+    const r = st && st[accountId];
+    if (r && r.ready) {
+      toast(`☁ ${label} is ready for cloud sessions${r.email ? ` (${r.email})` : ''}`, 'ok');
+      cloudChanged();
+      return;
+    }
+    setTimeout(poll, CLOUD_SETUP_POLL_MS);
+  };
+  if (!p.ready) setTimeout(poll, CLOUD_SETUP_POLL_MS);
+  return tab;
+}
+
+const CLOUD_TAB_TEXT = {
+  send: 'Cloud tab: a plain terminal running claude --cloud.',
+  teleport: 'Cloud tab: a plain terminal running claude --teleport (the cloud session continues here).',
+  setup: "Cloud sign-in tab: a plain terminal running claude's own sign-in for cloud sessions.",
+};
+function cloudTabText(c) {
+  return `☁ ${CLOUD_TAB_TEXT[c.kind] || 'Cloud tab.'}${c.id ? ` Session ${c.id}.` : ''}`
+    + `\nNot tracked as an agent: no status lights, feed, resume on restart or account moves.`;
+}
+
 function openTermFind() {
   $('#term-find').classList.remove('hidden');
   const input = $('#term-find-input');
@@ -1160,7 +1350,7 @@ function registerFileLinks(term, tab) {
   } catch {} // xterm without link-provider support — links simply don't light up
 }
 
-export function createTab({ name = 'agent', cwd = repoPath, claude = false, resumeId = null, activate = true, termId = null, attachBuffer = null, savedIsClaude = null, savedSessionId = null, pickSession = false, run = null, account = null, accountAt = 0, worktree = null, family = null, model = null, modelSwitch = false, setup = '' } = {}) {
+export function createTab({ name = 'agent', cwd = repoPath, claude = false, resumeId = null, activate = true, termId = null, attachBuffer = null, savedIsClaude = null, savedSessionId = null, pickSession = false, run = null, account = null, accountAt = 0, worktree = null, family = null, model = null, modelSwitch = false, setup = '', cloudTab = null } = {}) {
   const id = termId || newTermId();
   const host = el('div', 'term-host');
   host.style.display = 'none';
@@ -1196,6 +1386,8 @@ export function createTab({ name = 'agent', cwd = repoPath, claude = false, resu
     named: restoredNamed.get(id) || null, // 'user' | 'auto' | null (still on its default name)
     isClaude: savedIsClaude !== null ? Boolean(savedIsClaude) : Boolean(claude || resumeId || pickSession),
     model: cleanModel(model), // chosen/switched model (--model on a fresh claude); null = default
+    // ☁ a cloud tab (send / teleport / sign-in): a plain tab, said so in the tooltip
+    cloudTab: cloudTab && cloud.CLOUD_TAB_KINDS.includes(cloudTab.kind) ? { kind: cloudTab.kind, id: cloudTab.id || null, account: cloudTab.account || null } : null,
   };
   tab.modelSwitch = Boolean(modelSwitch && tab.model); // a /model switch with no reply since: a resume adds --model
   if (tab.isClaude) {
@@ -1553,7 +1745,8 @@ function renderTabBar() {
       : (tab.sessionId ? `session ${tab.sessionId.slice(0, 8)}…` : 'no claude session yet');
     const label = el('span', 'label', tab.name);
     label.title = (tab.sessionId ? `${tab.name} — ${tab.sessionId}` : tab.name) + '  (double-click to rename · right-click for options)'
-      + (tab.worktree ? '\n' + feedui.wtText(tab.worktree) : '');
+      + (tab.worktree ? '\n' + feedui.wtText(tab.worktree) : '')
+      + (tab.cloudTab ? '\n' + cloudTabText(tab.cloudTab) : '');
     const close = el('span', 'close', '✕');
     close.title = 'close terminal';
     const meter = el('span', 'ctx-meter hidden'); // context-window fill, bottom edge
@@ -1798,6 +1991,7 @@ export function snapshot() {
     named: t.named || null,
     model: t.model || null, // chosen/switched model; null = claude's default
     modelSwitch: Boolean(t.modelSwitch), // /model switch with no reply since: the resume adds --model
+    cloudTab: t.cloudTab || null, // ☁ cloud tab (plain): restored as a plain tab with the same note
   }));
 }
 

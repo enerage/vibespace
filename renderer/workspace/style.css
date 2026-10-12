@@ -670,6 +670,26 @@ html[data-mode="light"] .ficon { filter: brightness(0.55) saturate(1.4); }
 }
 .info-v.none { color: var(--dim); }
 .info-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+/* Send to cloud dialog (cloud.js, 0.6.58) */
+.cloud-box { width: min(560px, 92vw); }
+.cloud-hint { color: var(--dim); font-size: 12px; line-height: 1.45; margin: 0 0 10px; }
+.cloud-task {
+  width: 100%; box-sizing: border-box; resize: vertical; min-height: 6em; margin-bottom: 10px;
+  padding: 8px 10px; background: var(--bg); color: var(--text);
+  border: 1px solid var(--border); border-radius: 8px; outline: none;
+  font: inherit; font-size: 13px;
+}
+.cloud-task:focus, .cloud-account:focus { border-color: var(--accent); }
+.cloud-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.cloud-k { color: var(--dim); font-size: 12px; flex: none; }
+.cloud-account {
+  flex: 1 1 auto; min-width: 0; padding: 4px 8px;
+  background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px; outline: none;
+}
+.cloud-none { font-size: 12px; color: var(--dim); }
+.cloud-branch { font-size: 12px; margin-bottom: 8px; overflow-wrap: anywhere; }
+.cloud-branch.warn { color: var(--yellow); }
+.acct-cloud.ready { color: var(--accent-text); }
 /* confirmBox() (common.js) — the in-page replacement for window.confirm */
 .confirm-box { width: min(460px, 92vw); }
 .confirm-msg { white-space: pre-wrap; font-size: 13px; line-height: 1.5; }

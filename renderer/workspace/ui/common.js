@@ -134,6 +134,7 @@ export function cardOnHover(target, build, { place = 'side' } = {}) {
 //   section: small dim non-clickable label
 //   meta: right-aligned dim text · card(): element for a hover card beside the row
 //   action: { label, hint?, run } — a small secondary button on the row (✕ forget)
+//   actions: [action, …] — several of them (☁ Bring back + ✕)
 // opts.leaveClose: [elements] — a hover-opened menu closes once the pointer has
 // left it, those elements and its card for a moment.
 // Lives on document.body so tree rebuilds / tab-bar redraws can't take it down;
@@ -150,15 +151,16 @@ export function showMenu(x, y, items, opts = {}) {
   for (const it of items) {
     if (it.sep) { menu.appendChild(el('div', 'ctx-sep')); continue; }
     if (it.section) { menu.appendChild(el('div', 'ctx-section', it.section)); continue; }
-    const rich = Boolean(it.meta || it.action);
+    const acts = Array.isArray(it.actions) ? it.actions : it.action ? [it.action] : [];
+    const rich = Boolean(it.meta || acts.length);
     const item = el('div', 'ctx-item' + (rich ? ' rich' : '') + (it.danger ? ' danger' : '') + (it.disabled ? ' disabled' : ''), rich ? undefined : it.label);
     if (rich) {
       item.append(el('span', 'ctx-label', it.label));
       if (it.meta) item.append(el('span', 'ctx-meta', it.meta));
-      if (it.action) {
-        const act = el('span', 'ctx-act', it.action.label);
-        if (it.action.hint) act.title = it.action.hint;
-        act.onclick = (ev) => { ev.stopPropagation(); closeMenu(); it.action.run(); };
+      for (const a of acts) {
+        const act = el('span', 'ctx-act', a.label);
+        if (a.hint) act.title = a.hint;
+        act.onclick = (ev) => { ev.stopPropagation(); closeMenu(); a.run(); };
         item.append(act);
       }
     }

@@ -45,3 +45,125 @@ export function bgRefusal(text) {
   if (!m) return null;
   return { job: m[1] && JOB_ID.test(m[1]) ? m[1] : null };
 }
+
+// ---------- Send to cloud (0.6.58) ----------
+// Cloud sessions (`claude --cloud`, `--teleport`) run the REAL claude
+// executable, never the tab's `claude` function (it adds our hook settings,
+// --remote-control and the tab's account token, and a setup-token can't use
+// cloud features). The task goes to claude as ONE argument, unchanged.
+
+// One argument of a Windows command line, quoted so the C runtime /
+// CommandLineToArgvW split gives back exactly `s`: always in double quotes, a
+// quote as \", and backslashes doubled only where they precede a quote (or
+// the closing one). Spaces, #, $, quotes and line breaks all survive.
+export function crtQuote(s) {
+  let out = '"';
+  let bs = 0;
+  for (const ch of String(s)) {
+    if (ch === '\\') { bs++; continue; }
+    if (ch === '"') out += '\\'.repeat(bs * 2 + 1) + '"';
+    else out += '\\'.repeat(bs) + ch;
+    bs = 0;
+  }
+  return out + '\\'.repeat(bs * 2) + '"';
+}
+
+// A PowerShell expression for any string that is safe to TYPE into the
+// prompt: a typed line break would submit the line and a typed tab would
+// trigger completion, so those go in as [char]10 / [char]9; other control
+// characters (escape sequences included) are dropped; CRLF becomes LF.
+export function psString(s) {
+  const t = String(s ?? '').replace(/\r\n?/g, '\n').replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/g, '');
+  const parts = t.split(/([\n\t])/).filter(p => p !== '')
+    .map(p => (p === '\n' ? '[char]10' : p === '\t' ? '[char]9' : psQuote(p)));
+  if (!parts.length) return "''";
+  return parts.length === 1 ? parts[0] : `((${parts.join(', ')}) -join '')`;
+}
+
+// variables claude reads its credentials or endpoint from: each one would
+// override the claude.ai login that cloud sessions need, so they are cleared
+// for the call (and put back afterwards, like CLAUDE_CONFIG_DIR)
+export const CLOUD_CLEAR_ENV = ['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_BASE_URL'];
+
+// the wrapper's own lookup (ptyhost CLAUDE_WRAPPER), a native claude.exe first:
+// an npm `claude.cmd` would go through cmd.exe, which re-parses the arguments
+const CLAUDE_EXE = '(@(Get-Command claude.exe, claude -CommandType Application -ErrorAction SilentlyContinue) | Select-Object -First 1).Source';
+
+// The line typed into a plain tab that runs the real claude with `args`:
+// CLAUDE_CONFIG_DIR = configDir (null = leave it, the /login account's own
+// config), CLOUD_CLEAR_ENV removed, all of them restored when claude exits
+// (finally), so the tab's shell stays a normal VibeSpace shell afterwards.
+// The command line is built here (crtQuote) and handed to Process.Start
+// as-is: Windows PowerShell 5.1's `& exe 'arg'` does NOT escape embedded
+// quotes, so a task with a `"` in it would arrive split or stripped. The
+// child inherits the console like `& exe` does. No -EncodedCommand (Defender,
+// CLAUDE.md). exe: a fixed path instead of the lookup (smoke only).
+export function realClaudeLine(args = [], { configDir = null, exe = null } = {}) {
+  const clear = CLOUD_CLEAR_ENV.map(psQuote).join(', ');
+  return `$vsX = ${exe ? psQuote(exe) : CLAUDE_EXE}; `
+    + "if (-not $vsX) { Write-Host 'VibeSpace: claude.exe was not found on PATH' -ForegroundColor Red } else { "
+    + `$vsK = @('CLAUDE_CONFIG_DIR', ${clear}); $vsV = @{}; foreach ($k in $vsK) { $vsV[$k] = [Environment]::GetEnvironmentVariable($k, 'Process') }; `
+    + 'try { '
+    + `foreach ($k in @(${clear})) { [Environment]::SetEnvironmentVariable($k, $null, 'Process') }; `
+    + (configDir ? `$env:CLAUDE_CONFIG_DIR = ${psQuote(configDir)}; ` : '')
+    + `$vsI = New-Object System.Diagnostics.ProcessStartInfo $vsX; $vsI.Arguments = ${psString(args.map(crtQuote).join(' '))}; `
+    + '$vsI.UseShellExecute = $false; $vsI.WorkingDirectory = (Get-Location).ProviderPath; '
+    + '$vsP = [System.Diagnostics.Process]::Start($vsI); $vsP.WaitForExit(); $global:LASTEXITCODE = $vsP.ExitCode '
+    + "} finally { foreach ($k in $vsK) { [Environment]::SetEnvironmentVariable($k, $vsV[$k], 'Process') } } }";
+}
+
+// the task as claude's `--cloud` value: trimmed, and never starting with `-`
+// (claude's option parser would read it as a flag instead of the value)
+export function cloudTask(task) {
+  const t = String(task ?? '').replace(/\r\n?/g, '\n').trim();
+  return t.startsWith('-') ? 'Task: ' + t : t;
+}
+
+// claude --cloud "<task>" in the repo (cloud clones its GitHub remote)
+export function cloudSendLine(task, opts = {}) {
+  return realClaudeLine(['--cloud', cloudTask(task)], opts);
+}
+
+// claude --teleport <id>: the cloud session continues locally in this tab
+export function teleportLine(id, opts = {}) {
+  if (!CLOUD_ID.test(String(id || ''))) throw new Error('not a cloud session id');
+  return realClaudeLine(['--teleport', id], opts);
+}
+
+// plain interactive claude in the account's cloud config dir: a fresh dir
+// starts claude's own onboarding + claude.ai sign-in (or type /login)
+export function cloudLoginLine(opts = {}) {
+  return realClaudeLine([], opts);
+}
+
+// A cloud session in a tab's output: `https://claude.ai/code/<id>` or a bare
+// `session_…` id (escape sequences removed first). → { id, url } or null.
+// exclude: text whose ids don't count (the task itself, echoed by the shell).
+export const CLOUD_ID = /^(?:session|cse)_[0-9A-Za-z]{8,64}$/;
+const CLOUD_ID_IN = /(?<![0-9A-Za-z_])((?:session|cse)_[0-9A-Za-z]{8,64})(?![0-9A-Za-z_])/g;
+export function cloudSession(text, { exclude = '' } = {}) {
+  const t = String(text || '').replace(ANSI, '');
+  const ex = String(exclude || '');
+  const url = (id) => `https://claude.ai/code/${id}`;
+  for (const m of t.matchAll(/https:\/\/claude\.ai\/code\/[^\s'"<>`]*/g)) {
+    const raw = m[0].replace(/[.,;:!?)\]}]+$/, '');
+    for (const h of raw.matchAll(CLOUD_ID_IN)) {
+      if (!ex.includes(h[1])) return { id: h[1], url: raw.length <= 300 ? raw : url(h[1]) };
+    }
+  }
+  for (const h of t.matchAll(CLOUD_ID_IN)) {
+    if (!ex.includes(h[1])) return { id: h[1], url: url(h[1]) };
+  }
+  return null;
+}
+
+// `☁ fix the flaky login test` → the tab name's text: the first non-empty
+// line, spaces collapsed, cut at a word near `max`
+export function shortTask(task, max = 28) {
+  const line = String(task ?? '').split(/\r?\n/).map(s => s.trim()).find(Boolean) || 'cloud task';
+  const flat = line.replace(/\s+/g, ' ');
+  if (flat.length <= max) return flat;
+  const cut = flat.slice(0, max - 1);
+  const sp = cut.lastIndexOf(' ');
+  return (sp >= max / 2 ? cut.slice(0, sp) : cut).trimEnd() + '…';
+}
