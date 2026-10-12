@@ -520,8 +520,10 @@ Key facts encoded in `main/sessions.cjs`:
     cloud sessions through `assets/ps/cloud-send.ps1` (task in a file, repo path,
     account id), opened in a NEW console window (`Start-Process pwsh -NoExit
     -File …`), which is a real TTY. pwsh 7 passes the task as one argument
-    (quotes intact). Verified 2026-10-12 from inside an agent. The agent can't
-    read the link back (claude keeps no local record); claude.ai/code lists it.
+    (quotes intact). A HIDDEN window works too (`-WindowStyle Hidden`, no
+    `-NoExit`: it closes itself); each run appends `exit=<code>` to
+    `~/.vibespace/cloud/sent.log`, exit 0 = created. Verified 2026-10-12 from
+    inside an agent. The link itself isn't recorded locally; claude.ai/code lists it.
 - **Keyboard selection in claude's prompt** (0.6.39, `renderer/workspace/ui/inputsel.js`,
   RESEARCH-INPUT-SELECTION.md). Claude has no keyboard-started selection, so
   Shift(+Ctrl)+←/→ and Shift+Home/End are turned into: a synthetic two-cell SGR
