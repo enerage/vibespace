@@ -13,6 +13,13 @@ Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
   (975,307 tokens before). Restarts never shorten a conversation: they resume
   the same id with its full history. The log gets a `compact:` line too.
 
+### Fixed
+- **A workspace window opened from 0.6.59's first commit would have shown no
+  terminals**: a misplaced `export` dropped one function the tab code imports,
+  so the module graph failed to load. Caught by an investigation agent before
+  any window restarted onto it. New self-test: every named import between the
+  renderer's modules must really be exported (`node --check` can't see this).
+
 ## [0.6.58] — 2026-10-12
 
 ### Added

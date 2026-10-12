@@ -1441,6 +1441,41 @@ async function runSmoke() {
     check('feed remembers a compaction (auto-compacted · 951k → 134k note)', Object.values(r).every(Boolean), JSON.stringify(r));
   }
 
+  // 22f. renderer modules link: every `import { a, b } from './x.js'` names
+  //      something x.js really exports. `node --check` can't see this, and a
+  //      missing export blanks the whole workspace window (0.6.59: a misplaced
+  //      `export` dropped feedui.compactSoon and windows opened with no terminals)
+  {
+    const roots = [path.join(__dirname, '..', 'renderer', 'workspace'), path.join(__dirname, '..', 'renderer', 'workspace', 'ui'), path.join(__dirname, '..', 'renderer', 'launcher')];
+    const exportsOf = (file) => {
+      const src = fs.readFileSync(file, 'utf8');
+      const names = new Set();
+      for (const m of src.matchAll(/^export\s+(?:async\s+)?(?:function\*?|const|let|var|class)\s+([A-Za-z_$][\w$]*)/gm)) names.add(m[1]);
+      for (const m of src.matchAll(/^export\s*\{([^}]*)\}/gm)) for (const n of m[1].split(',')) { const k = n.trim().split(/\s+as\s+/).pop().trim(); if (k) names.add(k); }
+      return names;
+    };
+    const missing = [];
+    let checked = 0;
+    for (const dir of roots) {
+      for (const f of fs.readdirSync(dir).filter(x => x.endsWith('.js'))) {
+        const file = path.join(dir, f);
+        const src = fs.readFileSync(file, 'utf8');
+        for (const m of src.matchAll(/import\s*\{([^}]*)\}\s*from\s*'(\.[^']+\.js)'/g)) {
+          const target = path.join(dir, m[2]);
+          if (!fs.existsSync(target)) { missing.push(`${f}: ${m[2]} (file missing)`); continue; }
+          const ex = exportsOf(target);
+          for (const n of m[1].split(',')) {
+            const name = n.trim().split(/\s+as\s+/)[0].trim();
+            if (!name) continue;
+            checked++;
+            if (!ex.has(name)) missing.push(`${f}: ${name} from ${m[2]}`);
+          }
+        }
+      }
+    }
+    check('renderer modules: every named import is exported', missing.length === 0 && checked > 20, missing.length ? missing.join('; ') : `${checked} imports ok`);
+  }
+
   // 23. agent board summary (main/board.cjs): shape, write, other-workspace read
   //     with freshness filter, delete on close
   {

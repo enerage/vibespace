@@ -174,7 +174,7 @@ if (typeof document !== 'undefined') { // (smoke imports the pure helpers in mai
 }
 
 // idle + context ≥ 85 %: claude will auto-compact (summarise) soon
-export // "auto-compacted 15:09 · 975k → 134k" for a while after claude compacted the
+// "auto-compacted 15:09 · 975k → 134k" for a while after claude compacted the
 // conversation, so the context meter's sudden drop explains itself
 const COMPACT_NOTE_MS = 30 * 60 * 1000;
 const kTok = (n) => (typeof n === 'number' ? `${Math.round(n / 1000)}k` : '?');
@@ -191,7 +191,7 @@ function compactNote(f) {
   };
 }
 
-function compactSoon(f, working) {
+export function compactSoon(f, working) {
   return Boolean(!working && f && !f.compacting && f.context && f.context.pct >= 85);
 }
 

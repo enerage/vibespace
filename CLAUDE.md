@@ -158,7 +158,7 @@ Key facts encoded in `main/sessions.cjs`:
 
 ## Developing VibeSpace
 
-- `npm run smoke` — 137 self-tests (as of 0.6.59) incl. pty echo and live session discovery. Run it after
+- `npm run smoke` — 138 self-tests (as of 0.6.59) incl. pty echo and live session discovery. Run it after
   touching main-process code, **from a normal shell**: inside a Claude pty the stripped
   PATH and nested ConPTY break the pty test (`powershell.exe` "File not found" /
   AttachConsole) — prepend System32 to PATH and give it its own console, or just use a
@@ -167,6 +167,13 @@ Key facts encoded in `main/sessions.cjs`:
   binary must also pass it: `dist\win-unpacked\VibeSpace.exe --smoke` — catches
   asar/path bugs (e.g. pty cwd error 267). `npm run rebuild` only needed after
   reinstalling node-pty.
+- **`node --check` does not catch a broken renderer import.** A named import of
+  something a module no longer exports passes every syntax check, then the
+  browser refuses to link the module graph and the workspace window opens with
+  NO terminals (0.6.59: a patch script inserted a block between `export` and
+  `function compactSoon`). Smoke's "every named import is exported" check
+  covers it; when patching renderer files by script, anchor on the full
+  `export function name(` line, never on `function name(`.
 - **Hot reload is opt-in** (`main/devwatch.cjs`, since 0.3.0): it only runs in a process
   started with `--watch` / `VIBESPACE_WATCH=1` (unpackaged builds only;
   `VIBESPACE_NO_WATCH=1` still force-disables; a watched launcher propagates the env to
