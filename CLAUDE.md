@@ -53,6 +53,16 @@ Knowledge is tracked **as we go**, never batched for later:
   contextmenu paste must skip when `term.modes.mouseTrackingMode !== 'none'` or
   every paste doubles. Test mouse behavior AFTER the trust prompt — before it,
   Claude hasn't enabled tracking yet (an early probe gave a false all-clear).
+- **Copying from a claude tab is CLAUDE's copy, not ours** (investigated
+  2026-10-12, claude 2.1.296). With mouse tracking on, a left-drag never makes
+  an xterm selection: Claude selects and copies on release by itself
+  (`copyOnSelect`, PowerShell `Set-Clipboard`, ~0.5-1 s later), joining its
+  wrapped lines. Right-click then finds no xterm selection and does nothing.
+  Claude's bug: while its view is scrolled up, the `Jump to bottom (ctrl+End) ↓`
+  button covers ~29 cells of the last visible message row, and its copy DROPS
+  those cells ("I checked with a test account today" → "I chec"). Workaround:
+  Ctrl+End / scroll to the bottom before selecting, or `/copy`. Shift+drag
+  (xterm's selection) keeps every wrap as a line break, so it is no better.
 - **Per-workspace identity is load-bearing**: each workspace process sets its own
   `userData` dir AND `app.setAppUserModelId('vibespace.workspace.<id>')` *before* app
   ready; shortcuts carry the same AUMID (`assets/ps/set-shortcut.ps1` writes it through

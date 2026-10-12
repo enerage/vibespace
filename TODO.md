@@ -241,6 +241,10 @@ Build in this order. Verify the statusLine and HTTP hooks live in a pty before r
 - [ ] Per-workspace notification badge when an agent finishes (taskbar overlay icon).
 
 ## Internal
+- [ ] Claude Code copy drops the cells under its "Jump to bottom (ctrl+End) ↓"
+      button when the view is scrolled up (CLAUDE.md, right-click bullet).
+      Upstream bug (anthropics/claude-code); a VibeSpace-side fix isn't possible
+      without taking selection away from Claude. Re-test after Claude updates (S).
 - [ ] Cloud handoffs of 2026-10-12 (FlexIQ ×3, PlacementFlow
       `wip/review-filters-sim-copy`, JustLinked `wip/provider-balances`): after
       they finish, each repo's local agent pulls its `wip/` branch, verifies and
