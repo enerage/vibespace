@@ -568,7 +568,13 @@ Key facts encoded in `main/sessions.cjs`:
   a one-cell selection needs the trim; Esc does NOT clear a selection; Backspace
   and Delete remove it. Typing over a selection sends `\x7f` first, only when
   the selected cells really have a background colour. If selection breaks after
-  a Claude update, re-check those facts first. Testing gotchas: xterm's DOM
+  a Claude update, re-check those facts first. Re-checked on 2.1.296
+  (2026-10-13): all facts hold, and Claude still has NO keyboard selection of
+  its own (#80734): Shift+←/→/Home/End only move the caret, Shift+↑/↓ only
+  extend an existing selection. Claude doesn't draw trailing spaces, so a
+  caret past the drawn text counts those cells as typed spaces (else "word "
+  + Shift+← fell through). Each selection start makes Claude copy that 1 char
+  to the clipboard (copyOnSelect on the synthetic drag). Testing gotchas: xterm's DOM
   renderer only updates on a frame, so in an occluded test window read the DOM
   AFTER a CDP screenshot; and a CDP `char` event has no keydown, so the custom
   key handler never sees it (use `keyDown` with `text`).

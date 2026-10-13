@@ -2,6 +2,16 @@
 
 Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 
+## [0.6.60] — 2026-10-13
+
+### Fixed
+- **Shift+← after typing a space selected nothing** (it just moved the
+  caret, and the next press started the selection from the wrong spot). Claude
+  doesn't draw trailing spaces, so the caret looked like it was outside the
+  prompt. Checked live on claude 2.1.296: Claude still has no keyboard
+  selection of its own (Shift+↑/↓ only extend a selection that already
+  exists), so VibeSpace's Shift+arrow selection stays.
+
 ## [0.6.59] — 2026-10-12
 
 ### Added

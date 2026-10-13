@@ -47,9 +47,13 @@ function promptRow(term) {
   for (let i = y + 1; i <= y + MAX_SCAN; i++) if (isBorder(i)) { bottom = i; break; }
   if (top < 0 || bottom < 0 || isBorder(y)) return null;
   const line = buf.getLine(y);
-  const text = line.translateToString(true);
+  let text = line.translateToString(true);
   if ([...text].length !== text.length) return null; // astral chars (emoji): cells ≠ string indexes
   for (let x = 0; x < text.length; x++) if (line.getCell(x)?.getWidth() !== 1) return null; // wide chars: same
+  // Claude doesn't draw trailing spaces, so after "word " the caret sits past the
+  // trimmed text. Those cells are the typed spaces: count them as text, or the
+  // caret reads as "outside the prompt" and the key falls through to a caret move.
+  if (buf.cursorX > text.length) text = text.padEnd(buf.cursorX, ' ');
   return { row: buf.cursorY, caret: buf.cursorX, line, text, end: Math.max(text.length, TEXT_START), cols: term.cols };
 }
 
