@@ -241,7 +241,7 @@ Build in this order. Verify the statusLine and HTTP hooks live in a pty before r
 - [ ] Per-workspace notification badge when an agent finishes (taskbar overlay icon).
 
 ## Internal
-- [ ] Keyboard selection overwrites the clipboard with 1 char (Claude's
+- [x] (0.6.60, guardClipboard) Keyboard selection overwrites the clipboard with 1 char (Claude's
       copyOnSelect fires on our synthetic drag). Save + restore the clipboard
       around the drag, or find a drag Claude doesn't copy (S).
 - [ ] Claude Code copy drops the cells under its "Jump to bottom (ctrl+End) ↓"

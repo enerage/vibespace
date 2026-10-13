@@ -31,6 +31,38 @@ const mouse = (code, col, row, up) => `${CSI}<${code};${col + 1};${row + 1}${up 
 const drag = (from, to, row) => mouse(0, from, row) + mouse(32, to, row) + mouse(0, to, row, true);
 const click = (col, row) => mouse(0, col, row) + mouse(0, col, row, true);
 
+// Claude copies a mouse selection when the button is released (copyOnSelect,
+// via PowerShell Set-Clipboard, ~0.5-1 s later), so our synthetic two-cell drag
+// put those 2 characters on the user's clipboard (found 2026-10-13). Keep what
+// was there and put it back once Claude's copy lands. Only a clipboard that
+// turned into exactly the dragged characters is restored: anything else is the
+// user's own copy (e.g. Ctrl+C on the selection) and is left alone.
+// Text only: an image on the clipboard can't be read back here.
+const GUARD_MS = 3000;
+let guard = null; // { saved, expect, until }
+const same = (a, b) => String(a).trim() === String(b).trim();
+async function guardClipboard(expect) {
+  const api = globalThis.vs;
+  if (!api || !api.readClipboard || !api.writeClipboard) return;
+  if (guard) { guard.until = Date.now() + GUARD_MS; guard.expect.push(expect); return; } // keep the ORIGINAL clipboard
+  const g = { saved: null, expect: [expect], until: Date.now() + GUARD_MS };
+  guard = g;
+  try { g.saved = await api.readClipboard(); } catch { guard = null; return; }
+  const tick = async () => {
+    if (guard !== g) return;
+    if (Date.now() > g.until) { guard = null; return; }
+    let now;
+    try { now = await api.readClipboard(); } catch { guard = null; return; }
+    if (now !== g.saved) {
+      guard = null;
+      if (g.saved && g.expect.some(e => same(now, e))) { try { await api.writeClipboard(g.saved); } catch {} }
+      return;
+    }
+    setTimeout(tick, 120);
+  };
+  setTimeout(tick, 120);
+}
+
 export function reset(term) { states.delete(term); }
 
 // The prompt row under the caret, or null when the caret isn't in Claude's prompt.
@@ -136,6 +168,11 @@ export function onKey(term, ev, send) {
   if (next > 0 && st.count <= 0 && p.caret + 1 > p.cols - 1) return true;
   const seq = steps(p, st.count, next);
   if (seq) send(seq);
+  // a drag (move code 32) makes Claude copy the two dragged cells: protect the clipboard
+  if (seq && seq.includes(CSI + '<32;')) {
+    const a = next < 0 ? p.caret - 1 : p.caret;
+    guardClipboard(p.text.padEnd(a + 2, ' ').slice(a, a + 2));
+  }
   st.count = next;
   states.set(term, st);
   return true;

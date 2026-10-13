@@ -11,6 +11,12 @@ Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
   prompt. Checked live on claude 2.1.296: Claude still has no keyboard
   selection of its own (Shift+↑/↓ only extend a selection that already
   exists), so VibeSpace's Shift+arrow selection stays.
+- **Starting a Shift+arrow selection no longer overwrites your clipboard.**
+  Claude copies a mouse selection when it's released, and the selection starts
+  with a tiny synthetic drag, so your clipboard became 1-2 characters. VibeSpace
+  now puts your clipboard back right after (within ~70 ms of Claude's copy),
+  and never touches it when you copy something yourself (Ctrl+C on the
+  selection, a real mouse drag). Verified live on claude 2.1.296.
 
 ## [0.6.59] — 2026-10-12
 

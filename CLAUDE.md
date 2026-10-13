@@ -574,7 +574,10 @@ Key facts encoded in `main/sessions.cjs`:
   extend an existing selection. Claude doesn't draw trailing spaces, so a
   caret past the drawn text counts those cells as typed spaces (else "word "
   + Shift+← fell through). Each selection start makes Claude copy that 1 char
-  to the clipboard (copyOnSelect on the synthetic drag). Testing gotchas: xterm's DOM
+  to the clipboard (copyOnSelect on the synthetic drag, ~0.7-1 s later):
+  `guardClipboard` saves the clipboard text and restores it only when the
+  clipboard turns into exactly the dragged cells (trimmed), within 3 s; any
+  other change is the user's own copy and is left alone (verified live). Testing gotchas: xterm's DOM
   renderer only updates on a frame, so in an occluded test window read the DOM
   AFTER a CDP screenshot; and a CDP `char` event has no keydown, so the custom
   key handler never sees it (use `keyDown` with `text`).
