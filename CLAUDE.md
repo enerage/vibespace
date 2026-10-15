@@ -380,6 +380,12 @@ Key facts encoded in `main/sessions.cjs`:
     evidence older than the tab's current account (`accountSince`) is ignored,
     and `clearRateLimits` drops the old windows. Otherwise the old account's
     limit blames the new one (found in review).
+  - **The limit-switch resume says why** (0.6.61, `terms.js` onAccountSwitch):
+    the prompt typed after the relaunch names the new account and asks the
+    agent to restart subagents that died on the limit. It is typed inside
+    `"…"` in PowerShell, so `"`, `$`, backticks and line breaks are stripped
+    from the account label/reason. Subagents can't be resumed by VibeSpace;
+    only the main agent can relaunch them.
   - `setTermAccount` happens only AFTER the old claude exited.
   - The relaunch types into the shell only when `waitClaudeExit` says `prompt`,
     `gone` or `killed`. Custom prompts (oh-my-posh) never match the prompt

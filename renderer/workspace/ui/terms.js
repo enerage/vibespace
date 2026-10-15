@@ -553,7 +553,12 @@ export function init(opts) {
     const tab = tabs.get(termId);
     if (!tab) { console.warn(`account switch: unknown term ${termId}`); return; }
     toast(`${tab.name}: ${reason || 'usage limit'}, continuing on ${toLabel || to}`);
-    relaunchOnAccount(tab, to);
+    // tell the agent WHY it was restarted: without it, an agent whose subagents
+    // died on the limit assumed nothing could run until the reset (2026-10-15).
+    // Typed inside "…" in PowerShell: no quotes, $ or backticks in it.
+    const plain = (x) => String(x || '').replace(/["$`\r\n]/g, '').slice(0, 60);
+    const why = plain(reason || 'usage limit');
+    relaunchOnAccount(tab, to, { prompt: `continue - VibeSpace moved this conversation to the account ${plain(toLabel || to)} because the previous one hit its ${why}. This account has room, so restart any subagents or background agents that failed on that limit.` });
   });
 
   // main: the API answers again after an outage → `continue` the waiting agents

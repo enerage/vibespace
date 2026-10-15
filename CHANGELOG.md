@@ -2,6 +2,18 @@
 
 Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 
+## [0.6.61] — 2026-10-15
+
+### Changed
+- **After a usage-limit switch, the agent is told what happened.** VibeSpace
+  used to resume it with a bare `continue`, so an agent whose subagents had
+  died on the limit planned to wait days for the reset while it was already
+  running on the other account. It now resumes with: "continue - VibeSpace
+  moved this conversation to the account <name> because the previous one hit
+  its <weekly limit>. This account has room, so restart any subagents or
+  background agents that failed on that limit." A matching rule went into the
+  global CLAUDE.md for every agent.
+
 ## [0.6.60] — 2026-10-13
 
 ### Fixed
