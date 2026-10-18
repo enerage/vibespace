@@ -924,7 +924,12 @@ function initIpc() {
     // images/video/audio skip Monaco: the viewer shows them from vsfile:// (any
     // size; mtime lets it reload a file that changed on disk)
     const media = mediaserve.kindOf(file);
-    if (media) return { media, size: st.size, mtimeMs: st.mtimeMs };
+    if (media) {
+      const out = { media, size: st.size, mtimeMs: st.mtimeMs };
+      // SVG is source code too: the text rides along so the tab can flip to Monaco
+      if (path.extname(file).toLowerCase() === '.svg' && st.size <= MAX_BYTES) out.content = fs.readFileSync(file, 'utf8');
+      return out;
+    }
     if (st.size > MAX_BYTES) return { tooLarge: true, size: st.size };
     if (BIN_EXT.has(path.extname(file).toLowerCase())) return { binary: true, size: st.size };
     const buf = fs.readFileSync(file);

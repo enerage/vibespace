@@ -85,6 +85,7 @@ function wireControls() {
     updateSaveButton();
   };
   $('#btn-save').onclick = save;
+  $('#btn-view').onclick = toggleSvgView;
   $('#btn-reveal').onclick = () => { if (tabs.has(activePath)) vs.reveal(activePath); };
   document.addEventListener('keydown', (e) => {
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
@@ -127,7 +128,7 @@ function refreshEditButton(t) {
 
 function updateSaveButton() {
   const t = tabs.get(activePath);
-  const dirty = Boolean(t && t.editable && t.model && t.model.getValue() !== t.saved);
+  const dirty = Boolean(t && t.kind === 'text' && t.editable && t.model && t.model.getValue() !== t.saved); // an SVG in image view can't save
   $('#btn-save').disabled = !dirty;
 }
 
@@ -186,6 +187,7 @@ export async function open(path, name, { quiet = false } = {}) {
     t.media = res.media;
     t.size = res.size;
     t.mtime = res.mtimeMs;
+    t.svg = res.media === 'image' && /\.svg$/i.test(path); // ⇄ Source (#btn-view)
   } else if (res.tooLarge) {
     t.kind = 'toolarge';
     t.message = `File too large to preview (${(res.size / 1048576).toFixed(1)} MB).`;
@@ -255,8 +257,49 @@ function activate(path) {
     showPlaceholder(t.message || 'Binary file — nothing to preview.');
   }
   refreshEditButton(t);
+  refreshViewButton(t);
   updateSaveButton();
   onStateChange();
+}
+
+function refreshViewButton(t) {
+  const b = $('#btn-view');
+  b.classList.toggle('hidden', !(t && t.svg));
+  if (t && t.svg) b.textContent = t.kind === 'media' ? 'Source' : 'Image';
+}
+
+// SVG tabs flip between the image preview and Monaco (same tab). The model
+// survives the flip, so unsaved edits are kept (tab dot, close confirm) and the
+// image always shows the file on disk: a save, then Image, shows the new art.
+async function toggleSvgView() {
+  const path = activePath;
+  const t = tabs.get(path);
+  if (!t || !t.svg) return;
+  let res = null;
+  try { res = await vs.fsRead(path); } catch (e) { toast('Cannot read file: ' + (e.message || e), 'err'); return; }
+  if (tabs.get(path) !== t || activePath !== path) return; // closed / switched meanwhile
+  if (t.kind === 'media') {
+    const text = typeof res.content === 'string' ? res.content : null;
+    if (!t.model) {
+      if (text === null) { toast('This SVG is too large to open as text.', 'err'); return; }
+      t.model = monaco.editor.createModel(text, 'xml', monaco.Uri.parse('file:///' + path.replace(/\\/g, '/').replace(/^\/+/, ''))); // same URI as open()
+      t.saved = text;
+    } else if (text !== null && text !== t.saved && t.model.getValue() === t.saved) {
+      t.model.setValue(text); // clean model, newer file on disk
+      t.saved = text;
+    }
+    t.kind = 'text';
+  } else {
+    viewStates.set(path, editor.saveViewState()); // activate() restores it on the way back
+    if (res.media && (res.mtimeMs !== t.mtime || res.size !== t.size)) {
+      t.mtime = res.mtimeMs;
+      t.size = res.size;
+      releaseMedia(t); // saved from Monaco → new URL, fresh image
+    }
+    t.kind = 'media';
+  }
+  activate(path);
+  renderTabs();
 }
 
 function showEmptyState() {
@@ -266,6 +309,7 @@ function showEmptyState() {
   $('#viewer-path').textContent = '';
   editor.setModel(null);
   hideMedia();
+  refreshViewButton(null);
   const ph = $('#viewer-placeholder');
   ph.innerHTML = '';
   ph.appendChild(el('p', '', 'Open a file from the tree.'));
@@ -329,9 +373,14 @@ export function renameTab(oldPath, newPath) {
 export const onFilesChanged = debounce(async () => {
   for (const [path, t] of [...tabs]) {
     if (t.kind === 'media') {
-      // stat only (fs:read returns no bytes for media); a new mtime/size = new URL
+      // stat only (fs:read returns no bytes for media, just an SVG's text); a new mtime/size = new URL
       try {
         const res = await vs.fsRead(path);
+        // an SVG flipped back from Source keeps its model: refresh it when clean
+        if (t.model && typeof res.content === 'string' && res.content !== t.saved && t.model.getValue() === t.saved) {
+          t.model.setValue(res.content);
+          t.saved = res.content;
+        }
         if (res.media && (res.mtimeMs !== t.mtime || res.size !== t.size)) {
           t.mtime = res.mtimeMs;
           t.size = res.size;
