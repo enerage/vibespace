@@ -1856,7 +1856,101 @@ async function runSmoke() {
     // the checks below are the manual order's ("Move all here", ↑/↓): automatic off
     acc.setAuto(false);
 
-    // store + DPAPI: add → blob → PowerShell decrypt gives the same token back
+    // macOS secret store (main/keychain.cjs): the `security -i` command line is
+    // pure and checked on every platform against a port of Apple's own parser;
+    // the Keychain round-trip runs on darwin only, with throwaway service names
+    // (never Claude's real item). A locked/missing keychain (CI) is a SKIP.
+    const kc = require('./keychain.cjs');
+    {
+      const tok = 'sk-ant-oat01-SmokeFake_' + 'a'.repeat(30) + '-x';
+      const odd = ['say "hi"', 'back\\slash\\', '', "it's", ' lead and trail ', '"', '\\"'];
+      const args = ['add-generic-password', '-U', '-s', 'VibeSpace-account-main-ab12', '-a', 'vibespace', '-w', tok, ...odd];
+      const line = kc.commandLine(args);
+      const throws = (fn) => { try { fn(); return false; } catch { return true; } };
+      const nfc = 'café', nfd = 'café';
+      const q = {
+        roundtrip: line.endsWith('\n') && !line.slice(0, -1).includes('\n') && JSON.stringify(kc.splitLine(line.slice(0, -1))) === JSON.stringify(args),
+        rejects: throws(() => kc.quoteArg('a\nb')) && throws(() => kc.quoteArg('tab\there')) && throws(() => kc.quoteArg('café')),
+        tooLong: throws(() => kc.commandLine(['add-generic-password', '-w', 'x'.repeat(kc.MAX_LINE)])) && !throws(() => kc.commandLine(['-w', 'x'.repeat(3000)])),
+        names: kc.tokenService('main-ab12') === 'VibeSpace-account-main-ab12' && kc.endpointService('zai-cd34') === 'VibeSpace-endpoint-zai-cd34' && kc.ACCOUNT === 'vibespace',
+        claudeNames: kc.claudeService(null) === 'Claude Code-credentials'
+          && kc.claudeService('/Users/test/.claude-work') === 'Claude Code-credentials-' + require('node:crypto').createHash('sha256').update('/Users/test/.claude-work').digest('hex').slice(0, 8)
+          && /^Claude Code-credentials-[0-9a-f]{8}$/.test(kc.claudeService('/x')) && kc.claudeService('/x') !== kc.claudeService('/x/')
+          && kc.claudeService('/Users/' + nfd) === kc.claudeService('/Users/' + nfc)
+          && kc.claudeLoginService({}) === 'Claude Code-credentials' && kc.claudeLoginService({ CLAUDE_CONFIG_DIR: '' }) === 'Claude Code-credentials'
+          && kc.claudeLoginService({ CLAUDE_CONFIG_DIR: '/a' }) === kc.claudeService('/a')
+          && kc.claudeLoginService({ CLAUDE_CONFIG_DIR: '/a', CLAUDE_SECURESTORAGE_CONFIG_DIR: '' }) === 'Claude Code-credentials'
+          && kc.claudeLoginService({ CLAUDE_CONFIG_DIR: '/a', CLAUDE_SECURESTORAGE_CONFIG_DIR: '/b' }) === kc.claudeService('/b'),
+        unavailable: kc.unavailableKind('security: SecKeychainItemCreateFromContent (<default>): User interaction is not allowed.') === 'interaction_not_allowed'
+          && kc.unavailableKind('The specified item could not be found in the keychain.') === null,
+      };
+      check('keychain: security -i command line (Apple parser round-trip, ASCII only, length cap), item names, Claude item hash', Object.values(q).every(Boolean), JSON.stringify(q));
+    }
+    let keychainSkip = null;
+    if (process.platform === 'darwin') {
+      const cloudMain = require('./cloud.cjs');
+      const os = require('node:os');
+      const svc = `VibeSpace-smoke-${U.randId(8)}`;
+      const svc2 = `${svc}-env`;
+      const loginSvc = `${svc}-login`;
+      const cloudRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-kc-'));
+      cloudMain._setRoot(cloudRoot);
+      const cloudSvc = cloudMain.keychainServiceOf('kcsmoke');
+      const tok = 'sk-ant-oat01-SmokeKeychain_' + U.randId(24);
+      const r = {};
+      try {
+        await kc.write(svc, tok);
+        r.readBack = (await kc.read(svc)) === tok;
+        r.exists = kc.exists(svc, kc.ACCOUNT, { maxAgeMs: 0 }) && kc.exists(svc, null, { maxAgeMs: 0 });
+        // exactly what the darwin `claude` wrapper runs for a token account
+        const w = require('node:child_process').spawnSync('/usr/bin/security', ['find-generic-password', '-s', svc, '-a', 'vibespace', '-w'], { encoding: 'utf8', timeout: 10000 });
+        r.wrapperRead = w.status === 0 && String(w.stdout).replace(/\n$/, '') === tok;
+        await kc.write(svc, tok + 'U'); // -U updates in place
+        r.updated = (await kc.read(svc)) === tok + 'U';
+        const text = 'ANTHROPIC_BASE_URL=https://x.io/api\nANTHROPIC_AUTH_TOKEN=a "q" \'s\' b\\c $HOME `x`\nAPI_TIMEOUT_MS=5';
+        await kc.write(svc2, Buffer.from(text, 'utf8').toString('base64'));
+        r.base64 = Buffer.from(await kc.read(svc2), 'base64').toString('utf8') === text;
+        // login detection: a throwaway item stands in for Claude's
+        acc._setLoginService(loginSvc);
+        await kc.write(loginSvc, '{}', 'claude-code-user');
+        r.loginViaKeychain = acc.state().accounts.find(a => a.id === 'login').available === true;
+        kc.remove(loginSvc, 'claude-code-user');
+        acc._setLoginService(null);
+        // cloud readiness: the item named after the cloud dir's hash
+        const cloudBefore = cloudMain.readiness('kcsmoke').ready;
+        await kc.write(cloudSvc, '{}', 'claude-code-user');
+        r.cloudViaKeychain = cloudBefore === false && cloudMain.readiness('kcsmoke').ready === true && !fs.existsSync(path.join(cloudRoot, 'kcsmoke'));
+        kc.remove(cloudSvc, 'claude-code-user');
+        r.cloudGone = cloudMain.readiness('kcsmoke').ready === false;
+        r.removed = kc.remove(svc) && !kc.exists(svc, kc.ACCOUNT, { maxAgeMs: 0 }) && (await kc.read(svc)) === null && kc.remove(svc);
+      } catch (e) {
+        if (kc.unavailableKind(e.message)) keychainSkip = e.message; else r.error = e.message;
+      } finally {
+        acc._setLoginService(null);
+        cloudMain._setRoot(null);
+        for (const [s, a] of [[svc], [svc2], [loginSvc, 'claude-code-user'], [cloudSvc, 'claude-code-user']]) { try { kc.remove(s, a); } catch {} }
+        try { fs.rmSync(cloudRoot, { recursive: true, force: true }); } catch {}
+      }
+      if (keychainSkip) console.log(`SKIP  keychain round-trip (darwin)  — ${keychainSkip}`);
+      else {
+        check('keychain round-trip (darwin): argv-free add → read back → wrapper read → -U update → base64 env → login + cloud detection → delete',
+          Object.values(r).every(v => v === true), JSON.stringify(r).split(tok).join('<tok>'));
+      }
+    }
+    // checks that need a working secret store: a SKIP (not a FAIL) when the
+    // darwin keychain is unavailable
+    const kcCheck = (name, ok, detail) => (keychainSkip ? console.log(`SKIP  ${name}  — keychain unavailable: ${keychainSkip}`) : check(name, ok, detail));
+    // darwin CI has no Claude login: pin the /login as present for the store
+    // checks (Windows keeps testing the real one)
+    let credPin = null;
+    if (process.platform === 'darwin') {
+      credPin = path.join(U.dataRoot(), 'smoke-credentials.json');
+      fs.writeFileSync(credPin, '{}');
+      acc._setCredentialsPath(credPin);
+    }
+
+    // store + secret: add → DPAPI blob (Windows) / Keychain item (darwin) → the
+    // pty wrapper's own read gives the same token back
     const fakeToken = 'sk-ant-oat01-' + 'SmokeFakeToken_' + U.randId(24) + '-x';
     const s0 = acc.state();
     const bad = await acc.add('Nope', 'not-a-token');
@@ -1866,6 +1960,12 @@ async function runSmoke() {
     const blobText = blob && fs.existsSync(blob) ? fs.readFileSync(blob, 'utf8') : '';
     const decrypted = await new Promise((resolve) => {
       if (!blob) { resolve(''); return; }
+      if (process.platform === 'darwin') {
+        // the exact command the darwin wrapper runs (the item name is the contract)
+        require('node:child_process').execFile('/usr/bin/security', ['find-generic-password', '-s', kc.tokenService(id2), '-a', 'vibespace', '-w'],
+          { timeout: 20000 }, (err, out) => resolve(String(out || '').trim()));
+        return;
+      }
       // the exact snippet the pty wrapper runs
       const ps = `$blob = $env:VS_SMOKE_BLOB; ${acc.DECRYPT_PS}; [Console]::Out.Write($tok)`;
       require('node:child_process').execFile(acc._psExe(), ['-NoProfile', '-NonInteractive', '-Command', ps],
@@ -1875,10 +1975,13 @@ async function runSmoke() {
       loginFirst: s0.accounts.length === 1 && s0.accounts[0].id === 'login' && s0.accounts[0].kind === 'login' && s0.pick === 'login',
       badRejected: bad.ok === false && typeof bad.error === 'string',
       added: Boolean(added.ok && id2 && id2 !== 'login' && added.state.accounts[1].kind === 'token' && added.state.accounts[1].label === 'Second Max'),
-      blobOpaque: blobText.length > 100 && !blobText.includes(fakeToken) && !JSON.stringify(acc.state()).includes(fakeToken),
+      blobOpaque: process.platform === 'darwin'
+        ? !fs.existsSync(blob || '') && acc._service(id2 || 'x') === kc.tokenService(id2) && !JSON.stringify(acc.state()).includes(fakeToken)
+        : blobText.length > 100 && !blobText.includes(fakeToken) && !JSON.stringify(acc.state()).includes(fakeToken),
       roundtrip: decrypted === fakeToken,
     };
-    check('accounts DPAPI token blob (add → blob → decrypt round-trip, never in state)', Object.values(dp).every(Boolean),
+    kcCheck(process.platform === 'darwin' ? 'accounts Keychain token item (add → item → wrapper read round-trip, never in state)'
+      : 'accounts DPAPI token blob (add → blob → decrypt round-trip, never in state)', Object.values(dp).every(Boolean),
       JSON.stringify({ ...dp, roundtrip: dp.roundtrip ? 'ok' : 'MISMATCH' }));
 
     if (id2) {
@@ -1964,7 +2067,8 @@ async function runSmoke() {
 
       // wrapper dry-run with an account file: login keeps --remote-control, a token
       // account gets none, a missing blob says so. The pty start clears a stale file.
-      const r = await new Promise((resolve) => {
+      // (PowerShell wrapper: Windows only; the zsh wrapper has its own darwin test)
+      const r = process.platform !== 'win32' ? null : await new Promise((resolve) => {
         let buf = '';
         const termId = 'smokeacct';
         const stale = ptyhost.accountFileFor('smoke-acct', termId);
@@ -1993,10 +2097,11 @@ async function runSmoke() {
         const setTo = (v) => `Set-Content -NoNewline -LiteralPath $env:VIBESPACE_ACCOUNT_FILE -Value '${v}'`;
         setTimeout(() => ptyhost.write(termId, `$env:VIBESPACE_CLAUDE_DRYRUN=1; claude; ${setTo(id2)}; claude --resume abc; ${setTo('ghost-zz99')}; claude\r`), 900);
       });
-      check('pty `claude` wrapper per-account dry-run (login → RC, token → no RC, missing blob)', r.ok, r.detail);
+      if (r) check('pty `claude` wrapper per-account dry-run (login → RC, token → no RC, missing blob)', r.ok, r.detail);
 
       acc.remove(id2);
-      check('accounts remove deletes the token blob', !acc.has(id2) && !fs.existsSync(blob));
+      check(`accounts remove deletes the token ${process.platform === 'darwin' ? 'Keychain item' : 'blob'}`, !acc.has(id2) && !fs.existsSync(blob)
+        && (process.platform !== 'darwin' || !kc.exists(kc.tokenService(id2), kc.ACCOUNT, { maxAgeMs: 0 })));
     }
 
     // 25b. API endpoint accounts (z.ai GLM, …): lenient env parser, the whole env
@@ -2031,7 +2136,9 @@ async function runSmoke() {
       };
       check('accounts endpoint env parser (settings block + typo + trailing comma, KEY=VALUE, errors)', Object.values(pe).every(Boolean), JSON.stringify(pe));
 
-      const decrypt = (blobFile) => new Promise((resolve) => {
+      // darwin: the endpoint's Keychain item (base64) instead of the blob file
+      const kcEnv = async (id) => { const b = id ? await kc.read(kc.endpointService(id)).catch(() => null) : null; return b ? Buffer.from(b, 'base64').toString('utf8') : ''; };
+      const decrypt = (blobFile, id) => process.platform === 'darwin' ? kcEnv(id) : new Promise((resolve) => {
         const ps = `$blob = $env:VS_SMOKE_BLOB; ${acc.DECRYPT_PS}; [Console]::Out.Write($tok)`;
         require('node:child_process').execFile(acc._psExe(), ['-NoProfile', '-NonInteractive', '-Command', ps],
           { windowsHide: true, timeout: 20000, env: acc._psEnv({ VS_SMOKE_BLOB: blobFile }) }, (err, out) => resolve(String(out || '')));
@@ -2042,7 +2149,7 @@ async function runSmoke() {
       const epId = epAdd.ok ? (epAdd.state.accounts.find(a => a.kind === 'endpoint') || {}).id : null;
       const epBlob = epId ? acc.blobPath(epId) : null;
       const epText = epBlob && fs.existsSync(epBlob) ? fs.readFileSync(epBlob, 'utf8') : '';
-      const dec = epBlob ? await decrypt(epBlob) : '';
+      const dec = epBlob ? await decrypt(epBlob, epId) : '';
       const logger = require('./logger.cjs');
       const logText = (() => {
         try { return fs.readdirSync(logger.logsDir()).map(f => fs.readFileSync(path.join(logger.logsDir(), f), 'utf8')).join('\n'); } catch { return ''; }
@@ -2052,7 +2159,9 @@ async function runSmoke() {
       const ep = {
         added: Boolean(tokId && epId && epAdd.notes && epAdd.notes.length === 1),
         roundtrip: dec === acc._envText(p.env) && dec.includes('ANTHROPIC_BASE_URL=https://api.z.ai/api/anthropic\n'),
-        blobOpaque: epText.length > 100 && !epText.includes(fakeKey),
+        blobOpaque: process.platform === 'darwin'
+          ? !fs.existsSync(epBlob || '') && kc.exists(kc.endpointService(epId), kc.ACCOUNT, { maxAgeMs: 0 })
+          : epText.length > 100 && !epText.includes(fakeKey),
         noSecret: !JSON.stringify(acc.state()).includes(fakeKey) && !JSON.stringify(epAdd).includes(fakeKey)
           && !fs.readFileSync(path.join(U.dataRoot(), 'accounts.json'), 'utf8').includes(fakeKey) && !logText.includes(fakeKey),
         row: row.kind === 'endpoint' && row.family === 'endpoint:api.z.ai' && row.host === 'api.z.ai'
@@ -2062,7 +2171,7 @@ async function runSmoke() {
         normalize: nz.accounts.e1.kind === 'endpoint' && nz.accounts.e1.baseUrl === 'https://api.z.ai/api/anthropic'
           && nz.accounts.e1.models.opus === 'glm-5.3' && nz.accounts.t1.kind === 'token',
       };
-      check('accounts endpoint add (DPAPI env blob round-trip, family, models, never the key in state/json/log)', Object.values(ep).every(Boolean),
+      kcCheck(`accounts endpoint add (${process.platform === 'darwin' ? 'Keychain' : 'DPAPI'} env blob round-trip, family, models, never the key in state/json/log)`, Object.values(ep).every(Boolean),
         JSON.stringify({ ...ep, roundtrip: ep.roundtrip ? 'ok' : 'MISMATCH' }));
 
       // provider presets: pick z.ai, paste only the key. Same store path as a
@@ -2098,10 +2207,10 @@ async function runSmoke() {
         pa.override = Boolean(r2.models && r2.models.sonnet === 'glm-smoke-x' && r2.models.opus === 'glm-5.3[1m]' && r2.models.haiku === 'glm-5.3-flash[1m]');
         pa.pastedZaiIsPreset = (acc.state().accounts.find(x => x.id === epId) || {}).preset === 'zai'; // a pasted z.ai block is z.ai too
         const b2 = a2.ok ? acc.blobPath(a2.id) : null;
-        const dec2 = b2 ? await decrypt(b2) : '';
+        const dec2 = b2 ? await decrypt(b2, a2.id) : '';
         pa.blob = dec2.includes(`ANTHROPIC_AUTH_TOKEN=${zKey}`) && dec2.includes('ANTHROPIC_DEFAULT_SONNET_MODEL=glm-smoke-x')
           && dec2.includes('ANTHROPIC_BASE_URL=https://api.z.ai/api/anthropic') && dec2.includes('CLAUDE_CODE_AUTO_COMPACT_WINDOW=900000')
-          && dec2.includes('API_TIMEOUT_MS=3000000') && !fs.readFileSync(b2, 'utf8').includes(zKey);
+          && dec2.includes('API_TIMEOUT_MS=3000000') && (process.platform === 'darwin' ? !fs.existsSync(b2) : !fs.readFileSync(b2, 'utf8').includes(zKey));
         const files = acc._files();
         const logNow = (() => {
           try { return fs.readdirSync(logger.logsDir()).map(f => fs.readFileSync(path.join(logger.logsDir(), f), 'utf8')).join('\n'); } catch { return ''; }
@@ -2111,7 +2220,7 @@ async function runSmoke() {
         if (a1.ok) acc.remove(a1.id);
         if (a2.ok) acc.remove(a2.id);
         pa.removed = !(a1.ok && acc.has(a1.id)) && !(a2.ok && acc.has(a2.id));
-        check('accounts addPreset z.ai (key only, preset models + override, " 2" label, Claude/empty key rejected, key never stored in clear)',
+        kcCheck('accounts addPreset z.ai (key only, preset models + override, " 2" label, Claude/empty key rejected, key never stored in clear)',
           Object.values(pa).every(Boolean), JSON.stringify(pa));
       }
 
@@ -2137,7 +2246,7 @@ async function runSmoke() {
         try { acc.switchAll('login'); } catch { refused = true; }
         fp.switchAllRefused = refused;
         acc.clear(tokId);
-        acc._setCredentialsPath(null);
+        acc._setCredentialsPath(credPin);
         fp.loggedInAgain = acc.pick() === 'login' && acc.state().accounts.find(a => a.id === 'login').available === true;
         check('accounts provider families (family-bound pick, no /login without credentials)', Object.values(fp).every(Boolean), JSON.stringify(fp));
         // a conversation's provider comes from its transcript's model when it has
@@ -2187,21 +2296,27 @@ async function runSmoke() {
             oldCodeBlind: !(epId in old) && (tokId in old),
             ownFile: Boolean(rawEps[epId] && rawEps[epId].baseUrl === 'https://api.z.ai/api/anthropic' && rawEps[epId].models.opus === 'glm-5.3[1m]')
               && !JSON.stringify(rawEps).includes(fakeKey) && !(tokId in rawEps),
-            blobName: epBlob === files.endpointBlob(epId) && fs.existsSync(epBlob) && !fs.existsSync(files.tokenBlob(epId)),
+            blobName: process.platform === 'darwin'
+              ? acc._service(epId) === kc.endpointService(epId) && kc.exists(kc.endpointService(epId), kc.ACCOUNT, { maxAgeMs: 0 })
+                && !kc.exists(kc.tokenService(epId), kc.ACCOUNT, { maxAgeMs: 0 })
+              : epBlob === files.endpointBlob(epId) && fs.existsSync(epBlob) && !fs.existsSync(files.tokenBlob(epId)),
           };
-          const legacy = JSON.parse(fs.readFileSync(files.accounts, 'utf8'));
-          legacy.accounts.mig1 = { label: 'Mig', kind: 'endpoint', baseUrl: 'https://mig.example/api', models: { opus: 'm1' } };
-          legacy.order.push('mig1');
-          fs.writeFileSync(files.accounts, JSON.stringify(legacy, null, 2) + '\n');
-          fs.writeFileSync(files.tokenBlob('mig1'), 'ab'.repeat(60));
-          const migRow = acc.state().accounts.find(a => a.id === 'mig1') || {};
-          const afterAcc = JSON.parse(fs.readFileSync(files.accounts, 'utf8'));
-          const afterEps = JSON.parse(fs.readFileSync(files.endpoints, 'utf8'));
-          own.migrated = migRow.kind === 'endpoint' && migRow.family === 'endpoint:mig.example' && migRow.available === true
-            && !('mig1' in afterAcc.accounts) && afterAcc.order.includes('mig1') && Boolean(afterEps.mig1) && Boolean(afterEps[epId])
-            && fs.existsSync(files.endpointBlob('mig1')) && !fs.existsSync(files.tokenBlob('mig1'));
-          acc.remove('mig1');
-          own.migRemoved = !acc.has('mig1') && !fs.existsSync(files.endpointBlob('mig1')) && !('mig1' in JSON.parse(fs.readFileSync(files.endpoints, 'utf8')));
+          // the 0.6.49 blob-file migration exists on Windows only (no Mac build had it)
+          if (process.platform === 'win32') {
+            const legacy = JSON.parse(fs.readFileSync(files.accounts, 'utf8'));
+            legacy.accounts.mig1 = { label: 'Mig', kind: 'endpoint', baseUrl: 'https://mig.example/api', models: { opus: 'm1' } };
+            legacy.order.push('mig1');
+            fs.writeFileSync(files.accounts, JSON.stringify(legacy, null, 2) + '\n');
+            fs.writeFileSync(files.tokenBlob('mig1'), 'ab'.repeat(60));
+            const migRow = acc.state().accounts.find(a => a.id === 'mig1') || {};
+            const afterAcc = JSON.parse(fs.readFileSync(files.accounts, 'utf8'));
+            const afterEps = JSON.parse(fs.readFileSync(files.endpoints, 'utf8'));
+            own.migrated = migRow.kind === 'endpoint' && migRow.family === 'endpoint:mig.example' && migRow.available === true
+              && !('mig1' in afterAcc.accounts) && afterAcc.order.includes('mig1') && Boolean(afterEps.mig1) && Boolean(afterEps[epId])
+              && fs.existsSync(files.endpointBlob('mig1')) && !fs.existsSync(files.tokenBlob('mig1'));
+            acc.remove('mig1');
+            own.migRemoved = !acc.has('mig1') && !fs.existsSync(files.endpointBlob('mig1')) && !('mig1' in JSON.parse(fs.readFileSync(files.endpoints, 'utf8')));
+          }
           check('endpoint accounts in their own file + blob name, invisible to older main code (+ migration)', Object.values(own).every(Boolean), JSON.stringify(own));
         }
 
@@ -2215,7 +2330,7 @@ async function runSmoke() {
         const epsFile = ptyhost.endpointSettingsFor('smoke-acct', 'smokeendpoint');
         let keptAtKill = null; // was the tab's settings file there just before kill()?
         const refuse = 'start claude without --settings';
-        const r = await new Promise((resolve) => {
+        const r = process.platform !== 'win32' ? null : await new Promise((resolve) => {
           let buf = '';
           const termId = 'smokeendpoint';
           const done = (ok, detail) => { clearTimeout(timer); ptyhost.onData(() => {}); keptAtKill = fs.existsSync(epsFile); ptyhost.kill(termId); resolve({ ok, detail }); };
@@ -2244,7 +2359,7 @@ async function runSmoke() {
           // --settings), then one with someone else's --settings
           setTimeout(() => ptyhost.write(termId, `$env:VIBESPACE_CLAUDE_DRYRUN=1; claude; claude --resume abc --settings '${baseS}'; claude --settings 'C:\\other.json'\r`), 900);
         });
-        check('endpoint account: main writes the tab settings, wrapper swaps --settings, refuses a foreign --settings, no RC, no key in output', r.ok, r.detail);
+        if (r) check('endpoint account: main writes the tab settings, wrapper swaps --settings, refuses a foreign --settings, no RC, no key in output', r.ok, r.detail);
         // kill() itself deletes the tab's settings file (it holds the key); its
         // onExit no longer knows the workspace. Main start clears an instance's
         // leftovers (no pty survives a restart), account files stay.
@@ -2254,7 +2369,7 @@ async function runSmoke() {
         const cleared = ptyhost.clearInstanceEndpointSettings('smoke-clean');
         const left = fs.readdirSync(cdir).join(',');
         check('pty kill removes the endpoint settings file; main start clears stale ones',
-          keptAtKill === true && !fs.existsSync(epsFile) && cleared === 2 && left === 't1.account', JSON.stringify({ keptAtKill, gone: !fs.existsSync(epsFile), cleared, left }));
+          (!r || (keptAtKill === true && !fs.existsSync(epsFile))) && cleared === 2 && left === 't1.account', JSON.stringify({ keptAtKill, gone: !fs.existsSync(epsFile), cleared, left }));
         // leaving the account deletes the file (it holds the key)
         const epsPath = ptyhost.endpointSettingsFor('smoke-acct', 'smokeendpoint');
         ptyhost.writeEndpointSettings('smokeendpoint', 'smoke-acct', null, { ANTHROPIC_BASE_URL: 'x' });
@@ -2278,8 +2393,11 @@ async function runSmoke() {
           const all = await Promise.all([acc.forTerm(epId), acc.forTerm(epId), acc.endpointEnv(epId)]).catch(() => null);
           ft.oneDecrypt = Boolean(all) && acc._decryptSpawns() - sp0 === 1 && all[0].env.ANTHROPIC_AUTH_TOKEN === fakeKey
             && all[2].ANTHROPIC_AUTH_TOKEN === fakeKey && all[0].env !== all[1].env;
-          const goodBlob = fs.readFileSync(epBlob, 'utf8');
-          fs.writeFileSync(epBlob, 'ab'.repeat(64)); // damaged blob
+          // the secret: the blob file (Windows) or the Keychain item (darwin)
+          const epSvc = kc.endpointService(epId);
+          const goodBlob = process.platform === 'darwin' ? await kc.read(epSvc) : fs.readFileSync(epBlob, 'utf8');
+          const putSecret = (v) => (process.platform === 'darwin' ? kc.write(epSvc, v) : fs.writeFileSync(epBlob, v));
+          await putSecret('ab'.repeat(64)); // damaged blob
           acc._forgetEnv(epId);
           let bad = null;
           try { await acc.forTerm(epId); } catch (e) { bad = e.message; }
@@ -2287,11 +2405,11 @@ async function runSmoke() {
           const sp1 = acc._decryptSpawns();
           try { await acc.forTerm(epId); } catch {}
           ft.failureNotCached = acc._decryptSpawns() - sp1 === 1;
-          fs.rmSync(epBlob, { force: true });
+          if (process.platform === 'darwin') kc.remove(epSvc); else fs.rmSync(epBlob, { force: true });
           let gone = null;
           try { await acc.forTerm(epId); } catch (e) { gone = e.message; }
           ft.missingThrows = Boolean(gone && /missing/.test(gone));
-          fs.writeFileSync(epBlob, goodBlob); // the remove check below needs it back
+          await putSecret(goodBlob); // the remove check below needs it back
           check('accounts.forTerm (setTerm): unknown or undecryptable endpoint throws, one decrypt per id', Object.values(ft).every(Boolean),
             JSON.stringify(ft).split(fakeKey).join('<key>'));
         }
@@ -2319,19 +2437,22 @@ async function runSmoke() {
       // the expanded wrapper must stay valid Windows PowerShell 5.1
       const wf = path.join(U.dataRoot(), 'wrapper-smoke.ps1');
       fs.writeFileSync(wf, ptyhost._wrapper);
-      const parsed = await new Promise((resolve) => {
+      const parsed = process.platform !== 'win32' ? null : await new Promise((resolve) => {
         const ps = '$t = [IO.File]::ReadAllText($env:VS_SMOKE_PS); $e = $null; [void][System.Management.Automation.Language.Parser]::ParseInput($t, [ref]$null, [ref]$e); '
           + "[Console]::Out.Write([string]$e.Count + '|' + (($e | ForEach-Object { $_.Message }) -join '; '))";
         require('node:child_process').execFile(acc._psExe(), ['-NoProfile', '-NonInteractive', '-Command', ps],
           { windowsHide: true, timeout: 20000, env: acc._psEnv({ VS_SMOKE_PS: wf }) }, (err, out) => resolve(String(out || (err && err.message) || '').trim()));
       });
-      check('pty `claude` wrapper parses in Windows PowerShell 5.1', parsed === '0|', parsed);
+      if (parsed !== null) check('pty `claude` wrapper parses in Windows PowerShell 5.1', parsed === '0|', parsed);
       try { fs.rmSync(wf, { force: true }); } catch {}
 
       if (tokId) acc.remove(tokId);
       if (epId) acc.remove(epId);
-      check('accounts remove deletes the endpoint blob', !acc.has(epId) && !(epBlob && fs.existsSync(epBlob)));
+      kcCheck(`accounts remove deletes the endpoint ${process.platform === 'darwin' ? 'Keychain item' : 'blob'}`, !acc.has(epId) && !(epBlob && fs.existsSync(epBlob))
+        && (process.platform !== 'darwin' || !epId || !kc.exists(kc.endpointService(epId), kc.ACCOUNT, { maxAgeMs: 0 })));
     }
+    acc._setCredentialsPath(null);
+    if (credPin) { try { fs.rmSync(credPin, { force: true }); } catch {} }
 
     // transcript fallback: the LAST api-error line, read from the tail only
     {

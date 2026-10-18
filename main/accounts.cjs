@@ -23,6 +23,9 @@
 // Secret blobs, Windows DPAPI (CurrentUser): <dataRoot>/accounts/<id>.dpapi = a
 // token; <id>.endpoint.dpapi = an endpoint's whole env as KEY=VALUE lines (older
 // code looks for <id>.dpapi only, finds nothing and skips the account).
+// macOS has no DPAPI: the same secrets are Keychain items (keychain.cjs), token
+// `VibeSpace-account-<id>`, endpoint `VibeSpace-endpoint-<id>` (base64 of the
+// KEY=VALUE lines); "the blob exists" becomes "the item exists" there.
 // A secret is NEVER logged, never put on a command line, never sent to a renderer.
 const fs = require('node:fs');
 const os = require('node:os');
@@ -30,6 +33,7 @@ const path = require('node:path');
 const { spawn } = require('node:child_process');
 const U = require('./util.cjs');
 const logger = require('./logger.cjs');
+const keychain = require('./keychain.cjs');
 
 const LOGIN = 'login';
 const LOGIN_LABEL = 'Logged-in account';
@@ -46,6 +50,8 @@ const tokenBlobPath = (id) => path.join(blobDir(), `${id}.dpapi`);
 const endpointBlobPath = (id) => path.join(blobDir(), `${id}.endpoint.dpapi`);
 const blobIn = (d, id) => ((d.accounts[id] || {}).kind === 'endpoint' ? endpointBlobPath(id) : tokenBlobPath(id));
 const blobPath = (id) => blobIn(read(), id);
+// darwin: the Keychain item that stands in for the blob
+const serviceIn = (d, id) => ((d.accounts[id] || {}).kind === 'endpoint' ? keychain.endpointService(id) : keychain.tokenService(id));
 
 // System32's powershell by absolute path: under a stripped PATH a bare name fails
 function psExe() {
@@ -236,9 +242,13 @@ const credentialsPath = () => credentialsOverride
 // moves it, and an ANTHROPIC_API_KEY or an oauthAccount in ~/.claude.json also
 // mean claude has Anthropic auth. Only with NONE of them (a PC that runs claude
 // on an endpoint only) is the login account skipped.
+// macOS: claude keeps that login in the Keychain, not in .credentials.json
+// (keychain.cjs: `Claude Code-credentials`, suffixed for a CLAUDE_CONFIG_DIR).
+let loginServiceOverride = null; // smoke: a throwaway item, never Claude's real one
 const loggedIn = () => {
   if (fs.existsSync(credentialsPath())) return true;
   if (credentialsOverride) return false; // smoke pins the answer
+  if (process.platform === 'darwin' && keychain.exists(loginServiceOverride || keychain.claudeLoginService())) return true;
   if (process.env.ANTHROPIC_API_KEY) return true;
   if (process.env.CLAUDE_CONFIG_DIR && fs.existsSync(path.join(process.env.CLAUDE_CONFIG_DIR, '.credentials.json'))) return true;
   try {
@@ -251,6 +261,7 @@ function usable(d, id, now) {
   if (!d.accounts[id] || isExhausted(d, id, now)) return false;
   if (id === LOGIN) return loggedIn();
   // a token/endpoint account whose blob is gone could never start: skip it
+  if (process.platform === 'darwin') return keychain.exists(serviceIn(d, id), keychain.ACCOUNT);
   return fs.existsSync(blobIn(d, id));
 }
 
@@ -638,18 +649,27 @@ async function add(label, token) {
   if (!TOKEN_RE.test(tok)) return { ok: false, error: 'That does not look like a setup-token (it starts with sk-ant-oat01-).' };
   let id;
   do { id = `${U.slugify(name).slice(0, 24)}-${U.randId(4)}`; } while (id === LOGIN || has(id));
-  let blob;
-  try {
-    blob = await encrypt(tok);
-  } catch (e) {
-    logger.warn(`accounts: add failed (${e.message})`); // never the token
-    return { ok: false, error: 'Could not encrypt the token: ' + e.message };
-  }
-  try {
-    U.ensureDir(blobDir());
-    fs.writeFileSync(tokenBlobPath(id), blob);
-  } catch (e) {
-    return { ok: false, error: 'Could not save the token: ' + e.message };
+  if (process.platform === 'darwin') {
+    try {
+      await keychain.write(keychain.tokenService(id), tok);
+    } catch (e) {
+      logger.warn(`accounts: add failed (${e.message})`); // never the token
+      return { ok: false, error: 'Could not store the token in the Keychain: ' + e.message };
+    }
+  } else {
+    let blob;
+    try {
+      blob = await encrypt(tok);
+    } catch (e) {
+      logger.warn(`accounts: add failed (${e.message})`); // never the token
+      return { ok: false, error: 'Could not encrypt the token: ' + e.message };
+    }
+    try {
+      U.ensureDir(blobDir());
+      fs.writeFileSync(tokenBlobPath(id), blob);
+    } catch (e) {
+      return { ok: false, error: 'Could not save the token: ' + e.message };
+    }
   }
   update((d) => { d.accounts[id] = { label: name, kind: 'token' }; d.order.push(id); });
   logger.info(`accounts: added ${id} ("${name}")`);
@@ -791,6 +811,7 @@ function endpointEnv(id) {
 }
 
 function decryptEnv(id) {
+  if (process.platform === 'darwin') return decryptEnvKeychain(id);
   const blob = endpointBlobPath(id);
   if (!fs.existsSync(blob)) return Promise.reject(new Error('its settings file is missing: remove the account and add it again'));
   decryptSpawns++;
@@ -813,6 +834,24 @@ function decryptEnv(id) {
       resolve(env);
     });
   });
+}
+
+// darwin: the endpoint's Keychain item (one `security` spawn, the value on its
+// stdout only) = base64 of the same KEY=VALUE lines
+function decryptEnvKeychain(id) {
+  decryptSpawns++;
+  return keychain.read(keychain.endpointService(id)).then((b64) => {
+    if (b64 === null) throw new Error('its settings are missing from the Keychain: remove the account and add it again');
+    const text = /^[A-Za-z0-9+/=]*$/.test(b64) ? Buffer.from(b64, 'base64').toString('utf8') : '';
+    const env = {};
+    for (const line of text.split(/\r?\n/)) {
+      const i = line.indexOf('=');
+      if (i > 0 && ENDPOINT_KEY_RE.test(line.slice(0, i))) env[line.slice(0, i)] = line.slice(i + 1);
+    }
+    if (!env.ANTHROPIC_BASE_URL) throw new Error('its settings could not be decrypted (unreadable Keychain item)');
+    if (has(id)) envCache.set(id, env); // removed meanwhile: nothing to keep
+    return env;
+  }, (e) => { throw new Error(`its settings could not be decrypted (${e.message})`); });
 }
 
 // What a tab's claude starts on: { id, env } (env = an endpoint's vars, which
@@ -853,18 +892,27 @@ async function storeEndpoint(name, env) {
   };
   let id;
   do { id = `${U.slugify(name).slice(0, 24)}-${U.randId(4)}`; } while (id === LOGIN || has(id));
-  let blob;
-  try {
-    blob = await encrypt(envText(env));
-  } catch (e) {
-    logger.warn(`accounts: add endpoint failed (${e.message})`); // never a value
-    return { ok: false, error: 'Could not encrypt the settings: ' + e.message };
-  }
-  try {
-    U.ensureDir(blobDir());
-    fs.writeFileSync(endpointBlobPath(id), blob);
-  } catch (e) {
-    return { ok: false, error: 'Could not save the settings: ' + e.message };
+  if (process.platform === 'darwin') {
+    try {
+      await keychain.write(keychain.endpointService(id), Buffer.from(envText(env), 'utf8').toString('base64'));
+    } catch (e) {
+      logger.warn(`accounts: add endpoint failed (${e.message})`); // never a value
+      return { ok: false, error: 'Could not store the settings in the Keychain: ' + e.message };
+    }
+  } else {
+    let blob;
+    try {
+      blob = await encrypt(envText(env));
+    } catch (e) {
+      logger.warn(`accounts: add endpoint failed (${e.message})`); // never a value
+      return { ok: false, error: 'Could not encrypt the settings: ' + e.message };
+    }
+    try {
+      U.ensureDir(blobDir());
+      fs.writeFileSync(endpointBlobPath(id), blob);
+    } catch (e) {
+      return { ok: false, error: 'Could not save the settings: ' + e.message };
+    }
   }
   update((d) => { d.accounts[id] = { label: name, kind: 'endpoint', baseUrl, models }; d.order.push(id); });
   logger.info(`accounts: added endpoint ${id} ("${name}", ${u.host}, vars: ${Object.keys(env).join(',')})`);
@@ -950,6 +998,7 @@ function remove(id) {
   envCache.delete(id);
   if (id === LOGIN || !has(id)) return state();
   const blob = blobPath(id);
+  const service = process.platform === 'darwin' ? serviceIn(read(), id) : null;
   update((d) => {
     delete d.accounts[id];
     delete d.exhausted[id];
@@ -957,6 +1006,7 @@ function remove(id) {
     d.order = d.order.filter(x => x !== id);
   });
   try { fs.rmSync(blob, { force: true }); } catch {}
+  if (service && !keychain.remove(service)) logger.warn(`accounts: ${id} Keychain item not removed (${keychain.lastError() || '?'})`);
   logger.info(`accounts: removed ${id}`);
   return state();
 }
@@ -1289,6 +1339,8 @@ module.exports = {
   _parseEndpointEnv: parseEndpointEnv,
   _envText: envText,
   _setCredentialsPath: (p) => { credentialsOverride = p || null; },
+  _setLoginService: (s) => { loginServiceOverride = s || null; },
+  _service: (id) => serviceIn(read(), id),
   _setFamiliesMax: (n) => { familiesMax = Number(n) > 0 ? Number(n) : 2000; },
   _forgetEnv: (id) => { envCache.delete(id); },
   _decryptSpawns: () => decryptSpawns,
