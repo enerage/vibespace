@@ -609,7 +609,8 @@ async function runSmoke(hooks = {}) {
     statusMod.onData((wsId, termId, st) => { got = { wsId, termId, st }; });
     statusMod.start('smoke-ws', dir);
     fs.writeFileSync(path.join(dir, 't9.status'), 'idle-noise\nworking\n'); // last line wins
-    await new Promise(r => setTimeout(r, 900));
+    // up to 3 s: FSEvents on a loaded Mac runner took longer than 900 ms
+    for (let i = 0; i < 30 && !got; i++) await new Promise(r => setTimeout(r, 100));
     check('status watcher emits last status line', got && got.wsId === 'smoke-ws' && got.termId === 't9' && got.st === 'working', JSON.stringify(got));
     statusMod.stop('smoke-ws');
     try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}

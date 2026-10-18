@@ -6,7 +6,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-const active = new Map(); // wsId -> { dir, watcher, pending: Set, timer }
+const active = new Map(); // wsId -> { dir, watcher, pending: Set, timer, sweep, mtimes }
 let listener = () => {};
 
 function onData(fn) { listener = fn; }
@@ -21,15 +21,34 @@ function readStatus(file) {
 function start(wsId, dir) {
   stop(wsId);
   try { fs.mkdirSync(dir, { recursive: true }); } catch {}
-  const state = { dir, watcher: null, pending: new Set(), timer: null };
+  const state = { dir, watcher: null, pending: new Set(), timer: null, sweep: null, mtimes: new Map() };
+  const queue = (filename) => {
+    state.pending.add(filename);
+    clearTimeout(state.timer);
+    state.timer = setTimeout(() => flush(wsId), 200);
+  };
   try {
     state.watcher = fs.watch(dir, { persistent: false }, (event, filename) => {
       if (!filename || !filename.endsWith('.status')) return;
-      state.pending.add(filename);
-      clearTimeout(state.timer);
-      state.timer = setTimeout(() => flush(wsId), 200);
+      queue(filename);
     });
   } catch {}
+  // macOS: FSEvents delivers late under load and can miss a write made right
+  // after the watch starts (seen on the Intel CI runner), so a cheap mtime
+  // sweep backs it up. A missed event would leave a tab light stale.
+  if (process.platform === 'darwin') {
+    const sweep = () => {
+      let names = [];
+      try { names = fs.readdirSync(dir).filter(n => n.endsWith('.status')); } catch { return; }
+      for (const n of names) {
+        let m = 0;
+        try { m = fs.statSync(path.join(dir, n)).mtimeMs; } catch { continue; }
+        if (state.mtimes.get(n) !== m) { state.mtimes.set(n, m); queue(n); }
+      }
+    };
+    state.sweep = setInterval(sweep, 1500);
+    if (state.sweep.unref) state.sweep.unref();
+  }
   active.set(wsId, state);
   return state;
 }
@@ -50,6 +69,7 @@ function stop(wsId) {
   if (!state) return;
   if (state.watcher) { try { state.watcher.close(); } catch {} }
   clearTimeout(state.timer);
+  if (state.sweep) clearInterval(state.sweep);
   active.delete(wsId);
 }
 

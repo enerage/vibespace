@@ -484,6 +484,9 @@ function create(termId, cwd, cols = 120, rows = 30, wsId = null, { settingsPath 
     // a Finder-launched app has no locale: zsh's line editor and claude's UI
     // then mangle anything non-ASCII (Terminal.app sets this too)
     if (!env.LANG && !env.LC_ALL && !env.LC_CTYPE) env.LANG = 'en_US.UTF-8';
+    // Apple's bash 3.2 prints "The default interactive shell is now zsh…" in
+    // every new terminal of a bash user (seen on the CI runner)
+    env.BASH_SILENCE_DEPRECATION_WARNING = '1';
     const sh = posixLaunch(env);
     proc = pty.spawn(sh.file, sh.args, { name: 'xterm-256color', cols, rows, cwd, env });
   } else {

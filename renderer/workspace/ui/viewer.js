@@ -121,9 +121,13 @@ async function save() {
 }
 
 function refreshEditButton(t) {
-  const on = Boolean(t && t.editable);
+  // an SVG back in image view keeps t.editable for its source view, but there is
+  // nothing to edit here: plain "Edit", disabled
+  const media = Boolean(t && t.kind === 'media');
+  const on = Boolean(t && t.editable) && !media;
   $('#btn-edit').textContent = on ? 'Read-only' : 'Edit';
   $('#btn-edit').classList.toggle('primary', on);
+  $('#btn-edit').disabled = media;
 }
 
 function updateSaveButton() {
@@ -490,9 +494,15 @@ function buildMedia(path, t) {
     const caption = () => {
       if (!img.naturalWidth || !img.isConnected || !img.clientWidth) return; // detached: no size to report
       const fit = stage.classList.contains('fit');
-      const scale = fit ? Math.min(1, img.clientWidth / img.naturalWidth) : 1;
-      img.classList.toggle('fit-full', fit && scale >= 1);
-      const mode = !fit ? '100 % — click to fit' : scale >= 1 ? '100 %' : `fit ${Math.round(scale * 100)} % — click for 100 %`;
+      // 100 % = the natural size, set explicitly: an SVG with only a viewBox has
+      // no intrinsic size and would otherwise stretch to the box (150 px wide
+      // "natural", drawn at 354 px, captioned 100 %)
+      img.style.width = fit ? '' : `${img.naturalWidth}px`;
+      img.style.height = fit ? '' : `${img.naturalHeight}px`;
+      const scale = fit ? img.clientWidth / img.naturalWidth : 1;
+      const same = Math.abs(scale - 1) < 0.005;
+      img.classList.toggle('fit-full', fit && same);
+      const mode = !fit ? '100 % — click to fit' : same ? '100 %' : `fit ${Math.round(scale * 100)} % — click for 100 %`;
       info([`${img.naturalWidth} × ${img.naturalHeight} px`, fmtBytes(t.size), mode]);
     };
     img.onload = caption;
