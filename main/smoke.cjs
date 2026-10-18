@@ -147,6 +147,48 @@ async function ptyTreeKillTest() {
   }
 }
 
+// macOS twin of the above: under the tab's zsh, `sh -c` starts a child (a), a
+// child that ignores TERM and HUP (b: only the SIGKILL round ends it) and an
+// orphan (c: its parent exits at once, so launchd adopts it; only the process
+// GROUP kill reaches it). kill() must end all three and leave the other tab's
+// tree alone; killAll() (window close / quit) ends the rest.
+async function ptyTreeKillTestDarwin() {
+  if (!ptyhost.available()) return { ok: false, detail: 'node-pty unavailable' };
+  const os = require('node:os');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-smoke-tree-'));
+  const alive = (pid) => { try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } };
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+  const waitFor = async (fn, ms) => { const end = Date.now() + ms; while (Date.now() < end) { const v = fn(); if (v) return v; await sleep(200); } return fn(); };
+  const readPid = (f) => { try { return Number(fs.readFileSync(f, 'utf8').trim()) || 0; } catch { return 0; } };
+  const ids = ['smoketree1', 'smoketree2'];
+  const pids = {};
+  try {
+    for (const id of ids) {
+      ptyhost.create(id, U.BIN_ROOT, 160, 30);
+      await sleep(1500);
+      const f = (k) => path.join(dir, `${id}.${k}`);
+      ptyhost.write(id, `sh -c 'sleep 600 & echo $! > "${f('a')}"; (trap "" TERM HUP; exec sleep 600) & echo $! > "${f('b')}"; (sleep 600 & echo $! > "${f('c')}"); wait'\r`);
+      const got = await waitFor(() => { const v = ['a', 'b', 'c'].map(k => readPid(f(k))); return v.every(Boolean) ? v : null; }, 15000);
+      if (!got) return { ok: false, detail: `${id}: the fake tree never started` };
+      pids[id] = got;
+    }
+    const [a, b] = ids.map(id => pids[id]);
+    if (![...a, ...b].every(alive)) return { ok: false, detail: `not alive before kill: ${JSON.stringify(pids)}` };
+    ptyhost.kill(ids[0]);
+    const goneA = await waitFor(() => a.every(p => !alive(p)), 8000);
+    const keptB = b.every(alive) && ptyhost.alive(ids[1]);
+    ptyhost.killAll(); // synchronous tree kill
+    const goneB = await waitFor(() => b.every(p => !alive(p)), 4000);
+    return { ok: goneA && keptB && goneB, detail: `kill(): ${a.join(',')} gone=${goneA}, other tab's ${b.join(',')} kept=${keptB}; killAll(): gone=${goneB}` };
+  } catch (err) {
+    return { ok: false, detail: 'threw: ' + (err && err.message ? err.message : err) };
+  } finally {
+    for (const id of ids) ptyhost.kill(id);
+    for (const p of Object.values(pids).flat()) { if (p && alive(p)) { try { process.kill(p, 'SIGKILL'); } catch {} } }
+    setTimeout(() => { try { fs.rmSync(dir, { recursive: true, force: true }); } catch {} }, 2000);
+  }
+}
+
 // create() on a live termId: the old pty's exit (it closes only after its tree
 // kill, ~1 s) must not clean up or report the NEW pty as exited
 async function ptyRecreateTest() {
@@ -862,8 +904,19 @@ async function runSmoke() {
     }
   }
 
-  // 17. PATH rebuild from registry (the stripped/mangled-PATH class of bugs)
-  {
+  // 17. PATH rebuild from registry (the stripped/mangled-PATH class of bugs);
+  //     macOS: from the login shell, merged with fixed fallbacks, never empty
+  if (process.platform === 'darwin') {
+    const rebuilt = U.rebuildPath('/usr/bin:/bin:.:/usr/bin/');
+    const parts = rebuilt.split(':');
+    check('PATH rebuild (macOS): login-shell PATH + fallbacks, deduped, no relative entries',
+      parts.includes('/usr/bin') && parts.includes('/bin') && parts.length === new Set(parts).size && !parts.includes('.') && !parts.includes(''),
+      `${parts.length} entries: ${rebuilt.slice(0, 200)}`);
+    const t0 = Date.now();
+    const noShell = U.rebuildPath('', { shell: '/nonexistent/zsh' });
+    check('PATH rebuild (macOS): a broken login shell still gives a usable PATH', noShell.split(':').includes('/usr/bin') && Date.now() - t0 < 4000, noShell);
+  }
+  if (process.platform === 'win32') {
     const rebuilt = U.rebuildPath('C:\\Windows;C:\\Windows;junk;C:Windows');
     const parts = rebuilt.split(';');
     const dupes = parts.length !== new Set(parts.map(p => p.toLowerCase())).size;
@@ -929,7 +982,33 @@ async function runSmoke() {
 
   // 21. terminal env has ONE path key and resolves user-PATH tools by name
   //     (the Path/PATH duplicate-key bug that broke node/python/MCP servers)
-  {
+  if (process.platform === 'darwin') {
+    // case-sensitive env: PATH is set, "Path" is a different variable and stays
+    const e = ptyhost._withSinglePath({ Path: 'other', PATH: 'old', Other: '1' }, 'final');
+    check('pty env (macOS) sets PATH only, case-sensitive', e.PATH === 'final' && e.Path === 'other' && e.Other === '1', JSON.stringify(e));
+    const r = await new Promise((resolve) => {
+      let buf = '';
+      const termId = 'smokeenv';
+      const marker = `__ENV_${Date.now()}__`;
+      const timer = setTimeout(() => { ptyhost.onData(() => {}); ptyhost.kill(termId); resolve({ ok: false, detail: 'timeout: ' + buf.slice(-200) }); }, 20000);
+      ptyhost.onData((id, chunk) => {
+        if (id !== termId) return;
+        buf += chunk;
+        const flat = buf.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '').replace(/\r?\n/g, '');
+        // the echoed command has a quote right after "GIT="; the OUTPUT does not
+        const m = flat.match(new RegExp(marker + 'GIT=([^"|]*)\\|USRBIN=(\\d)\\|' + marker + 'END'));
+        if (!m) return;
+        clearTimeout(timer);
+        ptyhost.onData(() => {});
+        ptyhost.kill(termId);
+        resolve({ ok: /\/git$/.test(m[1].trim()) && m[2] === '1', detail: `git=${m[1].trim() || 'NOT FOUND'} usrBinOnPath=${m[2]}` });
+      });
+      try { ptyhost.create(termId, U.BIN_ROOT, 200, 30); } catch (err) { clearTimeout(timer); resolve({ ok: false, detail: 'spawn: ' + err.message }); return; }
+      setTimeout(() => ptyhost.write(termId, `echo "${marker}GIT=""$(command -v git)""|USRBIN=""$([[ ":$PATH:" == *:/usr/bin:* ]] && echo 1 || echo 0)""|${marker}END"\r`), 1500);
+    });
+    check('terminal (macOS login zsh) has a full PATH: git by name, /usr/bin', r.ok, r.detail);
+  }
+  if (process.platform === 'win32') {
     const e = ptyhost._withSinglePath({ Path: 'full', PATH: 'stripped', path: 'x', Other: '1' }, 'final');
     const pathKeys = Object.keys(e).filter(k => k.toUpperCase() === 'PATH');
     check('pty env collapses to a single Path key', pathKeys.length === 1 && e.Path === 'final' && e.Other === '1', pathKeys.join(','));
@@ -1543,7 +1622,8 @@ async function runSmoke() {
         resolve({ ok: m[1].trim().toLowerCase() === marker.toLowerCase(), detail: m[1].trim() || 'NOT SET' });
       });
       try { ptyhost.create(termId, U.BIN_ROOT, 200, 30); } catch (err) { clearTimeout(timer); resolve({ ok: false, detail: 'spawn: ' + err.message }); return; }
-      setTimeout(() => ptyhost.write(termId, `Write-Output ("${tag}P=" + $env:CLAUDE_CLIENT_PRESENCE_FILE + "|${tag}END")\r`), 900);
+      if (process.platform === 'darwin') setTimeout(() => ptyhost.write(termId, `echo "${tag}P=""$CLAUDE_CLIENT_PRESENCE_FILE""|${tag}END"\r`), 1500);
+      else setTimeout(() => ptyhost.write(termId, `Write-Output ("${tag}P=" + $env:CLAUDE_CLIENT_PRESENCE_FILE + "|${tag}END")\r`), 900);
     });
     check('pty env carries CLAUDE_CLIENT_PRESENCE_FILE', r.ok, r.detail);
   }
@@ -1576,9 +1656,110 @@ async function runSmoke() {
         done(bad.length === 0, bad.length ? 'wrong: ' + bad.join('; ') + ' got=' + JSON.stringify(got) : got.length + ' cases');
       });
       try { ptyhost.create(termId, U.BIN_ROOT, 200, 30, null, { settingsPath: 'S.json', rcLabel: 'WS · t1' }); } catch (err) { done(false, 'spawn: ' + err.message); return; }
-      setTimeout(() => ptyhost.write(termId, '$env:VIBESPACE_CLAUDE_DRYRUN=1; ' + cases.map(c => c[0]).join('; ') + '\r'), 900);
+      const dry = process.platform === 'darwin' ? 'export VIBESPACE_CLAUDE_DRYRUN=1; ' : '$env:VIBESPACE_CLAUDE_DRYRUN=1; ';
+      setTimeout(() => ptyhost.write(termId, dry + cases.map(c => c[0]).join('; ') + '\r'), process.platform === 'darwin' ? 1500 : 900);
     });
     check('pty `claude` wrapper adds tracking flags (hand-typed claude)', r.ok, r.detail);
+  }
+
+  // 23c. macOS process-tree walk (pure, every platform): one `ps` snapshot,
+  //      claude = argv[0] claude* / versions/<v> / node running claude; a tree
+  //      kill takes descendants + their groups, never a shell's group or claude's
+  //      daemon
+  {
+    const snap = ptyhost._parsePs([
+      '    1     0     1 /sbin/launchd',
+      '  600     1   600 /bin/zsh -l -i',
+      '  610   600   610 claude --resume abc',
+      '  620   610   610 node /x/mcp-server.js',
+      '  640   600   640 sleep 60',
+      '  650   600   600 cat',
+      '  660   610   660 claude daemon run',
+      '  700     1   700 /bin/zsh -l -i',
+      '  710   700   710 node /usr/local/lib/node_modules/@anthropic-ai/claude-code/cli.js',
+      '  720   700   720 /Users/v/.local/share/claude/versions/2.1.296 --resume x',
+      '  730   700   730 /Applications/Google Chrome.app/Contents/MacOS/Google Chrome --x',
+    ].join('\n'));
+    const sorted = (a) => JSON.stringify([...a].sort((x, y) => x - y));
+    const t = ptyhost._treeTargets(snap, [600], { shellPids: [600] });
+    const t2 = ptyhost._treeTargets(snap, [610], { includeRoots: true, shellPids: [600] });
+    const w = {
+      parsed: snap.length === 11 && snap[10].args.startsWith('/Applications/Google Chrome.app'),
+      claude600: sorted(ptyhost._claudePidsIn(snap, 600)) === '[610]',
+      claude700: sorted(ptyhost._claudePidsIn(snap, 700)) === '[710,720]',
+      none: ptyhost._claudePidsIn(snap, 640).length === 0,
+      names: ptyhost._isClaudeProc('/opt/homebrew/bin/claude --x') && !ptyhost._isClaudeProc('grep claude') && !ptyhost._isClaudeProc('node /x/mcp.js'),
+      tree: sorted(t.pids) === '[610,620,640,650]' && sorted(t.pgids) === '[610,640]',
+      claudeTree: sorted(t2.pids) === '[610,620]' && sorted(t2.pgids) === '[610]',
+      prompt: ptyhost._endsAtPrompt('x\r\n' + ptyhost._promptMark + 'v@mac ~ % ', 'darwin') && !ptyhost._endsAtPrompt('x\r\nv@mac ~ % ', 'darwin'),
+    };
+    check('macOS process-tree walk + prompt marker (pure)', Object.values(w).every(Boolean), JSON.stringify(w));
+  }
+
+  // 23d. macOS shell: our rc files parse (zsh -n / bash -n), the zsh `claude()`
+  //      per account kind (login → RC, missing Keychain token, endpoint swaps
+  //      --settings and refuses a foreign one, plain runs untouched), and the
+  //      precmd prompt marker after a command
+  if (process.platform === 'darwin') {
+    const cp = require('node:child_process');
+    const dir = ptyhost._shellInitDir();
+    const syn = ['.zshenv', '.zprofile', '.zshrc', '.zlogin', 'bashrc'].map((f) => {
+      const r = cp.spawnSync(f === 'bashrc' ? '/bin/bash' : '/bin/zsh', ['-n', path.join(dir, f)], { encoding: 'utf8', timeout: 10000 });
+      return r.status === 0 ? '' : `${f}: ${(r.stderr || r.error?.message || '').trim()}`;
+    }).filter(Boolean);
+    check('macOS rc files written and parse (zsh -n, bash -n)', syn.length === 0, syn.join('; ') || dir);
+
+    const dryRun = (termId, prep, typed, want, refuse = null) => new Promise((resolve) => {
+      let buf = '';
+      const done = (ok, detail) => { clearTimeout(timer); ptyhost.onData(() => {}); ptyhost.kill(termId); resolve({ ok, detail }); };
+      const timer = setTimeout(() => done(false, 'timeout: ' + buf.slice(-300)), 20000);
+      ptyhost.onData((id, chunk) => {
+        if (id !== termId) return;
+        buf += chunk;
+        const flat = buf.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '').replace(/\r?\n/g, '');
+        const got = [...flat.matchAll(/VS(?:ACCT|CLAUDE)\[[^\]]*\]/g)].map(m => m[0]);
+        if (got.length < want.length || (refuse && !flat.includes(refuse))) return;
+        const ok = got.length === want.length && want.every((x, i) => got[i] === x);
+        done(ok, ok ? `${got.length} lines${refuse ? ' + refusal' : ''}` : 'got=' + JSON.stringify(got));
+      });
+      try { ptyhost.create(termId, U.BIN_ROOT, 400, 30, 'smoke-mac', { settingsPath: 'S.json', rcLabel: 'WS · t1' }); } catch (err) { done(false, 'spawn: ' + err.message); return; }
+      prep(termId);
+      setTimeout(() => ptyhost.write(termId, 'export VIBESPACE_CLAUDE_DRYRUN=1; ' + typed + '\r'), 1500);
+    });
+    const r1 = await dryRun('smokemacacct', (id) => ptyhost.setAccount(id, 'login'),
+      'claude; claude -p hi; printf %s ghost-zz99 > "$VIBESPACE_ACCOUNT_FILE"; claude --resume abc',
+      ['VSACCT[login]', 'VSCLAUDE[--remote-control|WS · t1|--settings|S.json]', 'VSCLAUDE[-p|hi]',
+        'VSACCT[ghost-zz99|missing]', 'VSCLAUDE[--resume|abc|--settings|S.json]']);
+    check('macOS `claude` wrapper dry-run (login → RC, plain -p untouched, missing Keychain token → no RC)', r1.ok, r1.detail);
+    const epsFile = ptyhost.endpointSettingsFor('smoke-mac', 'smokemacep');
+    const r2 = await dryRun('smokemacep', (id) => { ptyhost.setAccount(id, 'smoke-ep'); ptyhost.writeEndpointSettings(id, 'smoke-mac', null, { ANTHROPIC_BASE_URL: 'https://example.invalid' }); },
+      "claude; claude --resume abc --settings 'S.json'; claude --settings '/other.json'",
+      ['VSACCT[smoke-ep|endpoint]', `VSCLAUDE[--settings|${epsFile}]`, 'VSACCT[smoke-ep|endpoint]', `VSCLAUDE[--resume|abc|--settings|${epsFile}]`],
+      "endpoint account 'smoke-ep': start claude without --settings");
+    check('macOS `claude` wrapper dry-run (endpoint swaps --settings, refuses a foreign one)', r2.ok && !fs.existsSync(epsFile), r2.detail);
+
+    // the precmd marker: a finished command → 'prompt'; idle with no claude → 'gone'
+    const termId = 'smokemacprompt';
+    let w1 = null;
+    let w2 = null;
+    let marked = false;
+    let at = null;
+    try {
+      ptyhost.create(termId, U.BIN_ROOT, 120, 30);
+      await new Promise(r => setTimeout(r, 1500));
+      const p1 = ptyhost.waitClaudeExit(termId, 8000);
+      ptyhost.write(termId, 'echo waited\r');
+      w1 = await p1;
+      at = ptyhost.atPrompt(termId);
+      marked = (ptyhost.list().find(p => p.termId === termId)?.buffer || '').includes(ptyhost._promptMark);
+      await new Promise(r => setTimeout(r, 2500));
+      w2 = await ptyhost.waitClaudeExit(termId, 600);
+    } catch (err) {
+      w1 = w1 || { how: 'error: ' + err.message };
+    }
+    ptyhost.kill(termId);
+    check('macOS prompt marker: printed by precmd, ends a wait as prompt; no claude → gone',
+      w1 && w1.how === 'prompt' && w2 && w2.how === 'gone' && marked && at === true, JSON.stringify({ w1, w2, marked, at }));
   }
 
   // 25. accounts (main/accounts.cjs): reset parsing, usage-limit classification,
@@ -1796,8 +1977,13 @@ async function runSmoke() {
         const setFile = ptyhost.setAccount(termId, 'login');
         const setOk = fs.readFileSync(setFile, 'utf8') === 'login' && setFile === stale;
         if (!setOk) { done(false, 'setAccount wrote ' + setFile); return; }
-        const setTo = (v) => `Set-Content -NoNewline -LiteralPath $env:VIBESPACE_ACCOUNT_FILE -Value '${v}'`;
-        setTimeout(() => ptyhost.write(termId, `$env:VIBESPACE_CLAUDE_DRYRUN=1; claude; ${setTo(id2)}; claude --resume abc; ${setTo('ghost-zz99')}; claude\r`), 900);
+        if (process.platform === 'darwin') {
+          const setTo = (v) => `printf %s '${v}' > "$VIBESPACE_ACCOUNT_FILE"`;
+          setTimeout(() => ptyhost.write(termId, `export VIBESPACE_CLAUDE_DRYRUN=1; claude; ${setTo(id2)}; claude --resume abc; ${setTo('ghost-zz99')}; claude\r`), 1500);
+        } else {
+          const setTo = (v) => `Set-Content -NoNewline -LiteralPath $env:VIBESPACE_ACCOUNT_FILE -Value '${v}'`;
+          setTimeout(() => ptyhost.write(termId, `$env:VIBESPACE_CLAUDE_DRYRUN=1; claude; ${setTo(id2)}; claude --resume abc; ${setTo('ghost-zz99')}; claude\r`), 900);
+        }
       });
       check('pty `claude` wrapper per-account dry-run (login → RC, token → no RC, missing blob)', r.ok, r.detail);
 
@@ -2048,7 +2234,8 @@ async function runSmoke() {
           });
           // plain `claude`, the way claudeCommand types it (explicit hook
           // --settings), then one with someone else's --settings
-          setTimeout(() => ptyhost.write(termId, `$env:VIBESPACE_CLAUDE_DRYRUN=1; claude; claude --resume abc --settings '${baseS}'; claude --settings 'C:\\other.json'\r`), 900);
+          if (process.platform === 'darwin') setTimeout(() => ptyhost.write(termId, `export VIBESPACE_CLAUDE_DRYRUN=1; claude; claude --resume abc --settings '${baseS}'; claude --settings '/other.json'\r`), 1500);
+          else setTimeout(() => ptyhost.write(termId, `$env:VIBESPACE_CLAUDE_DRYRUN=1; claude; claude --resume abc --settings '${baseS}'; claude --settings 'C:\\other.json'\r`), 900);
         });
         check('endpoint account: main writes the tab settings, wrapper swaps --settings, refuses a foreign --settings, no RC, no key in output', r.ok, r.detail);
         // kill() itself deletes the tab's settings file (it holds the key); its
@@ -2123,16 +2310,26 @@ async function runSmoke() {
       }
 
       // the expanded wrapper must stay valid Windows PowerShell 5.1
-      const wf = path.join(U.dataRoot(), 'wrapper-smoke.ps1');
-      fs.writeFileSync(wf, ptyhost._wrapper);
-      const parsed = await new Promise((resolve) => {
-        const ps = '$t = [IO.File]::ReadAllText($env:VS_SMOKE_PS); $e = $null; [void][System.Management.Automation.Language.Parser]::ParseInput($t, [ref]$null, [ref]$e); '
-          + "[Console]::Out.Write([string]$e.Count + '|' + (($e | ForEach-Object { $_.Message }) -join '; '))";
-        require('node:child_process').execFile(acc._psExe(), ['-NoProfile', '-NonInteractive', '-Command', ps],
-          { windowsHide: true, timeout: 20000, env: acc._psEnv({ VS_SMOKE_PS: wf }) }, (err, out) => resolve(String(out || (err && err.message) || '').trim()));
-      });
-      check('pty `claude` wrapper parses in Windows PowerShell 5.1', parsed === '0|', parsed);
-      try { fs.rmSync(wf, { force: true }); } catch {}
+      if (process.platform === 'win32') {
+        const wf = path.join(U.dataRoot(), 'wrapper-smoke.ps1');
+        fs.writeFileSync(wf, ptyhost._wrapper);
+        const parsed = await new Promise((resolve) => {
+          const ps = '$t = [IO.File]::ReadAllText($env:VS_SMOKE_PS); $e = $null; [void][System.Management.Automation.Language.Parser]::ParseInput($t, [ref]$null, [ref]$e); '
+            + "[Console]::Out.Write([string]$e.Count + '|' + (($e | ForEach-Object { $_.Message }) -join '; '))";
+          require('node:child_process').execFile(acc._psExe(), ['-NoProfile', '-NonInteractive', '-Command', ps],
+            { windowsHide: true, timeout: 20000, env: acc._psEnv({ VS_SMOKE_PS: wf }) }, (err, out) => resolve(String(out || (err && err.message) || '').trim()));
+        });
+        check('pty `claude` wrapper parses in Windows PowerShell 5.1', parsed === '0|', parsed);
+        try { fs.rmSync(wf, { force: true }); } catch {}
+      }
+      // macOS: the zsh and bash claude() texts parse (the rc files get their own check in 23d)
+      if (process.platform === 'darwin') {
+        const bad = ['zsh', 'bash'].map((sh) => {
+          const r = require('node:child_process').spawnSync(`/bin/${sh}`, ['-n'], { input: ptyhost._wrapperPosix[sh], encoding: 'utf8', timeout: 10000 });
+          return r.status === 0 ? '' : `${sh}: ${(r.stderr || '').trim()}`;
+        }).filter(Boolean);
+        check('pty `claude` wrapper parses in zsh and bash', bad.length === 0, bad.join('; '));
+      }
 
       if (tokId) acc.remove(tokId);
       if (epId) acc.remove(epId);
@@ -2160,7 +2357,7 @@ async function runSmoke() {
       try { fs.rmSync(tdir, { recursive: true, force: true }); } catch {}
     }
 
-    // claude-exit wait: a PowerShell prompt after the call resolves 'prompt'; no
+    // claude-exit wait: a PowerShell prompt (macOS: our precmd marker) after the call resolves 'prompt'; no
     // output and no claude under the shell resolves 'timeout'
     {
       const termId = 'smokewait';
@@ -2312,9 +2509,9 @@ async function runSmoke() {
       JSON.stringify({ pMain, pSelf, pBadIds, found, txSub }));
   }
 
-  // 8. pty echo (powershell)
+  // 8. pty echo (powershell; the login zsh on macOS)
   const echo = await ptyEchoTest();
-  check('pty spawn + echo (powershell)', echo.ok, echo.detail);
+  check(process.platform === 'darwin' ? 'pty spawn + echo (zsh)' : 'pty spawn + echo (powershell)', echo.ok, echo.detail);
 
   // 9. pty ring buffer + list (Layer 2: reloads must not kill agents)
   const ring = await ptyBufferTest();
@@ -2323,8 +2520,14 @@ async function runSmoke() {
     `now=${ring.busyNow} future=${ring.busyFuture} afterKill=${ring.busyAfterKill}`);
 
   // 9b. tab close kills hidden grandchildren (orphaned MCP servers) + id reuse
-  const tree = await ptyTreeKillTest();
-  check('pty kill takes hidden grandchildren (MCP servers) down, per tab', tree.ok, tree.detail);
+  if (process.platform === 'win32') {
+    const tree = await ptyTreeKillTest();
+    check('pty kill takes hidden grandchildren (MCP servers) down, per tab', tree.ok, tree.detail);
+  }
+  if (process.platform === 'darwin') {
+    const tree = await ptyTreeKillTestDarwin();
+    check('pty kill takes the whole tree down (TERM-ignoring child, orphan in the group), per tab', tree.ok, tree.detail);
+  }
   const recreate = await ptyRecreateTest();
   check('pty re-create on a live id survives the old pty exit', recreate.ok, recreate.detail);
 

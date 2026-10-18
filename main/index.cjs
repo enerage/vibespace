@@ -7,6 +7,7 @@ const { spawn } = require('node:child_process');
 // FIRST: rebuild PATH from the registry (machine + user). Windows spawned from
 // stripped environments (agent shells) otherwise break node/python/git for every
 // terminal AND every process we spawn (git status, claude --version, builds).
+// macOS: the login shell's PATH instead (Finder apps get only /usr/bin:/bin).
 const U = require('./util.cjs');
 process.env.PATH = U.rebuildPath();
 const logger = require('./logger.cjs');
