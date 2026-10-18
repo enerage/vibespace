@@ -1,4 +1,4 @@
-import { $, el, toast, debounce, confirmBox } from './common.js';
+import { $, el, toast, debounce, confirmBox, modKey, osText } from './common.js';
 import { monacoTheme, onThemeChange } from './themes.js';
 import { mediaUrl, fmtBytes, fmtDuration } from './mediaurl.js';
 
@@ -53,7 +53,7 @@ export function init(cb) {
       readOnly: true,
       minimap: { enabled: true, maxColumn: 80 },
       fontSize: 13,
-      fontFamily: '"Cascadia Code", Consolas, "Courier New", monospace',
+      fontFamily: '"Cascadia Code", Consolas, "SF Mono", Menlo, Monaco, "Courier New", monospace',
       wordWrap: 'on',
       scrollBeyondLastLine: false,
       automaticLayout: true,
@@ -81,14 +81,14 @@ function wireControls() {
     t.editable = !t.editable;
     editor.updateOptions({ readOnly: !t.editable });
     refreshEditButton(t);
-    if (t.editable) toast('Editing enabled — Ctrl+S saves to disk', 'ok');
+    if (t.editable) toast(osText('Editing enabled — Ctrl+S saves to disk'), 'ok');
     updateSaveButton();
   };
   $('#btn-save').onclick = save;
   $('#btn-view').onclick = toggleSvgView;
   $('#btn-reveal').onclick = () => { if (tabs.has(activePath)) vs.reveal(activePath); };
   document.addEventListener('keydown', (e) => {
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+    if (modKey(e) && e.key.toLowerCase() === 's') {
       e.preventDefault();
       const t = tabs.get(activePath);
       if (t && t.editable) save();
@@ -313,7 +313,7 @@ function showEmptyState() {
   const ph = $('#viewer-placeholder');
   ph.innerHTML = '';
   ph.appendChild(el('p', '', 'Open a file from the tree.'));
-  ph.appendChild(el('p', 'dim', 'Editing is off by default — hit Edit for a quick fix, Ctrl+S saves.'));
+  ph.appendChild(el('p', 'dim', osText('Editing is off by default — hit Edit for a quick fix, Ctrl+S saves.')));
   ph.classList.remove('hidden');
   $('#monaco-host').style.visibility = 'hidden';
   refreshEditButton(null);
