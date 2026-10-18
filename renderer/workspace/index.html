@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src app: 'unsafe-inline'; script-src app: blob: 'unsafe-eval'; worker-src blob:; img-src app: data: file:; style-src app: 'unsafe-inline'; font-src app: data:;" />
+  <meta http-equiv="Content-Security-Policy" content="default-src app: 'unsafe-inline'; script-src app: blob: 'unsafe-eval'; worker-src blob:; img-src app: data: file: vsfile:; media-src app: vsfile:; style-src app: 'unsafe-inline'; font-src app: data:;" />
   <title>Workspace</title>
   <link rel="stylesheet" href="app://local/vendor/@xterm/xterm/css/xterm.css" />
   <script src="theme-boot.js"></script>
@@ -67,6 +67,7 @@
             <div id="git-main"><div id="diff-editor"></div><div id="diff-empty"><p>No uncommitted changes.</p></div></div>
           </div>
           <div id="monaco-host"></div>
+          <div id="media-host" class="hidden"></div>
           <div id="viewer-placeholder">
             <p>Select a file from the tree to preview it.</p>
             <p class="dim">Editing is off by default — hit <b>Edit</b> for a quick fix, <b>Ctrl+S</b> saves.</p>

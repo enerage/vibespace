@@ -81,9 +81,11 @@ if (workspaceId) {
   app.setAppUserModelId('vibespace.app');
 }
 
-// Register the renderer protocol before ready
+// Register the renderer protocol before ready (+ vsfile: the image/video/audio
+// preview, main/mediaserve.cjs; `stream` lets videos seek)
 protocol.registerSchemesAsPrivileged([
   { scheme: 'app', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } },
+  { scheme: 'vsfile', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } },
 ]);
 
 // terminals and code panes don't need the GPU; software compositing is far more
@@ -364,7 +366,17 @@ function persistState(wsId) {
 }
 
 // ---------- protocol ----------
+const mediaserve = require('./mediaserve.cjs'); // vsfile: (also fs:read's media kinds)
+
 function initProtocol() {
+  // media preview: the renderer names its workspace; only a workspace with a
+  // window in THIS process is served (one workspace per process), never a
+  // renderer-given root
+  protocol.handle('vsfile', mediaserve.handler((wsId) => {
+    if (!wsId || !workspaceWindowsFor(wsId).length) return null;
+    const ws = workspaces.get(wsId);
+    return ws ? ws.repoPath : null;
+  }));
   const ROOT = U.ROOT;
   protocol.handle('app', async (request) => {
     const u = new URL(request.url);
@@ -909,6 +921,10 @@ function initIpc() {
   const MAX_BYTES = 2 * 1024 * 1024;
   ipcMain.handle('fs:read', (e, file) => {
     const st = fs.statSync(file);
+    // images/video/audio skip Monaco: the viewer shows them from vsfile:// (any
+    // size; mtime lets it reload a file that changed on disk)
+    const media = mediaserve.kindOf(file);
+    if (media) return { media, size: st.size, mtimeMs: st.mtimeMs };
     if (st.size > MAX_BYTES) return { tooLarge: true, size: st.size };
     if (BIN_EXT.has(path.extname(file).toLowerCase())) return { binary: true, size: st.size };
     const buf = fs.readFileSync(file);

@@ -665,6 +665,108 @@ async function runSmoke() {
     try { fs.rmSync(root, { recursive: true, force: true }); } catch {}
   }
 
+  // 16b. media preview: vsfile:// (main/mediaserve.cjs) on a temp repo — every
+  //      platform. The handler is driven directly (the registered one only
+  //      serves workspaces with a window in this process); net.fetch then
+  //      proves the scheme itself is registered.
+  {
+    const os = require('node:os');
+    const ms = require('./mediaserve.cjs');
+    const mu = await import(require('node:url').pathToFileURL(path.join(U.ROOT, 'renderer', 'workspace', 'ui', 'mediaurl.js')).href);
+    // mkdtemp path as-is (macOS: /var/… is a symlink to /private/var/…)
+    const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'vibespace-media-'));
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'vibespace-media-out-'));
+    try {
+      const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64');
+      const mp4 = Buffer.alloc(100);
+      for (let i = 0; i < mp4.length; i++) mp4[i] = i;
+      fs.mkdirSync(path.join(repo, 'ads', 'week 1'), { recursive: true });
+      const pngFile = path.join(repo, 'ads', 'week 1', 'logo #1.png'); // space + '#' must survive the URL
+      const mp4File = path.join(repo, 'ads', 'clip.mp4');
+      fs.writeFileSync(pngFile, png);
+      fs.writeFileSync(mp4File, mp4);
+      fs.writeFileSync(path.join(repo, 'notes.txt'), 'x');
+      fs.writeFileSync(path.join(outside, 'secret.png'), png);
+      const h = ms.handler((id) => (id === 'smoke-media' ? repo : null));
+      const get = (url, headers = {}) => h(new Request(url, { headers }));
+      const url = (f) => mu.mediaUrl('smoke-media', f, 1234);
+
+      const r1 = await get(url(pngFile));
+      const b1 = Buffer.from(await r1.arrayBuffer());
+      const r2 = await get(url(mp4File));
+      const b2 = Buffer.from(await r2.arrayBuffer());
+      check('media: full GET 200 with type, length, no-store (png + mp4)',
+        r1.status === 200 && r1.headers.get('content-type') === 'image/png' && b1.equals(png)
+        && r1.headers.get('content-length') === String(png.length) && r1.headers.get('cache-control') === 'no-store'
+        && r2.status === 200 && r2.headers.get('content-type') === 'video/mp4' && b2.equals(mp4) && r2.headers.get('accept-ranges') === 'bytes',
+        `${r1.status} ${r1.headers.get('content-type')} ${b1.length}B / ${r2.status} ${r2.headers.get('content-type')} ${b2.length}B`);
+
+      const r3 = await get(url(mp4File), { Range: 'bytes=0-9' });
+      const b3 = Buffer.from(await r3.arrayBuffer());
+      const r4 = await get(url(mp4File), { Range: 'bytes=90-' });
+      const b4 = Buffer.from(await r4.arrayBuffer());
+      const r5 = await get(url(mp4File), { Range: 'bytes=500-' });
+      check('media: Range → 206 + Content-Range + exact bytes; past the end → 416',
+        r3.status === 206 && r3.headers.get('content-range') === 'bytes 0-9/100' && r3.headers.get('content-length') === '10'
+        && b3.equals(mp4.subarray(0, 10)) && r4.status === 206 && b4.equals(mp4.subarray(90))
+        && r5.status === 416 && r5.headers.get('content-range') === 'bytes */100',
+        `${r3.status} ${r3.headers.get('content-range')} ${b3.length}B; ${r4.status} ${b4.length}B; ${r5.status}`);
+
+      const out = await get(url(path.join(outside, 'secret.png')));
+      const base = mu.mediaUrl('smoke-media', repo); // no ?v= — segments get appended
+      const dots = await get(base + '/../' + encodeURIComponent(path.basename(outside)) + '/secret.png');
+      const dots2 = await get(base + '/%2e%2e/' + encodeURIComponent(path.basename(outside)) + '/secret.png');
+      const smuggled = await get(base + '/..%2F' + encodeURIComponent(path.basename(outside)) + '%2Fsecret.png');
+      const txt = await get(url(path.join(repo, 'notes.txt')));
+      const otherWs = await h(new Request(mu.mediaUrl('not-this-process', pngFile)));
+      const missing = await get(url(path.join(repo, 'nope.png')));
+      check('media: outside the repo, .. traversal, non-media, foreign workspace, missing → rejected',
+        out.status === 403 && dots.status === 403 && dots2.status === 403 && smuggled.status === 404
+        && txt.status === 403 && otherWs.status === 404 && missing.status === 404,
+        JSON.stringify({ out: out.status, dots: dots.status, dots2: dots2.status, smuggled: smuggled.status, txt: txt.status, otherWs: otherWs.status, missing: missing.status }));
+
+      // a link inside the repo pointing out (junction on Windows: no admin needed)
+      let linkStatus = 'skipped';
+      try {
+        fs.symlinkSync(outside, path.join(repo, 'linked'), process.platform === 'win32' ? 'junction' : 'dir');
+        linkStatus = (await get(url(path.join(repo, 'linked', 'secret.png')))).status;
+      } catch (e) { linkStatus = 'skipped: ' + e.code; }
+      check('media: symlink/junction escape → 403 (realpath)', linkStatus === 403 || String(linkStatus).startsWith('skipped'), String(linkStatus));
+
+      // pure path/range logic, both platforms' path rules on any machine
+      const win = 'D:\\Users\\Ad Maker\\Kampagne #2\\b%20ild.png';
+      const mac = '/Users/ad maker/Desktop/über?.mp4';
+      const back = (u, p) => { const r = ms.parseUrl(u, p); return r && r.wsId === 'w-1' ? r.file : null; };
+      const rt = back(mu.mediaUrl('w-1', win, 5), path.win32) === win && back(mu.mediaUrl('w-1', win.replace(/\\/g, '/')), path.win32) === win
+        && back(mu.mediaUrl('w-1', mac, 5), path.posix) === mac;
+      const segRefused = [['C%3A', '..', 'x.png'], ['C%3A', 'a%5Cb.png'], ['C%3A', 'f.png%3Astream'], ['%5C%5Cserver', 'x.png'], ['C%3A', '%00.png']]
+        .every(s => ms.pathFromSegments(s, path.win32) === null) && ms.pathFromSegments(['Users', '..', 'x'], path.posix) === null
+        && ms.pathFromSegments(['%E0%A4%A'], path.posix) === null;
+      const pr = (hdr, size) => JSON.stringify(ms.parseRange(hdr, size));
+      const ranges = pr('bytes=0-9', 100) === '{"start":0,"end":9}' && pr('bytes=95-200', 100) === '{"start":95,"end":99}'
+        && pr('bytes=-10', 100) === '{"start":90,"end":99}' && pr('bytes=-500', 100) === '{"start":0,"end":99}'
+        && pr('bytes=100-', 100) === '"unsatisfiable"' && pr('bytes=-0', 100) === '"unsatisfiable"' && pr('bytes=0-', 0) === '"unsatisfiable"'
+        && pr(null, 100) === 'null' && pr('bytes=5-2', 100) === 'null' && pr('bytes=0-1,4-5', 100) === 'null' && pr('items=0-1', 100) === 'null';
+      const kinds = ms.kindOf('a.PNG') === 'image' && ms.kindOf('x.svg') === 'image' && ms.kindOf('c.mov') === 'video'
+        && ms.kindOf('s.m4a') === 'audio' && ms.kindOf('n.txt') === null && ms.kindOf('z.zip') === null;
+      check('media: URL round-trip (Windows + macOS paths), segment guards, Range parsing, kinds',
+        rt && segRefused && ranges && kinds, JSON.stringify({ rt, segRefused, ranges, kinds }));
+
+      // the real registration answers (no window of this ws here → 404, not a network error)
+      if (process.versions.electron) {
+        let st = null;
+        try { st = (await require('electron').net.fetch(mu.mediaUrl('smoke-none', pngFile))).status; } catch (e) { st = 'threw: ' + e.message; }
+        check('media: vsfile:// scheme registered (net.fetch reaches the handler)', st === 404, String(st));
+      }
+    } finally {
+      // drop the link itself first, never through it
+      const link = path.join(repo, 'linked');
+      try { fs.unlinkSync(link); } catch { try { fs.rmdirSync(link); } catch {} }
+      try { fs.rmSync(repo, { recursive: true, force: true }); } catch {}
+      try { fs.rmSync(outside, { recursive: true, force: true }); } catch {}
+    }
+  }
+
   // 17. gitdiff: CRLF normalization + end-to-end pairs on a temp git repo
   {
     const os = require('node:os');
