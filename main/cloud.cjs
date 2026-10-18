@@ -14,12 +14,14 @@
 //
 // Ready = the dir holds claude's credentials (.credentials.json, plain text on
 // Windows) or its .claude.json names an oauthAccount. An API key alone is not
-// a claude.ai login, so it doesn't count.
+// a claude.ai login, so it doesn't count. On macOS the credentials are a
+// Keychain item instead of the file (readiness below).
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const U = require('./util.cjs');
 const accounts = require('./accounts.cjs');
+const keychain = require('./keychain.cjs');
 
 const LOGIN = accounts.LOGIN;
 const ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
@@ -51,11 +53,25 @@ function readinessFrom({ credentials = false, claudeJson = null } = {}) {
   return { ready: Boolean(credentials || email || (oa && oa.accountUuid)), email };
 }
 
+// macOS: claude keeps the login in the Keychain, keyed to the config dir
+// (keychain.cjs claudeLoginService: sha256 of the exact CLAUDE_CONFIG_DIR
+// string). A cloud tab must therefore set CLAUDE_CONFIG_DIR to exactly
+// dirFor(id), or claude and this check name different items.
+function keychainServiceOf(id) {
+  const dir = dirFor(id);
+  return keychain.claudeLoginService(dir ? { ...process.env, CLAUDE_CONFIG_DIR: dir } : process.env);
+}
+
 function readiness(id) {
   let c;
   try { c = configOf(id); } catch { return { ready: false, email: null }; }
   let claudeJson = null;
   try { claudeJson = JSON.parse(fs.readFileSync(c.claudeJson, 'utf8')); } catch {}
+  if (process.platform === 'darwin') {
+    // asked on demand (not per tick): a short cache, so a fresh sign-in shows soon
+    const credentials = fs.existsSync(c.credentials) || keychain.exists(keychainServiceOf(id), null, { maxAgeMs: 5000 });
+    return readinessFrom({ credentials, claudeJson });
+  }
   return readinessFrom({ credentials: fs.existsSync(c.credentials), claudeJson });
 }
 
@@ -94,6 +110,6 @@ function isWebUrl(u) {
 }
 
 module.exports = {
-  dirFor, configOf, readiness, readinessFrom, state, prepare, eligible, isWebUrl,
+  dirFor, configOf, readiness, readinessFrom, state, prepare, eligible, isWebUrl, keychainServiceOf,
   _setRoot: (r) => { rootOverride = r; },
 };
