@@ -6,9 +6,24 @@ const fs = require('node:fs');
 
 // Resolve the real claude.exe so we never need shell:true (avoids arg-escaping issues)
 function claudeCommand() {
+  if (process.platform === 'darwin') return { cmd: darwinClaudePath(), shell: false };
   const local = path.join(os.homedir(), '.local', 'bin', 'claude.exe');
   if (fs.existsSync(local)) return { cmd: local, shell: false };
   return { cmd: 'claude', shell: false }; // CreateProcess resolves PATH for .exe
+}
+
+// macOS: the native installer's ~/.local/bin/claude (a symlink into
+// ~/.local/share/claude/versions/<v>), else the first claude on PATH (rebuilt
+// from the login shell at boot), else Homebrew's. No .exe/.cmd.
+function darwinClaudePath() {
+  const isExe = (p) => { try { fs.accessSync(p, fs.constants.X_OK); return fs.statSync(p).isFile(); } catch { return false; } };
+  const local = path.join(os.homedir(), '.local', 'bin', 'claude');
+  if (isExe(local)) return local;
+  for (const dir of String(process.env.PATH || '').split(path.delimiter)) {
+    if (dir && path.isAbsolute(dir) && isExe(path.join(dir, 'claude'))) return path.join(dir, 'claude');
+  }
+  for (const p of ['/opt/homebrew/bin/claude', '/usr/local/bin/claude']) if (isExe(p)) return p;
+  return 'claude'; // spawn reports ENOENT: the callers treat that as "no claude"
 }
 
 function spawnClaude(args, handlers) {

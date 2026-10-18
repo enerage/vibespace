@@ -187,7 +187,8 @@ function expandEnvVars(s) {
   return String(s).replace(/%([^%]+)%/g, (whole, name) => process.env[name] || whole);
 }
 
-function rebuildPath(inherited = process.env.PATH || '') {
+function rebuildPath(inherited = process.env.PATH || '', opts = {}) {
+  if (process.platform === 'darwin') return rebuildPathDarwin(inherited, opts);
   const machine = expandEnvVars(readRegistryPath('HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment'));
   const user = expandEnvVars(readRegistryPath('HKCU\\Environment'));
   const parts = [];
@@ -212,8 +213,62 @@ function rebuildPath(inherited = process.env.PATH || '') {
   return parts.join(';');
 }
 
+// macOS: an app started from Finder/the Dock inherits launchd's minimal PATH
+// (/usr/bin:/bin:/usr/sbin:/sbin), without ~/.local/bin (claude), Homebrew, nvm…
+// There is no registry: the truth is what the user's LOGIN shell builds
+// (/etc/zprofile path_helper, ~/.zprofile brew shellenv, ~/.zshrc). Ask it once,
+// with a timeout (a broken rc can hang), and merge it with the inherited PATH and
+// fixed fallbacks, so the result is never empty and always has /usr/bin.
+function darwinFallbackDirs() {
+  return [path.join(os.homedir(), '.local', 'bin'), '/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', '/bin', '/usr/sbin', '/sbin'];
+}
+
+// the user's login shell: $SHELL, else the passwd entry, else zsh (the default since 10.15)
+function darwinLoginShell() {
+  let sh = process.env.SHELL || '';
+  if (!sh) { try { sh = os.userInfo().shell || ''; } catch {} }
+  return sh && path.isAbsolute(sh) ? sh : '/bin/zsh';
+}
+
+function loginShellPath(shell, timeoutMs = 3000) {
+  const mark = `__VIBESPACE_PATH_${process.pid}_${Date.now()}__`;
+  try {
+    const r = require('node:child_process').spawnSync(shell, ['-ilc', `printf '%s' "${mark}\${PATH}${mark}"`], {
+      encoding: 'utf8',
+      timeout: timeoutMs,
+      killSignal: 'SIGKILL',
+      stdio: ['ignore', 'pipe', 'ignore'], // rc noise on stderr is ignored
+      // oh-my-zsh: no update prompt, no tmux autostart inside the probe
+      env: { ...process.env, DISABLE_AUTO_UPDATE: 'true', ZSH_TMUX_AUTOSTARTED: 'true', ZSH_TMUX_AUTOSTART: 'false' },
+    });
+    // the markers isolate PATH from anything the rc files print; a timeout
+    // still keeps whatever was read before the kill
+    const i = String(r.stdout || '').indexOf(mark);
+    const j = i < 0 ? -1 : r.stdout.indexOf(mark, i + mark.length);
+    return j < 0 ? '' : r.stdout.slice(i + mark.length, j);
+  } catch {
+    return '';
+  }
+}
+
+function rebuildPathDarwin(inherited = process.env.PATH || '', { shell = darwinLoginShell(), timeoutMs = 3000 } = {}) {
+  const fromShell = loginShellPath(shell, timeoutMs);
+  const parts = [];
+  const seen = new Set();
+  for (const p of [...fromShell.split(':'), ...String(inherited).split(':'), ...darwinFallbackDirs()]) {
+    const t = p.trim().replace(/(.)\/+$/, '$1');
+    // relative entries ('.', '') would resolve against whatever cwd a child gets
+    if (!t || !t.startsWith('/') || seen.has(t)) continue; // exact (case-sensitive) dedupe, like the shell
+    seen.add(t);
+    parts.push(t);
+  }
+  return parts.join(':');
+}
+
 module.exports = {
   rebuildPath,
+  darwinFallbackDirs,
+  darwinLoginShell,
   copyIn,
   ROOT,
   BIN_ROOT,
