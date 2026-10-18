@@ -1,7 +1,9 @@
 import { $, el, toast, debounce, confirmBox } from './common.js';
 import { monacoTheme, onThemeChange } from './themes.js';
+import { mediaUrl, fmtBytes, fmtDuration } from './mediaurl.js';
 
 const VS_URL = 'app://local/vendor/monaco-editor/min/vs/';
+const WS_ID = new URLSearchParams(location.search).get('id'); // vsfile:// URLs name the workspace
 
 export const LANGS = {
   ts: 'typescript', tsx: 'typescript', mts: 'typescript', cts: 'typescript',
@@ -18,7 +20,7 @@ export const LANGS = {
 
 let monaco = null;
 let editor = null;
-const tabs = new Map(); // path -> {name, kind, model?, saved?, editable, message?, el}
+const tabs = new Map(); // path -> {name, kind, model?, saved?, editable, message?, el, media?, size?, mtime?, mediaEl?}
 const viewStates = new Map(); // path -> editor view state
 let activePath = null;
 let onStateChange = () => {};
@@ -83,6 +85,7 @@ function wireControls() {
     updateSaveButton();
   };
   $('#btn-save').onclick = save;
+  $('#btn-view').onclick = toggleSvgView;
   $('#btn-reveal').onclick = () => { if (tabs.has(activePath)) vs.reveal(activePath); };
   document.addEventListener('keydown', (e) => {
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
@@ -125,7 +128,7 @@ function refreshEditButton(t) {
 
 function updateSaveButton() {
   const t = tabs.get(activePath);
-  const dirty = Boolean(t && t.editable && t.model && t.model.getValue() !== t.saved);
+  const dirty = Boolean(t && t.kind === 'text' && t.editable && t.model && t.model.getValue() !== t.saved); // an SVG in image view can't save
   $('#btn-save').disabled = !dirty;
 }
 
@@ -178,7 +181,14 @@ export async function open(path, name, { quiet = false } = {}) {
   }
 
   const t = { name, kind: 'text', editable: false, el: null };
-  if (res.tooLarge) {
+  if (res.media) {
+    // image / video / audio: never through Monaco (main serves it from vsfile://)
+    t.kind = 'media';
+    t.media = res.media;
+    t.size = res.size;
+    t.mtime = res.mtimeMs;
+    t.svg = res.media === 'image' && /\.svg$/i.test(path); // ⇄ Source (#btn-view)
+  } else if (res.tooLarge) {
     t.kind = 'toolarge';
     t.message = `File too large to preview (${(res.size / 1048576).toFixed(1)} MB).`;
   } else if (res.binary) {
@@ -233,7 +243,10 @@ function activate(path) {
   $('#viewer-name').textContent = t.name;
   $('#viewer-path').textContent = path;
 
-  if (t.kind === 'text' && t.model) {
+  if (t.kind === 'media') {
+    editor.setModel(null);
+    showMedia(path, t);
+  } else if (t.kind === 'text' && t.model) {
     hidePlaceholder();
     editor.setModel(t.model);
     const vs_ = viewStates.get(path);
@@ -244,8 +257,49 @@ function activate(path) {
     showPlaceholder(t.message || 'Binary file — nothing to preview.');
   }
   refreshEditButton(t);
+  refreshViewButton(t);
   updateSaveButton();
   onStateChange();
+}
+
+function refreshViewButton(t) {
+  const b = $('#btn-view');
+  b.classList.toggle('hidden', !(t && t.svg));
+  if (t && t.svg) b.textContent = t.kind === 'media' ? 'Source' : 'Image';
+}
+
+// SVG tabs flip between the image preview and Monaco (same tab). The model
+// survives the flip, so unsaved edits are kept (tab dot, close confirm) and the
+// image always shows the file on disk: a save, then Image, shows the new art.
+async function toggleSvgView() {
+  const path = activePath;
+  const t = tabs.get(path);
+  if (!t || !t.svg) return;
+  let res = null;
+  try { res = await vs.fsRead(path); } catch (e) { toast('Cannot read file: ' + (e.message || e), 'err'); return; }
+  if (tabs.get(path) !== t || activePath !== path) return; // closed / switched meanwhile
+  if (t.kind === 'media') {
+    const text = typeof res.content === 'string' ? res.content : null;
+    if (!t.model) {
+      if (text === null) { toast('This SVG is too large to open as text.', 'err'); return; }
+      t.model = monaco.editor.createModel(text, 'xml', monaco.Uri.parse('file:///' + path.replace(/\\/g, '/').replace(/^\/+/, ''))); // same URI as open()
+      t.saved = text;
+    } else if (text !== null && text !== t.saved && t.model.getValue() === t.saved) {
+      t.model.setValue(text); // clean model, newer file on disk
+      t.saved = text;
+    }
+    t.kind = 'text';
+  } else {
+    viewStates.set(path, editor.saveViewState()); // activate() restores it on the way back
+    if (res.media && (res.mtimeMs !== t.mtime || res.size !== t.size)) {
+      t.mtime = res.mtimeMs;
+      t.size = res.size;
+      releaseMedia(t); // saved from Monaco → new URL, fresh image
+    }
+    t.kind = 'media';
+  }
+  activate(path);
+  renderTabs();
 }
 
 function showEmptyState() {
@@ -254,6 +308,8 @@ function showEmptyState() {
   $('#viewer-name').textContent = 'pick a file to preview';
   $('#viewer-path').textContent = '';
   editor.setModel(null);
+  hideMedia();
+  refreshViewButton(null);
   const ph = $('#viewer-placeholder');
   ph.innerHTML = '';
   ph.appendChild(el('p', '', 'Open a file from the tree.'));
@@ -280,6 +336,7 @@ export function closeTab(path, { force } = {}) {
   tabs.delete(path);
   viewStates.delete(path);
   if (t.model) t.model.dispose();
+  if (t.kind === 'media') releaseMedia(t);
   t.el = null;
   if (wasActive) {
     const next = order[idx + 1] || order[idx - 1]; // successor after the closed slot, else predecessor
@@ -304,6 +361,10 @@ export function renameTab(oldPath, newPath) {
     $('#viewer-name').textContent = t.name;
     $('#viewer-path').textContent = newPath;
   }
+  if (t.kind === 'media') { // the vsfile:// URL is built from the path
+    releaseMedia(t);
+    if (activePath === newPath && !pinnedOn) showMedia(newPath, t);
+  }
   renderTabs();
   onStateChange();
 }
@@ -311,6 +372,26 @@ export function renameTab(oldPath, newPath) {
 // tree watcher fired — refresh open files from disk (never clobber unsaved edits)
 export const onFilesChanged = debounce(async () => {
   for (const [path, t] of [...tabs]) {
+    if (t.kind === 'media') {
+      // stat only (fs:read returns no bytes for media, just an SVG's text); a new mtime/size = new URL
+      try {
+        const res = await vs.fsRead(path);
+        // an SVG flipped back from Source keeps its model: refresh it when clean
+        if (t.model && typeof res.content === 'string' && res.content !== t.saved && t.model.getValue() === t.saved) {
+          t.model.setValue(res.content);
+          t.saved = res.content;
+        }
+        if (res.media && (res.mtimeMs !== t.mtime || res.size !== t.size)) {
+          t.mtime = res.mtimeMs;
+          t.size = res.size;
+          releaseMedia(t);
+          if (path === activePath && !pinnedOn) showMedia(path, t);
+        }
+      } catch {
+        closeTab(path, { force: true }); // file vanished from disk — close silently
+      }
+      continue;
+    }
     if (!t.model || t.model.getValue() !== t.saved) continue;
     try {
       const res = await vs.fsRead(path);
@@ -343,6 +424,7 @@ export async function restore(files, active) {
 }
 
 function showPlaceholder(msg) {
+  hideMedia();
   const ph = $('#viewer-placeholder');
   ph.innerHTML = '';
   ph.appendChild(el('p', '', msg));
@@ -351,8 +433,91 @@ function showPlaceholder(msg) {
 }
 
 function hidePlaceholder() {
+  hideMedia();
   $('#viewer-placeholder').classList.add('hidden');
   $('#monaco-host').style.visibility = 'visible';
+}
+
+// ---- media tabs (images / video / audio) ----
+// #media-host replaces #monaco-host (display:none — a hidden flex child would
+// still claim half the pane). Each tab keeps its element while open, so
+// switching tabs keeps a video's position; detaching it pauses playback.
+
+function showMedia(path, t) {
+  $('#viewer-placeholder').classList.add('hidden');
+  $('#monaco-host').style.display = 'none';
+  const host = $('#media-host');
+  if (!t.mediaEl) t.mediaEl = buildMedia(path, t);
+  if (host.firstChild !== t.mediaEl) {
+    host.querySelectorAll('video, audio').forEach((m) => m.pause());
+    host.replaceChildren(t.mediaEl);
+  }
+  host.classList.remove('hidden');
+}
+
+function hideMedia() {
+  const host = $('#media-host');
+  if (host.classList.contains('hidden')) return;
+  host.querySelectorAll('video, audio').forEach((m) => m.pause());
+  host.replaceChildren();
+  host.classList.add('hidden');
+  $('#monaco-host').style.display = '';
+}
+
+// drop the element (closed, renamed or changed on disk); a video releases its decoder
+function releaseMedia(t) {
+  const m = t.mediaEl && t.mediaEl.querySelector('video, audio');
+  if (m) { m.pause(); m.removeAttribute('src'); m.load(); }
+  if (t.mediaRO) t.mediaRO.disconnect();
+  if (t.mediaEl) t.mediaEl.remove();
+  t.mediaEl = null;
+  t.mediaRO = null;
+}
+
+function buildMedia(path, t) {
+  const wrap = el('div', 'media-wrap');
+  const stage = el('div', 'media-stage');
+  const cap = el('div', 'media-caption');
+  const info = (parts) => { cap.textContent = parts.filter(Boolean).join('  ·  '); };
+  const fail = (what) => cap.replaceChildren(el('span', 'err', `Can't show this ${what} here.`));
+  const src = mediaUrl(WS_ID, path, t.mtime); // mtime in the URL: a changed file is a new URL
+  if (t.media === 'image') {
+    // fitted + centered on a checkerboard; click toggles fit / 100 %
+    stage.classList.add('fit');
+    const img = el('img');
+    img.alt = t.name;
+    img.draggable = false;
+    const caption = () => {
+      if (!img.naturalWidth || !img.isConnected || !img.clientWidth) return; // detached: no size to report
+      const fit = stage.classList.contains('fit');
+      const scale = fit ? Math.min(1, img.clientWidth / img.naturalWidth) : 1;
+      img.classList.toggle('fit-full', fit && scale >= 1);
+      const mode = !fit ? '100 % — click to fit' : scale >= 1 ? '100 %' : `fit ${Math.round(scale * 100)} % — click for 100 %`;
+      info([`${img.naturalWidth} × ${img.naturalHeight} px`, fmtBytes(t.size), mode]);
+    };
+    img.onload = caption;
+    img.onerror = () => fail('image');
+    img.onclick = () => { stage.classList.toggle('fit'); caption(); };
+    t.mediaRO = new ResizeObserver(caption);
+    t.mediaRO.observe(stage);
+    img.src = src;
+    stage.appendChild(img);
+  } else {
+    // native controls, no autoplay; the server answers Range requests (seeking)
+    const m = el(t.media === 'video' ? 'video' : 'audio');
+    m.controls = true;
+    m.preload = 'metadata';
+    m.onloadedmetadata = () => info([
+      t.media === 'video' && m.videoWidth ? `${m.videoWidth} × ${m.videoHeight}` : '',
+      fmtDuration(m.duration), fmtBytes(t.size),
+    ]);
+    m.onerror = () => fail(t.media);
+    m.src = src;
+    stage.appendChild(m);
+  }
+  info([fmtBytes(t.size)]);
+  wrap.append(stage, cap);
+  return wrap;
 }
 
 // ---- pinned pseudo-tab (git diff "Changes" pane) ----
@@ -393,6 +558,7 @@ function togglePinned(force) {
   if (on) {
     // the diff pane owns the viewer area. display:none, not just visibility —
     // a visibility-hidden flex child still claims half the pane.
+    hideMedia(); // before display:none — it resets #monaco-host's display
     $('#monaco-host').style.display = 'none';
     $('#monaco-host').style.visibility = 'hidden';
     $('#viewer-placeholder').classList.add('hidden');
@@ -406,7 +572,9 @@ function togglePinned(force) {
 function restoreViewerVisibility() {
   const t = activePath ? tabs.get(activePath) : null;
   $('#monaco-host').style.display = '';
-  if (t && t.kind === 'text' && t.model) {
+  if (t && t.kind === 'media') {
+    showMedia(activePath, t);
+  } else if (t && t.kind === 'text' && t.model) {
     $('#viewer-placeholder').classList.add('hidden');
     $('#monaco-host').style.visibility = 'visible';
   } else if (t) {
