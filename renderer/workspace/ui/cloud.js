@@ -1,4 +1,4 @@
-import { el } from './common.js';
+import { el, modKey } from './common.js';
 import { agoShort } from './parked.js';
 import { CLOUD_ID, shortTask } from './shellcmd.js';
 
@@ -177,7 +177,7 @@ export function openSendDialog({ accounts = [], selected = null, git = null, set
     // capture + stop: Esc / Ctrl+Enter must not reach xterm or the app shortcuts
     const onKey = (e) => {
       if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); finish(null); }
-      else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); e.stopPropagation(); submit(); }
+      else if (e.key === 'Enter' && modKey(e)) { e.preventDefault(); e.stopPropagation(); submit(); }
     };
     window.addEventListener('keydown', onKey, true);
     no.onclick = () => finish(null);

@@ -119,7 +119,7 @@
       <div class="prefs-row prefs-col">
         <div>
           <div class="prefs-label">Worktree setup command</div>
-          <div class="prefs-hint">PowerShell, runs in the new worktree before claude starts (+ ▾ → New agent in a worktree), visible in its tab. If it fails, claude starts anyway. Empty = none.</div>
+          <div id="wt-setup-hint" class="prefs-hint">PowerShell, runs in the new worktree before claude starts (+ ▾ → New agent in a worktree), visible in its tab. If it fails, claude starts anyway. Empty = none.</div>
         </div>
         <input id="wt-setup" class="prefs-input" type="text" placeholder="e.g. npm ci; Copy-Item ..\..\..\.secrets.json ." autocomplete="off" spellcheck="false" />
       </div>
@@ -237,7 +237,7 @@
       <div id="acct-ep-note" class="acct-note hidden"></div>
 
       <div class="prefs-label" style="margin-top: 14px;">Notifications</div>
-      <div class="prefs-hint">Windows pop-ups — one choice for all workspaces. Tab lights and the taskbar badge always show every state.</div>
+      <div id="notify-hint" class="prefs-hint">Windows pop-ups — one choice for all workspaces. Tab lights and the taskbar badge always show every state.</div>
       <div class="prefs-row">
         <div>
           <div class="prefs-label">An agent needs your answer</div>

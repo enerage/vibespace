@@ -1,4 +1,4 @@
-import { $, el, cardOnHover, hideCard } from './common.js';
+import { $, el, cardOnHover, hideCard, modKey, osText } from './common.js';
 import { fmtElapsed, fmtAgo, taskItems, cacheChip, compactSoon, wtText, bgTasks, bgText, bgOnlyShells } from './feedui.js';
 import * as terms from './terms.js';
 import { cardFor as parkedCard, metaText as parkedMeta } from './parked.js';
@@ -346,7 +346,7 @@ export function init(opts) {
   const head = el('div', 'board-head');
   head.append(el('span', 'board-title', 'Agents'), el('span', 'board-hint', 'click a card to open its tab · Esc closes'));
   const x = el('button', 'btn small ghost', '✕');
-  x.title = 'Close the board (Ctrl+Shift+B)';
+  x.title = osText('Close the board (Ctrl+Shift+B)');
   x.onclick = close;
   head.append(el('span', 'spacer'), x);
   colsEl = el('div', 'board-cols');
@@ -369,7 +369,7 @@ export function init(opts) {
   $('#btn-board').onclick = toggle;
   document.addEventListener('keydown', (e) => {
     // capture + stopPropagation: xterm must not also see Ctrl+B (tmux-style prefix)
-    if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'b') { e.preventDefault(); e.stopPropagation(); toggle(); }
+    if (modKey(e) && e.shiftKey && e.key.toLowerCase() === 'b') { e.preventDefault(); e.stopPropagation(); toggle(); }
   }, true);
   terms.onAgentsChanged(schedule);
   vs.onBoardChanged(() => { if (open) pullOthers(); });

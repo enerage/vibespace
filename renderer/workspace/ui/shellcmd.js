@@ -1,5 +1,10 @@
 // Text that terms.js types into a tab's PowerShell, or reads back from it.
 // Pure, no imports, so node can test it (smoke imports this file directly).
+// On a Mac the tab's shell is zsh (or bash): the builders that type a command
+// take a `platform` ('darwin' = the POSIX twins at the end of this file),
+// which defaults to the window's (vs.platform), or node's when smoke runs it.
+const HOST_PLATFORM = (globalThis.vs && globalThis.vs.platform)
+  || (typeof process !== 'undefined' && process.platform) || 'win32';
 
 // A PowerShell single-quoted literal. Inside one only quote characters are
 // special, and PowerShell counts the typographic ones (‘ ’ ‚ ‛) as quotes too:
@@ -23,7 +28,8 @@ export function setupLines(setup) {
 // claude starts even when the setup fails (the agent can fix it), after a
 // one-line warning. Failed = a native exit code, a new $Error entry
 // (non-terminating errors) or a terminating error (catch).
-export function setupPrefix(setup) {
+export function setupPrefix(setup, platform = HOST_PLATFORM) {
+  if (platform === 'darwin') return setupPrefixSh(setup);
   const lines = setupLines(setup);
   if (!lines.length) return '';
   const src = lines.length === 1 ? psQuote(lines[0]) : `((${lines.map(psQuote).join(', ')}) -join [char]10)`;
@@ -98,7 +104,9 @@ const CLAUDE_EXE = '(@(Get-Command claude.exe, claude -CommandType Application -
 // quotes, so a task with a `"` in it would arrive split or stripped. The
 // child inherits the console like `& exe` does. No -EncodedCommand (Defender,
 // CLAUDE.md). exe: a fixed path instead of the lookup (smoke only).
-export function realClaudeLine(args = [], { configDir = null, exe = null } = {}) {
+// platform 'darwin': realClaudeLineSh.
+export function realClaudeLine(args = [], { configDir = null, exe = null, platform = HOST_PLATFORM } = {}) {
+  if (platform === 'darwin') return realClaudeLineSh(args, { configDir, exe });
   const clear = CLOUD_CLEAR_ENV.map(psQuote).join(', ');
   return `$vsX = ${exe ? psQuote(exe) : CLAUDE_EXE}; `
     + "if (-not $vsX) { Write-Host 'VibeSpace: claude.exe was not found on PATH' -ForegroundColor Red } else { "
@@ -119,7 +127,8 @@ export function cloudTask(task) {
   return t.startsWith('-') ? 'Task: ' + t : t;
 }
 
-// claude --cloud "<task>" in the repo (cloud clones its GitHub remote)
+// claude --cloud "<task>" in the repo (cloud clones its GitHub remote).
+// opts = realClaudeLine's { configDir, exe, platform }, here and below.
 export function cloudSendLine(task, opts = {}) {
   return realClaudeLine(['--cloud', cloudTask(task)], opts);
 }
@@ -166,4 +175,57 @@ export function shortTask(task, max = 28) {
   const cut = flat.slice(0, max - 1);
   const sp = cut.lastIndexOf(' ');
   return (sp >= max / 2 ? cut.slice(0, sp) : cut).trimEnd() + '…';
+}
+
+// ---------- POSIX shells (macOS: zsh, or bash) ----------
+// The twins of the PowerShell builders above, for the text typed into a Mac
+// tab. It is typed at an interactive prompt, where a line break would submit
+// the line, a tab would complete and an escape character would be a key
+// binding: none of them is ever typed literally.
+
+// A POSIX single-quoted word. Nothing inside one is special, in zsh and bash
+// alike: no $, backticks or backslashes, and no `!` history expansion (both
+// shells skip it inside single quotes). The quote itself closes the word, adds
+// an escaped quote and reopens it: ' → '\''
+export function shQuote(s) {
+  return "'" + String(s).replace(/'/g, "'\\''") + "'";
+}
+
+// One shell word for any string that is safe to TYPE (the psString twin):
+// line breaks and tabs go in as $'\n' / $'\t' (ANSI-C quoting, zsh and bash)
+// right next to the quoted parts, so the shell joins them into one word;
+// other control characters are dropped; CRLF becomes LF.
+export function shString(s) {
+  const t = String(s ?? '').replace(/\r\n?/g, '\n').replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/g, '');
+  const parts = t.split(/([\n\t])/).filter(p => p !== '')
+    .map(p => (p === '\n' ? "$'\\n'" : p === '\t' ? "$'\\t'" : shQuote(p)));
+  return parts.length ? parts.join('') : "''";
+}
+
+// setupPrefix on a Mac: the setup runs through `eval` in a subshell, so a `#`
+// comments out only the rest of ITS line, quotes or a syntax error in it can't
+// break our line, and a `cd` or `exit` in it can't move or end the tab's shell
+// (claude starts in the worktree either way). claude starts even when the
+// setup fails, after the same one-line warning in yellow. Failed = eval's exit
+// status, i.e. the setup's last command (or its syntax) failed.
+export function setupPrefixSh(setup) {
+  const lines = setupLines(setup);
+  if (!lines.length) return '';
+  return `( eval ${shString(lines.join('\n'))} ) || printf '\\033[33m%s\\033[0m\\n' `
+    + `${shQuote('VibeSpace: the worktree setup command failed; starting claude anyway')}; `;
+}
+
+// realClaudeLine on a Mac. `env` runs claude straight from PATH (execvp), so
+// the tab's `claude` shell function (our --settings / --remote-control /
+// account wrapper) is never involved, and `command` keeps a user's own `env`
+// alias or function out of it as well. CLOUD_CLEAR_ENV is unset and
+// CLAUDE_CONFIG_DIR set (configDir null = left as it is) for claude ONLY: the
+// tab's shell keeps its environment, so there is nothing to restore. Each
+// argument is one shell word (shString): quotes, $, !, backticks, spaces and
+// line breaks arrive unchanged. exe: a fixed path instead of `claude` (smoke).
+export function realClaudeLineSh(args = [], { configDir = null, exe = null } = {}) {
+  return 'command env ' + CLOUD_CLEAR_ENV.map(k => `-u ${k}`).join(' ')
+    + (configDir ? ` CLAUDE_CONFIG_DIR=${shString(configDir)}` : '')
+    + ' ' + (exe ? shString(exe) : 'claude')
+    + args.map(a => ' ' + shString(a)).join('');
 }

@@ -1,7 +1,7 @@
 'use strict';
 // In-page confirm shared with the workspace windows: native confirm() leaves a
 // Windows Electron window without real focus afterwards (CLAUDE.md).
-import { confirmBox } from '../workspace/ui/common.js';
+import { confirmBox, isMac } from '../workspace/ui/common.js';
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -74,12 +74,12 @@ async function refresh() {
     const logo = document.createElement('button');
     logo.className = 'btn small ghost';
     logo.textContent = 'Logo…';
-    logo.title = 'Change this workspace\'s logo (taskbar + window icon)';
+    logo.title = isMac() ? 'Change this workspace\'s logo (Dock + window icon)' : 'Change this workspace\'s logo (taskbar + window icon)';
     logo.onclick = async () => {
       const p = await vs.pickLogo();
       if (!p) return;
       await vs.updateLogo(ws.id, p);
-      toast(`Logo updated for "${ws.name}" — re-pin the shortcut to refresh its icon`, 'ok');
+      toast(isMac() ? `Logo updated for "${ws.name}"` : `Logo updated for "${ws.name}" — re-pin the shortcut to refresh its icon`, 'ok');
       refresh();
     };
 
@@ -97,7 +97,9 @@ async function refresh() {
       refresh();
     };
 
-    actions.append(open, pin, logo, reveal, del);
+    // Mac: no taskbar pin / Start Menu shortcut (a per-repo Dock icon comes later)
+    if (isMac()) actions.append(open, logo, reveal, del);
+    else actions.append(open, pin, logo, reveal, del);
     card.append(head, actions);
     grid.appendChild(card);
   }
@@ -167,7 +169,7 @@ function wireForm() {
     btn.textContent = 'Creating…';
     try {
       const ws = await vs.createWorkspace({ name, repoPath, logoPath });
-      toast(`Workspace "${ws.name}" created — now pin it to the taskbar`, 'ok');
+      toast(isMac() ? `Workspace "${ws.name}" created` : `Workspace "${ws.name}" created — now pin it to the taskbar`, 'ok');
       panel.classList.add('hidden');
       $('#f-name').value = $('#f-path').value = $('#f-logo').value = '';
       logoPath = null;
@@ -182,10 +184,25 @@ function wireForm() {
   };
 }
 
+// Mac wording for the static page: Dock instead of taskbar, a POSIX path
+// example, and no folder right-click entry (Windows registry; phase 2 on a Mac)
+function macLabels() {
+  const walk = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+    if (n.nodeValue.includes('taskbar')) n.nodeValue = n.nodeValue.replace(/taskbar/g, 'Dock');
+  }
+  $('#empty .dim').textContent = "Create one with your project's logo, and every launch opens that repo with its agent terminals restored.";
+  $('#f-path').placeholder = '~/Code/MyProject';
+  $('#btn-explorer').classList.add('hidden');
+}
+
 async function main() {
   wireForm();
-  wireExplorerButton();
-  refreshExplorerButton();
+  if (isMac()) macLabels();
+  else {
+    wireExplorerButton();
+    refreshExplorerButton();
+  }
   $('#btn-logs').onclick = () => vs.openLogs();
   refresh();
   const ver = await vs.claudeVersion();
