@@ -14,17 +14,23 @@
     "smoke": "electron . --smoke",
     "rebuild": "electron-rebuild -f -w node-pty",
     "dist": "electron-builder --win nsis",
-    "dist:dir": "electron-builder --win --dir"
+    "dist:dir": "electron-builder --win --dir",
+    "dist:mac": "electron-builder --mac dmg zip",
+    "dist:mac:dir": "electron-builder --mac --dir",
+    "make:icns": "node scripts/make-icns.cjs",
+    "postinstall": "node scripts/postinstall.cjs"
   },
   "build": {
     "appId": "app.vibespace",
     "productName": "VibeSpace",
     "npmRebuild": false,
+    "afterPack": "./build/afterPack.cjs",
     "files": [
       "main/**/*",
       "preload/**/*",
       "renderer/**/*",
       "assets/**/*",
+      "!assets/app.icns",
       "package.json"
     ],
     "asarUnpack": [
@@ -35,6 +41,20 @@
     "win": {
       "target": ["nsis"],
       "icon": "assets/app.ico"
+    },
+    "mac": {
+      "target": ["dmg", "zip"],
+      "icon": "assets/app.icns",
+      "category": "public.app-category.developer-tools",
+      "minimumSystemVersion": "13.0",
+      "identity": "-",
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false,
+      "extendInfo": {
+        "NSDocumentsFolderUsageDescription": "VibeSpace opens the repositories you keep in your Documents folder: file tree, git and agent terminals.",
+        "NSDesktopFolderUsageDescription": "VibeSpace opens the repositories you keep on your Desktop: file tree, git and agent terminals.",
+        "NSDownloadsFolderUsageDescription": "VibeSpace opens the repositories you keep in your Downloads folder: file tree, git and agent terminals."
+      }
     },
     "nsis": {
       "oneClick": false,

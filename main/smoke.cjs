@@ -166,19 +166,29 @@ async function ptyRecreateTest() {
   }
 }
 
-async function runSmoke() {
+// hooks (from index.cjs): openWorkspaceWindow(ws) opens a real workspace window
+// (screenshot mode) and restorePtyData() re-wires pty output to windows; both
+// used by the macOS window test
+async function runSmoke(hooks = {}) {
   U.ensureDir(U.dataRoot());
   U.ensureDir(path.join(U.dataRoot(), 'icons'));
 
-  // 1. munge
+  // 1. munge (pure: both platforms' paths everywhere)
   const munged = U.mungeClaudeDir('D:\\Repositories\\PlacementFlow');
   check('claude dir munge', munged === 'D--Repositories-PlacementFlow', munged);
+  const mungedMac = U.mungeClaudeDir('/Users/x/Repo');
+  check('claude dir munge (macOS path)', mungedMac === '-Users-x-Repo', mungedMac);
 
-  // 2. real session store discovery (read-only, against the live ~/.claude)
-  const dir = U.resolveClaudeProjectDir('D:\\Repositories\\PlacementFlow');
-  const jsonl = dir ? fs.readdirSync(dir).filter(f => f.endsWith('.jsonl')).length : 0;
-  check('placementflow session dir found', Boolean(dir), dir || 'not found');
-  check('placementflow has sessions', jsonl > 0, `${jsonl} sessions`);
+  // 2. real session store discovery (read-only, against the live ~/.claude).
+  // Windows dev PC only: it needs Valentin's PlacementFlow transcripts.
+  const dir = process.platform === 'win32' ? U.resolveClaudeProjectDir('D:\\Repositories\\PlacementFlow') : null;
+  if (process.platform === 'win32') {
+    const jsonl = dir ? fs.readdirSync(dir).filter(f => f.endsWith('.jsonl')).length : 0;
+    check('placementflow session dir found', Boolean(dir), dir || 'not found');
+    check('placementflow has sessions', jsonl > 0, `${jsonl} sessions`);
+  } else {
+    check('placementflow session store (real ~/.claude)', true, 'skipped — Windows dev PC only');
+  }
 
   // 3. ico build (default + from generated png)
   const sharp = require('sharp');
@@ -191,18 +201,20 @@ async function runSmoke() {
   check('ico build', headerOk && buf.length > 1000, `${buf.length} bytes, count=${buf.readUInt16LE(4)}`);
 
   // 4. registry CRUD
-  const ws = await workspaces.create({ name: 'Smoke Repo', repoPath: 'D:\\Repositories', logoPath: tmpPng });
+  const smokeRepoPath = process.platform === 'win32' ? 'D:\\Repositories' : require('node:os').tmpdir();
+  const ws = await workspaces.create({ name: 'Smoke Repo', repoPath: smokeRepoPath, logoPath: tmpPng });
   check('workspace create', Boolean(workspaces.get(ws.id)) && ws.iconPath && fs.existsSync(ws.iconPath), ws.id);
   {
     // a logo change must land at a NEW icon path (Windows caches taskbar icons by
-    // path); the first icon stays, older versioned ones are pruned
+    // path); the first icon stays, older versioned ones are pruned. Same scheme
+    // on macOS with .png (workspaces.ICON_EXT)
     const first = ws.iconPath;
     const a = await workspaces.updateLogo(ws.id, tmpPng, 1_000_000);
     const pathA = a.iconPath;
     const b = await workspaces.updateLogo(ws.id, tmpPng, 2_000_000);
     const pathB = b.iconPath;
     const c = await workspaces.updateLogo(ws.id, tmpPng, 3_000_000);
-    const versioned = (p) => path.basename(p).startsWith(ws.id + '.v') && p.endsWith('.ico');
+    const versioned = (p) => path.basename(p).startsWith(ws.id + '.v') && p.endsWith(workspaces.ICON_EXT);
     check('logo change gets a new icon path each time; old versions pruned',
       pathA !== first && pathB !== pathA && c.iconPath !== pathB && versioned(pathA) && versioned(c.iconPath)
       && fs.existsSync(c.iconPath) && fs.existsSync(pathB) && !fs.existsSync(pathA) && fs.existsSync(first)
@@ -227,7 +239,10 @@ async function runSmoke() {
   // 6. fresh-repo session tracking: dir appears only AFTER claude's first message
   {
     const sessions = require('./sessions.cjs');
-    const BS = String.fromCharCode(92); const fakeRepo = 'D:' + BS + 'Repositories' + BS + 'vibespace-smoke-fresh-' + U.randId(6);
+    // fake repo path (never created): a drive path on Windows, a home path on macOS
+    const BS = String.fromCharCode(92);
+    const fakeRoot = process.platform === 'win32' ? 'D:' + BS + 'Repositories' : path.join(require('node:os').homedir(), 'Repositories');
+    const fakeRepo = path.join(fakeRoot, 'vibespace-smoke-fresh-' + U.randId(6));
     sessions.start('smoke-fresh', fakeRepo); // no dir exists yet
     sessions.trackClaudeStart('smoke-fresh', 't1');
     const mungedDir = path.join(U.claudeProjectsDir(), U.mungeClaudeDir(fakeRepo));
@@ -892,7 +907,7 @@ async function runSmoke() {
   }
 
   // 19. junk "Electron.lnk" cleanup (pinned-before-shortcut taskbar bug)
-  {
+  if (process.platform === 'win32') {
     const { shell } = require('electron');
     const shortcutsMod = require('./shortcuts.cjs');
     const realAppData = process.env.APPDATA;
@@ -1132,8 +1147,10 @@ async function runSmoke() {
 
     // C — exact session pin from the feed (only once the transcript exists; the
     // timing heuristic never overrides it afterwards)
+    // fake repo paths (never created): a drive path on Windows, a home path on macOS
     const BS = String.fromCharCode(92);
-    const repo = 'D:' + BS + 'Repositories' + BS + 'vibespace-smoke-feedsess-' + U.randId(6);
+    const fakeRoot = process.platform === 'win32' ? 'D:' + BS + 'Repositories' : path.join(require('node:os').homedir(), 'Repositories');
+    const repo = path.join(fakeRoot, 'vibespace-smoke-feedsess-' + U.randId(6));
     const dir = path.join(U.claudeProjectsDir(), U.mungeClaudeDir(repo));
     fs.mkdirSync(dir, { recursive: true });
     sessions.start('smoke-fs', repo);
@@ -1162,7 +1179,7 @@ async function runSmoke() {
     // file doesn't exist yet, pins each tab once its file appears (a claude that
     // dies with no later tick keeps its conversation).
     {
-      const r1 = 'D:' + BS + 'Repositories' + BS + 'vibespace-smoke-feedlaunch-' + U.randId(6);
+      const r1 = path.join(fakeRoot, 'vibespace-smoke-feedlaunch-' + U.randId(6));
       const d1 = path.join(U.claudeProjectsDir(), U.mungeClaudeDir(r1));
       fs.mkdirSync(d1, { recursive: true });
       const fA = 'a1a1a1a1-0000-4000-8000-000000000011';
@@ -1188,7 +1205,7 @@ async function runSmoke() {
 
       // C1b — a claude WITHOUT the feed still gets the timing guess, which never
       // takes an id the feed named for another tab; a feed pin then wins over it
-      const r2 = 'D:' + BS + 'Repositories' + BS + 'vibespace-smoke-nofeed-' + U.randId(6);
+      const r2 = path.join(fakeRoot, 'vibespace-smoke-nofeed-' + U.randId(6));
       const d2 = path.join(U.claudeProjectsDir(), U.mungeClaudeDir(r2));
       fs.mkdirSync(d2, { recursive: true });
       const nE = 'e5e5e5e5-0000-4000-8000-000000000015';
@@ -1217,7 +1234,7 @@ async function runSmoke() {
     // it with the tab's cwd; the timing heuristic never hands an offRepo term a
     // repo-dir file.
     {
-      const wtCwd = repo + BS + '.claude' + BS + 'worktrees' + BS + 'agent-1';
+      const wtCwd = path.join(repo, '.claude', 'worktrees', 'agent-1');
       const repoDir = path.join(U.claudeProjectsDir(), U.mungeClaudeDir(repo));
       const wtDir = path.join(U.claudeProjectsDir(), U.mungeClaudeDir(wtCwd));
       fs.mkdirSync(repoDir, { recursive: true });
@@ -1250,7 +1267,7 @@ async function runSmoke() {
     // D — background agents: only kind=background under the repo, newest first
     const bg = require('./bgagents.cjs');
     const list = [
-      { id: '6ce06036', kind: 'background', cwd: repo + BS + 'sub', startedAt: 2, name: 'fix it', status: 'busy', state: 'working' },
+      { id: '6ce06036', kind: 'background', cwd: path.join(repo, 'sub'), startedAt: 2, name: 'fix it', status: 'busy', state: 'working' },
       { id: 'aa11bb22', kind: 'background', cwd: repo, startedAt: 3, name: 'newer', status: 'idle', state: 'done' },
       { sessionId: 'x', kind: 'interactive', cwd: repo, startedAt: 4, name: 'tab' },
       { id: 'dd33ee44', kind: 'background', cwd: repo + 'suffix', startedAt: 5 },        // sibling prefix: not ours
@@ -2328,8 +2345,114 @@ async function runSmoke() {
   const recreate = await ptyRecreateTest();
   check('pty re-create on a live id survives the old pty exit', recreate.ok, recreate.detail);
 
+  // ICNS container (pure; the bundle icon for macOS packaging, scripts/make-icns.cjs)
+  {
+    const pngs = new Map(ico.ICNS_TYPES.map(([, size]) => [size, Buffer.from(`png${size}`)]));
+    const icns = ico.buildIcns(pngs);
+    let at = 8;
+    const types = [];
+    while (at + 8 <= icns.length) {
+      const len = icns.readUInt32BE(at + 4);
+      types.push(icns.toString('ascii', at, at + 4));
+      if (len < 8) break;
+      at += len;
+    }
+    check('icns container: header, total length, one chunk per type',
+      icns.toString('ascii', 0, 4) === 'icns' && icns.readUInt32BE(4) === icns.length && at === icns.length
+      && types.join(',') === ico.ICNS_TYPES.map(([t]) => t).join(','), types.join(','));
+  }
+
+  // macOS app identity: Dock icon PNG from a logo (never .ico), app.dock, the
+  // Windows-only shortcut/registry entry points answer "not supported"
+  if (process.platform === 'darwin') {
+    const { app, nativeImage } = require('electron');
+    const sharpMac = require('sharp');
+    const logo = path.join(U.dataRoot(), 'smoke-mac-logo.png');
+    await sharpMac({ create: { width: 300, height: 200, channels: 4, background: { r: 30, g: 160, b: 90, alpha: 1 } } }).png().toFile(logo);
+    const wsMac = await workspaces.create({ name: 'Smoke Mac', repoPath: require('node:os').tmpdir(), logoPath: logo });
+    const meta = await sharpMac(wsMac.iconPath).metadata().catch(() => ({}));
+    const img = nativeImage.createFromPath(wsMac.iconPath);
+    check('mac: workspace icon is a 1024 px PNG nativeImage can read',
+      wsMac.iconPath.endsWith('.png') && meta.format === 'png' && meta.width === 1024 && meta.height === 1024 && !img.isEmpty(),
+      `${path.basename(wsMac.iconPath)} ${meta.format} ${meta.width}x${meta.height} empty=${img.isEmpty()}`);
+    const upd = await workspaces.updateLogo(wsMac.id, logo, 4_000_000);
+    check('mac: logo change gets a new versioned .png', upd.iconPath !== wsMac.iconPath && upd.iconPath.endsWith('.png') && fs.existsSync(upd.iconPath), path.basename(upd.iconPath));
+    const icoLogo = path.join(U.dataRoot(), 'smoke-mac-logo.ico');
+    await ico.buildIcoFromImage(logo, icoLogo);
+    let fromIco = null;
+    try { fromIco = await workspaces.updateLogo(wsMac.id, icoLogo, 5_000_000); } catch (e) { fromIco = { error: e.message }; }
+    check('mac: an .ico logo becomes a PNG icon (sharp can\'t read .ico)', Boolean(fromIco && fromIco.iconPath && fromIco.iconPath.endsWith('.png') && fs.existsSync(fromIco.iconPath)), JSON.stringify(fromIco && (fromIco.error || path.basename(fromIco.iconPath))));
+    let dockErr = null;
+    try { app.dock.setIcon(upd.iconPath); app.dock.setBadge('•'); app.dock.setBadge(''); } catch (e) { dockErr = e.message; }
+    check('mac: app.dock.setIcon / setBadge do not throw', dockErr === null, dockErr || 'ok');
+    const shortcutsMod = require('./shortcuts.cjs');
+    const cm = require('./contextmenu.cjs');
+    let sc = null;
+    try {
+      sc = await shortcutsMod.create({ workspace: wsMac, targetPath: process.execPath, targetArgs: '', workingDir: U.BIN_ROOT });
+    } catch (e) { sc = { threw: e.message }; }
+    const lsc = await shortcutsMod.createLauncherShortcut({ targetPath: process.execPath, workingDir: U.BIN_ROOT }).catch(e => ({ threw: e.message }));
+    const quiet = shortcutsMod.removeJunkElectronLinks(process.execPath).length === 0 && (await shortcutsMod.ensureStartMenu({ workspace: wsMac })) === false
+      && (await shortcutsMod.refreshIcons({ workspace: wsMac })) === true;
+    shortcutsMod.removeShortcuts(wsMac);
+    check('mac: shortcut + right-click menu entry points answer "not supported" (no throw)',
+      sc && sc.unsupported === true && sc.ok === false && lsc && lsc.unsupported === true && quiet
+      && cm.isInstalled() === false && cm.install({ targetPath: process.execPath, rootDir: U.BIN_ROOT }) === false && cm.uninstall() === true,
+      JSON.stringify({ sc, lsc, quiet }));
+    workspaces.remove(wsMac.id);
+  }
+
+  // macOS: a REAL workspace window (renderer + preload + one plain terminal),
+  // captured with webContents.capturePage (no Screen Recording permission
+  // needed) to VIBESPACE_SMOKE_SHOT (CI artifact) or the smoke home
+  if (process.platform === 'darwin' && typeof hooks.openWorkspaceWindow === 'function') {
+    const os = require('node:os');
+    const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-smoke-win-'));
+    fs.writeFileSync(path.join(repo, 'README.md'), '# VibeSpace smoke\n\nA throwaway repo for the macOS window test.\n');
+    const wsWin = await workspaces.create({ name: 'Smoke Window', repoPath: repo });
+    U.ensureDir(path.join(U.dataRoot(), 'instances', wsWin.id));
+    U.writeJsonAtomic(path.join(U.dataRoot(), 'instances', wsWin.id, 'state.json'), {
+      terminals: [{ termId: 'smokewin1', name: 'shell', cwd: repo, isClaude: false, claudeSessionId: null }],
+      autoResume: false,
+    });
+    const out = process.env.VIBESPACE_SMOKE_SHOT || path.join(U.dataRoot(), 'smoke-window.png');
+    let detail = '';
+    let ok = false;
+    try {
+      if (typeof hooks.restorePtyData === 'function') hooks.restorePtyData(); // the pty tests above replaced it
+      const win = hooks.openWorkspaceWindow(wsWin);
+      await new Promise((resolve) => {
+        const t = setTimeout(resolve, 20000);
+        win.webContents.once('did-finish-load', () => { clearTimeout(t); resolve(); });
+      });
+      win.show();
+      await new Promise(r => setTimeout(r, 5000)); // terminal spawned + painted
+      let png = null;
+      for (let i = 0; i < 5 && !png; i++) {
+        if (i) await new Promise(r => setTimeout(r, 800));
+        try {
+          const buf = (await win.webContents.capturePage()).toPNG();
+          if (buf.length > 1000) png = buf;
+        } catch (e) { detail = e.message; }
+      }
+      if (png) {
+        U.ensureDir(path.dirname(out));
+        fs.writeFileSync(out, png);
+        ok = true;
+        detail = `${out} (${png.length} bytes)`;
+        console.log('SCREENSHOT_SAVED: ' + out);
+      } else {
+        detail = 'capturePage never produced pixels' + (detail ? ': ' + detail : '');
+      }
+    } catch (e) {
+      detail = 'threw: ' + (e && e.message ? e.message : e);
+    }
+    check('mac: workspace window opens and captures a screenshot', ok, detail);
+  }
+
   const failed = results.filter(r => !r.ok);
-  console.log(`\nSMOKE RESULT: ${results.length - failed.length}/${results.length} passed`);
+  const skipped = results.filter(r => r.ok && /^skipped\b/.test(r.detail || '')).length;
+  console.log(`\nSMOKE RESULT: ${results.length - failed.length}/${results.length} passed${skipped ? ` (${skipped} of them skipped on ${process.platform})` : ''}`);
   return failed.length === 0;
 }
 
