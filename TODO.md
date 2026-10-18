@@ -40,6 +40,16 @@ must check these before merging (details in the branch summary / CLAUDE.md):
       token-account conversation can't be resumed by normal tabs (it lives in
       the cloud dir); decide whether that matters.
 
+## macOS port (decided 2026-10-18, RESEARCH-MAC.md)
+
+- [ ] Phase 1 core port on branch `mac-port` (5 builders: shell/PATH/processes, accounts+Keychain, renderer, app/packaging/CI, image/video preview).
+- [ ] Mac CI green: unpackaged + packaged `--smoke` on Apple Silicon and Intel runners.
+- [ ] Hands-on checklist on the sister's MacBook (z.ai preset, one workspace, preview).
+- [ ] Phase 2: per-repo Dock pins (per-workspace .app clones, spike on a real Mac first).
+- [ ] Phase 2: Send to cloud on Mac (`cloud-send.sh`, `script -q /dev/null` for the TTY).
+- [ ] Phase 2: Finder "Open with VibeSpace" (Quick Action / `open-file`).
+- [ ] Later: $99 Developer ID + notarization if the Mac build stays in use.
+
 ## Packaging & distribution
 - [x] **electron-builder packaging** (0.5.0) — NSIS installer + unpacked build
       validated end-to-end (16/16 packaged smoke, clean workspace boot). npmRebuild
