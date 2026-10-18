@@ -27,12 +27,20 @@ function get(id) {
   return load().workspaces.find(w => w.id === id) || null;
 }
 
+// A workspace's icon file: .ico on Windows (taskbar, .lnk, window), a 1024 px
+// PNG on macOS (Dock tile + window), because nativeImage can't read .ico there.
+// Same naming scheme on both: `<id>.<ext>`, then `<id>.v<stamp>.<ext>`.
+const ICON_EXT = process.platform === 'darwin' ? '.png' : '.ico';
+
 async function create({ name, repoPath, logoPath }) {
   const data = load();
   const id = `${U.slugify(name)}-${U.randId()}`;
   U.ensureDir(path.join(U.dataRoot(), 'icons'));
-  const iconPath = path.join(U.dataRoot(), 'icons', `${id}.ico`);
-  if (logoPath && fs.existsSync(logoPath)) {
+  const iconPath = path.join(U.dataRoot(), 'icons', `${id}${ICON_EXT}`);
+  if (process.platform === 'darwin') {
+    if (logoPath && fs.existsSync(logoPath)) await ico.buildPngFromImage(logoPath, iconPath);
+    else await ico.buildDefaultPng(iconPath, name);
+  } else if (logoPath && fs.existsSync(logoPath)) {
     await ico.buildIcoFromImage(logoPath, iconPath);
   } else {
     await ico.buildDefaultIco(iconPath, name);
@@ -57,7 +65,7 @@ async function create({ name, repoPath, logoPath }) {
 // file name; ids never contain a dot, so `<id>.v<stamp>.ico` can't collide with
 // another workspace's icon.
 function versionedIconPath(id, now = Date.now()) {
-  return path.join(U.dataRoot(), 'icons', `${id}.v${now.toString(36)}.ico`);
+  return path.join(U.dataRoot(), 'icons', `${id}.v${now.toString(36)}${ICON_EXT}`);
 }
 
 // Drop this workspace's older versioned icons. `keep` = the new one and the one
@@ -66,7 +74,7 @@ function versionedIconPath(id, now = Date.now()) {
 function pruneIcons(id, keep) {
   const dir = path.join(U.dataRoot(), 'icons');
   const prefix = id + '.v';
-  const mine = (n) => n.startsWith(prefix) && n.endsWith('.ico') && /^[0-9a-z]+$/.test(n.slice(prefix.length, -4));
+  const mine = (n) => n.startsWith(prefix) && n.endsWith(ICON_EXT) && /^[0-9a-z]+$/.test(n.slice(prefix.length, -ICON_EXT.length));
   const keepNames = new Set(keep.filter(Boolean).map(p => path.basename(p).toLowerCase()));
   let names = [];
   try { names = fs.readdirSync(dir); } catch { return; }
@@ -82,7 +90,8 @@ async function updateLogo(id, logoPath, now = Date.now()) {
   if (!ws) throw new Error(`workspace not found: ${id}`);
   U.ensureDir(path.join(U.dataRoot(), 'icons'));
   const next = versionedIconPath(ws.id, now);
-  await ico.buildIcoFromImage(logoPath, next); // throws on a bad image: nothing changed yet
+  if (process.platform === 'darwin') await ico.buildPngFromImage(logoPath, next); // same: throws first
+  else await ico.buildIcoFromImage(logoPath, next); // throws on a bad image: nothing changed yet
   const previous = ws.iconPath;
   ws.iconPath = next;
   ws.hasCustomLogo = true;
@@ -116,4 +125,4 @@ function remove(id) {
   return true;
 }
 
-module.exports = { list, get, create, updateLogo, remove, findByRepoPath, findOrCreateByRepoPath };
+module.exports = { list, get, create, updateLogo, remove, findByRepoPath, findOrCreateByRepoPath, ICON_EXT };

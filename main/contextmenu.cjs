@@ -6,6 +6,10 @@ const { spawnSync } = require('node:child_process');
 const path = require('node:path');
 const U = require('./util.cjs');
 
+// Windows only (HKCU registry). On macOS every call answers "not installed"
+// without spawning anything; a Finder Quick Action is phase 2 (RESEARCH-MAC).
+const SUPPORTED = process.platform !== 'darwin';
+
 const KEY_DIR = 'HKCU\\Software\\Classes\\Directory\\shell\\VibeSpace';
 const KEY_BG = 'HKCU\\Software\\Classes\\Directory\\Background\\shell\\VibeSpace';
 
@@ -15,10 +19,12 @@ function reg(args) {
 }
 
 function isInstalled() {
+  if (!SUPPORTED) return false;
   return reg(['query', KEY_DIR]);
 }
 
 function install({ targetPath, rootDir }) {
+  if (!SUPPORTED) return false;
   const iconPath = path.join(U.ROOT, 'assets', 'app.ico');
   // "%1" = the clicked folder; %V = the folder whose background was clicked
   const cmdFolder = `"${targetPath}" "${rootDir}" --open-repo="%1"`;
@@ -36,9 +42,10 @@ function install({ targetPath, rootDir }) {
 }
 
 function uninstall() {
+  if (!SUPPORTED) return true; // nothing to remove
   reg(['delete', KEY_DIR, '/f']);
   reg(['delete', KEY_BG, '/f']);
   return !isInstalled();
 }
 
-module.exports = { install, uninstall, isInstalled };
+module.exports = { install, uninstall, isInstalled, SUPPORTED };

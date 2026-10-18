@@ -128,4 +128,115 @@ async function buildIcoFromImageViaBuffer(pngBuffer, outIco) {
   return outIco;
 }
 
-module.exports = { buildIcoFromImage, buildDefaultIco, buildIcoFromImageViaBuffer };
+// ---------- macOS: PNG for the Dock, .icns for the app bundle ----------
+// nativeImage can't read .ico on macOS, so a workspace's icon there is a PNG.
+// Apple's icon grid keeps a transparent margin (824 px of art on a 1024 canvas),
+// so a full-bleed logo doesn't look oversized next to the other Dock tiles.
+// (macOS 26 puts BUNDLE icons that aren't Apple's rounded-square shape on a gray
+// plate; app.dock.setIcon of a running process is drawn as is.)
+const DOCK_SIZE = 1024;
+const DOCK_ART = 824;
+const CLEAR = { r: 0, g: 0, b: 0, alpha: 0 };
+
+// The best entry of an .ico as a PNG buffer: its PNG payload, or a 32-bit DIB
+// converted. Largest first; other bit depths are refused (sharp can't read .ico).
+async function pngFromIco(buf) {
+  if (buf.length < 6 || buf.readUInt16LE(0) !== 0 || buf.readUInt16LE(2) !== 1) throw new Error('not an .ico file');
+  const count = buf.readUInt16LE(4);
+  const entries = [];
+  for (let i = 0; i < count; i++) {
+    const base = 6 + i * 16;
+    if (base + 16 > buf.length) break;
+    const size = buf.readUInt32LE(base + 8);
+    const offset = buf.readUInt32LE(base + 12);
+    if (offset + size > buf.length || size < 40) continue;
+    entries.push({ w: buf.readUInt8(base) || 256, blob: buf.subarray(offset, offset + size) });
+  }
+  entries.sort((a, b) => b.w - a.w);
+  for (const e of entries) {
+    if (e.blob.readUInt32BE(0) === 0x89504e47) return Buffer.from(e.blob); // PNG payload
+    const hdr = e.blob.readUInt32LE(0);
+    const w = e.blob.readInt32LE(4);
+    const h = Math.abs(e.blob.readInt32LE(8)) / 2; // XOR + AND masks
+    if (e.blob.readUInt16LE(14) !== 32 || w <= 0 || h <= 0 || hdr + w * h * 4 > e.blob.length) continue;
+    const rgba = Buffer.alloc(w * h * 4);
+    for (let y = 0; y < h; y++) {
+      const src = hdr + (h - 1 - y) * w * 4; // bottom-up BGRA rows
+      for (let x = 0; x < w; x++) {
+        const s = src + x * 4;
+        const d = (y * w + x) * 4;
+        rgba[d] = e.blob[s + 2];
+        rgba[d + 1] = e.blob[s + 1];
+        rgba[d + 2] = e.blob[s];
+        rgba[d + 3] = e.blob[s + 3];
+      }
+    }
+    return sharp(rgba, { raw: { width: w, height: h, channels: 4 } }).png().toBuffer();
+  }
+  throw new Error('unsupported .ico (needs a PNG or 32-bit entry): pick a PNG, SVG or JPEG logo');
+}
+
+async function buildDockPngFromInput(input, outPng) {
+  const art = await sharp(input, { density: 384 }).rotate().resize(DOCK_ART, DOCK_ART, { fit: 'contain', background: CLEAR }).png().toBuffer();
+  const pad = (DOCK_SIZE - DOCK_ART) / 2;
+  await sharp(art).extend({ top: pad, bottom: pad, left: pad, right: pad, background: CLEAR }).png().toFile(outPng);
+  return outPng;
+}
+
+async function buildPngFromImage(srcPath, outPng) {
+  const input = path.extname(srcPath).toLowerCase() === '.ico' ? await pngFromIco(fs.readFileSync(srcPath)) : srcPath;
+  return buildDockPngFromInput(input, outPng);
+}
+
+async function buildDefaultPng(outPng, label = null) {
+  const svg = label ? letterMarkSvg(label) : DEFAULT_SVG;
+  return buildDockPngFromInput(Buffer.from(svg), outPng);
+}
+
+// ICNS container: 'icns' + BE total length, then OSType + BE length (incl. its
+// 8-byte header) + PNG payload per entry. Only the PNG-capable types are used.
+const ICNS_TYPES = [
+  ['icp4', 16], ['icp5', 32], ['icp6', 64], ['ic07', 128], ['ic08', 256], ['ic09', 512], ['ic10', 1024],
+  ['ic11', 32], ['ic12', 64], ['ic13', 256], ['ic14', 512],
+];
+
+// pngs: Map size -> PNG buffer (every size in ICNS_TYPES)
+function buildIcns(pngs) {
+  const chunks = [];
+  for (const [type, size] of ICNS_TYPES) {
+    const png = pngs.get(size);
+    if (!png) throw new Error(`icns: missing ${size}px PNG`);
+    const head = Buffer.alloc(8);
+    head.write(type, 0, 'ascii');
+    head.writeUInt32BE(png.length + 8, 4);
+    chunks.push(head, png);
+  }
+  const body = Buffer.concat(chunks);
+  const head = Buffer.alloc(8);
+  head.write('icns', 0, 'ascii');
+  head.writeUInt32BE(body.length + 8, 4);
+  return Buffer.concat([head, body]);
+}
+
+// rounded: clip the art to Apple's rounded square (corner ≈ 22.4 % of the side),
+// for a full-bleed square logo like assets/logo.png
+async function buildIcnsFromImage(srcPath, outIcns, { rounded = false } = {}) {
+  const pngs = new Map();
+  for (const size of new Set(ICNS_TYPES.map(([, s]) => s))) {
+    const art = Math.round(size * DOCK_ART / DOCK_SIZE);
+    const pad = size - art;
+    let inner = await sharp(srcPath, { density: 384 }).rotate().resize(art, art, { fit: 'contain', background: CLEAR }).ensureAlpha().png().toBuffer();
+    if (rounded) {
+      const mask = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${art}" height="${art}"><rect width="${art}" height="${art}" rx="${(art * 0.2237).toFixed(2)}" fill="#fff"/></svg>`);
+      inner = await sharp(inner).composite([{ input: mask, blend: 'dest-in' }]).png().toBuffer();
+    }
+    pngs.set(size, await sharp(inner).extend({ top: Math.floor(pad / 2), bottom: Math.ceil(pad / 2), left: Math.floor(pad / 2), right: Math.ceil(pad / 2), background: CLEAR }).png().toBuffer());
+  }
+  fs.writeFileSync(outIcns, buildIcns(pngs));
+  return outIcns;
+}
+
+module.exports = {
+  buildIcoFromImage, buildDefaultIco, buildIcoFromImageViaBuffer,
+  buildPngFromImage, buildDefaultPng, pngFromIco, buildIcns, buildIcnsFromImage, ICNS_TYPES,
+};
