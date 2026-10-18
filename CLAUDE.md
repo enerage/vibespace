@@ -168,7 +168,7 @@ Key facts encoded in `main/sessions.cjs`:
 
 ## Developing VibeSpace
 
-- `npm run smoke` — 138 self-tests (as of 0.6.59) incl. pty echo and live session discovery. Run it after
+- `npm run smoke` — 149 self-tests on Windows, 156 on macOS (as of 0.7.0) incl. pty echo and live session discovery. Run it after
   touching main-process code, **from a normal shell**: inside a Claude pty the stripped
   PATH and nested ConPTY break the pty test (`powershell.exe` "File not found" /
   AttachConsole) — prepend System32 to PATH and give it its own console, or just use a
@@ -756,6 +756,77 @@ Key facts encoded in `main/sessions.cjs`:
   write `{terminals:[{termId,name,cwd,isClaude,claudeSessionId}],autoResume:true}`
   with `U.writeJsonAtomic`, keeping the broken file as `.corrupt-<ts>`. The
   layout isn't logged, so it falls back to the default.
+- **macOS** (0.7.0, RESEARCH-MAC.md has the audit + sources). Facts the port
+  stands on, verified on GitHub's macOS runners (macos-15 arm64 + macos-15-intel):
+  - **PATH:** a Dock/Finder-launched app gets `/usr/bin:/bin` only.
+    `util.rebuildPath` asks `$SHELL -ilc` once (3 s timeout) between markers and
+    merges fallbacks (`~/.local/bin`, `/opt/homebrew/bin`, …); it is never
+    empty. Env keys are case-sensitive: write `PATH`, never `Path`.
+  - **The shell:** the user's zsh or bash as a login shell. zsh gets
+    `ZDOTDIR=<dataRoot>/shell/<content hash>/` whose rc files source the user's
+    own and then define `claude()`; bash gets `--rcfile`. The `claude()` text
+    is ONE POSIX body for both, and prints the same `VSACCT[…]`/`VSCLAUDE[…]`
+    dry-run lines as the PowerShell wrapper (smoke checks them on both
+    platforms). `BASH_SILENCE_DEPRECATION_WARNING=1` and a UTF-8 `LANG` are set.
+  - **Prompt detection:** precmd prints `ESC ] 7777 ; vibespace-prompt BEL`.
+    xterm.js ignores unknown OSC numbers (checked in 6.0.0), so it isn't
+    stripped. `ptyhost.atPrompt`, with the process-tree poll as the fallback.
+  - **Process tree:** one `ps -A -ww -o pid= -o ppid= -o pgid= -o args=`
+    snapshot (separate `-o`s, `args` because the native claude's exec name can
+    be its version number), SIGTERM descendants + their process groups (never
+    ours or a shell's), SIGKILL survivors after 1.5 s, THEN close the pty.
+    gitfetch spawns git detached and kills the group.
+  - **Secrets:** Keychain generic-password items through `/usr/bin/security`
+    (`main/keychain.cjs`): `VibeSpace-account-<id>` (raw token; the `claude()`
+    function reads exactly this name) and `VibeSpace-endpoint-<id>` (base64
+    env, read by main only), account `vibespace`. Writes go through `security
+    -i` on stdin, so a secret is never in any argv; a line max is 4095 bytes,
+    so endpoint env must stay under ~2.9 KB. Not `safeStorage`: its Keychain
+    ACL is per code signature and would prompt for every future per-workspace
+    `.app` clone.
+  - **Claude's login on a Mac is a Keychain item**, `Claude Code-credentials`
+    (account `claude-code-user`), not `.credentials.json`. With
+    `CLAUDE_CONFIG_DIR` it is `…-credentials-<first 8 hex of sha256(the exact
+    dir string, NFC)>` (read from claude 2.1.302's code). Existence checks are
+    attribute-only (`find-generic-password` without `-w`) and cached.
+  - **Dock:** every workspace process is its own Dock tile; `app.dock.setIcon`
+    takes a 1024 px PNG (`<id>.v<stamp>.png`; nativeImage can't read `.ico`).
+    That icon can't be PINNED: a pin always points at VibeSpace.app. Per-repo
+    pins need one generated `.app` clone per workspace (phase 2, the Chrome
+    PWA pattern). Badge = `app.dock.setBadge('•')` + one bounce.
+  - **Lifecycle:** a workspace process quits when its window closes on every
+    platform (a windowless darwin process kept the single-instance lock and
+    the workspace could not be reopened); the Mac launcher stays in the Dock.
+    No `session-end` on macOS: the final save happens on `before-quit` and
+    `powerMonitor` `shutdown`.
+  - **FSEvents can miss or delay a write** right after `fs.watch` starts (the
+    Intel runner missed a status file for >900 ms). `status.cjs` adds a 1.5 s
+    mtime sweep on darwin; other watchers that drive state need the same idea.
+  - **node-pty 1.1.0** ships darwin prebuilds with `spawn-helper` as mode 0644
+    ("posix_spawnp failed" on every terminal): `scripts/postinstall.cjs`,
+    `build/afterPack.cjs` and a runtime `ensureSpawnHelper` chmod it.
+  - **Packaging:** electron-builder 26.15.3 no longer ad-hoc signs by itself:
+    `mac.identity: "-"` plus an explicit `codesign --force --deep -s -` in
+    afterPack; CI fails unless `codesign -dv` says `Signature=adhoc`,
+    `Identifier=app.vibespace` and sealed resources. One arch per runner (sharp
+    installs only the host's native package). Electron 44 needs macOS 13+.
+  - **Smoke on the runner** is the real thing: a headed window
+    (`VIBESPACE_SMOKE_SHOT` saves a `capturePage` screenshot), login zsh,
+    Keychain round trips. Windows-only tests are gated per area, and the
+    tally reports how many passes were darwin skips.
+  - **Keys:** app shortcuts are Cmd-only on a Mac (`modKey`): Ctrl+P/F/B/U/D are
+    readline and claude keys there. Ctrl+V must reach claude (its image paste
+    on Mac). `macOptionIsMeta` is on (watch for non-US layouts that type
+    `@`/`{` with Option).
+- **Image/video/audio preview** (0.7.0, `main/mediaserve.cjs` +
+  `ui/mediaurl.js` + `viewer.js` media tabs): `vsfile://ws/<wsId>/<encoded abs
+  path>?v=<mtime>`. `protocol.handle` gets no sender, so the URL names the
+  workspace and main serves it only if that workspace's window lives in this
+  process, with the repo from the registry. Jailed via realpath, media
+  extensions only, `no-store`, streamed Range (206/416). CSP: `img-src`/`media-src`
+  allow `vsfile:` only; there is no `connect-src`, so page `fetch()` of it is
+  blocked (the viewer doesn't fetch). An SVG opens as an image with a
+  Source/Image toggle to Monaco.
 - **`/sync-docs` skill** (`.claude/skills/sync-docs`): the "update all docs" ritual —
   CHANGELOG/DECISIONS/CLAUDE/TODO/README + agent memory, docs only. Copy the skill
   folder into any repo that should join the ritual. (A 📨 broadcast button existed
@@ -801,5 +872,7 @@ Key facts encoded in `main/sessions.cjs`:
 - Update CHANGELOG.md (new version section) and TODO.md for anything user-visible.
 - Keep the launcher renderer dumb — workspace-window features belong in
   `renderer/workspace/`.
-- Windows-only by design (ConPTY, AUMID, registry). Don't add cross-platform shims
-  without asking.
+- **Windows and macOS** (since 0.7.0; Linux is not a target). Mac code sits behind
+  `process.platform === 'darwin'` (main) / `vs.platform` (renderer, from the
+  preloads; `common.js` `isMac`/`modKey`/`osText`). Windows branches stay as they
+  were: never "simplify" a Windows path while adding a Mac one.

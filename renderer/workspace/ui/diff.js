@@ -147,7 +147,7 @@ function createEditor() {
     renderSideBySide: true,
     automaticLayout: true,
     fontSize: 13,
-    fontFamily: '"Cascadia Code", Consolas, monospace',
+    fontFamily: '"Cascadia Code", Consolas, "SF Mono", Menlo, Monaco, monospace',
     scrollBeyondLastLine: false,
     wordWrap: 'on',
     renderOverviewRuler: false,

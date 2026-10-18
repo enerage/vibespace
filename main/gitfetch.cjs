@@ -39,6 +39,13 @@ function taskkillExe() {
 // only kill the wrapper itself AFTER taskkill walked it: killed first, the tree
 // walk finds nothing and the real fetch keeps running (seen in testing).
 function killTree(proc) {
+  // macOS: git was spawned as its own process-group leader (detached), so one
+  // group SIGKILL takes git-remote-https / ssh down with it
+  if (process.platform === 'darwin') {
+    try { process.kill(-proc.pid, 'SIGKILL'); } catch {}
+    try { proc.kill('SIGKILL'); } catch {}
+    return Promise.resolve();
+  }
   return new Promise((resolve) => {
     const last = () => { try { proc.kill(); } catch {} resolve(); };
     let child;
@@ -55,7 +62,7 @@ function run(repoPath, args, { env, timeout = 8000 } = {}) {
   return new Promise((resolve) => {
     let proc;
     try {
-      proc = spawn('git', [...BASE, ...args], { cwd: repoPath, env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+      proc = spawn('git', [...BASE, ...args], { cwd: repoPath, env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], ...(process.platform === 'darwin' ? { detached: true } : {}) });
     } catch (e) {
       return resolve({ code: null, out: '', err: e.message, timedOut: false });
     }

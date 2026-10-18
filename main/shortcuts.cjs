@@ -13,6 +13,16 @@ function aumidFor(id) {
   return `vibespace.workspace.${id}`;
 }
 
+// macOS has no .lnk, Start Menu or AppUserModelID: every entry point below
+// answers "not supported" there instead of throwing (APPDATA is undefined).
+// Per-workspace Dock pins come later as generated .app clones (RESEARCH-MAC Q1).
+const SUPPORTED = process.platform !== 'darwin';
+const UNSUPPORTED_TEXT = 'Not supported on macOS yet: keep the open window in the Dock instead';
+
+function unsupported() {
+  return { ok: false, persisted: false, unsupported: true, paths: [], details: [UNSUPPORTED_TEXT], aumid: null };
+}
+
 function sanitizeFileName(name) {
   return String(name).replace(/[\\/:*?"<>|]/g, '').trim() || 'workspace';
 }
@@ -37,6 +47,7 @@ function runPs(args) {
 }
 
 async function create({ workspace, targetPath, targetArgs, workingDir, startMenu = true, desktop = true }) {
+  if (!SUPPORTED) return unsupported();
   const name = sanitizeFileName(workspace.name);
   const aumid = aumidFor(workspace.id);
   const results = [];
@@ -63,6 +74,7 @@ async function create({ workspace, targetPath, targetArgs, workingDir, startMenu
 }
 
 async function createLauncherShortcut({ targetPath, workingDir }) {
+  if (!SUPPORTED) return unsupported();
   const lnkName = 'VibeSpace Launcher';
   const aumid = 'vibespace.app';
   const results = [];
@@ -82,6 +94,7 @@ async function createLauncherShortcut({ targetPath, workingDir }) {
 }
 
 function removeShortcuts(workspace) {
+  if (!SUPPORTED) return;
   const name = sanitizeFileName(workspace.name);
   const candidates = [
     path.join(process.env.APPDATA || '', 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'VibeSpace', `${name}.lnk`),
@@ -96,6 +109,7 @@ function removeShortcuts(workspace) {
 // Windows caches shortcut icons aggressively — re-write the .lnk where it exists
 // and nudge the icon cache, so taskbar pins refresh without a manual re-pin.
 async function refreshIcons({ workspace, targetPath, targetArgs, workingDir }) {
+  if (!SUPPORTED) return true; // nothing pinned through us on macOS
   const name = sanitizeFileName(workspace.name);
   const startMenu = path.join(process.env.APPDATA || '', 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'VibeSpace', `${name}.lnk`);
   const desktop = path.join(process.env.USERPROFILE || '', 'Desktop', `${name}.lnk`);
@@ -114,6 +128,7 @@ async function refreshIcons({ workspace, targetPath, targetArgs, workingDir }) {
 // icon at pin time — a logo swap must rewrite them too, or the pin keeps showing
 // whatever the icon was the second it was pinned. Matched by --workspace=<id>.
 function refreshTaskbarPins(workspace) {
+  if (!SUPPORTED) return [];
   const dir = path.join(process.env.APPDATA || '', 'Microsoft', 'Internet Explorer', 'Quick Launch', 'User Pinned', 'TaskBar');
   const updated = [];
   let names = [];
@@ -139,6 +154,7 @@ function startMenuLinkPath(workspace) {
 // Windows maps the window's AppID to a display name + icon. Without it, pinning
 // the running window yields a junk "Electron" pin. Returns true if it created one.
 async function ensureStartMenu({ workspace, targetPath, targetArgs, workingDir }) {
+  if (!SUPPORTED) return false;
   if (fs.existsSync(startMenuLinkPath(workspace))) return false;
   const r = await create({ workspace, targetPath, targetArgs, workingDir, startMenu: true, desktop: false });
   return Boolean(r && r.ok);
@@ -148,6 +164,7 @@ async function ensureStartMenu({ workspace, targetPath, targetArgs, workingDir }
 // existed: "<Start Menu>\Programs\Electron*.lnk" targeting OUR exe with no
 // arguments. Only those exact strays are deleted — never other apps' shortcuts.
 function removeJunkElectronLinks(exePath) {
+  if (!SUPPORTED) return [];
   const dir = path.join(process.env.APPDATA || '', 'Microsoft', 'Windows', 'Start Menu', 'Programs');
   const removed = [];
   let names = [];
@@ -168,4 +185,4 @@ function removeJunkElectronLinks(exePath) {
   return removed;
 }
 
-module.exports = { create, createLauncherShortcut, removeShortcuts, refreshIcons, refreshTaskbarPins, ensureStartMenu, removeJunkElectronLinks, startMenuLinkPath, aumidFor };
+module.exports = { create, createLauncherShortcut, removeShortcuts, refreshIcons, refreshTaskbarPins, ensureStartMenu, removeJunkElectronLinks, startMenuLinkPath, aumidFor, SUPPORTED, UNSUPPORTED_TEXT };

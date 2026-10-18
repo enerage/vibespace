@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src app: 'unsafe-inline'; script-src app: blob: 'unsafe-eval'; worker-src blob:; img-src app: data: file:; style-src app: 'unsafe-inline'; font-src app: data:;" />
+  <meta http-equiv="Content-Security-Policy" content="default-src app: 'unsafe-inline'; script-src app: blob: 'unsafe-eval'; worker-src blob:; img-src app: data: file: vsfile:; media-src app: vsfile:; style-src app: 'unsafe-inline'; font-src app: data:;" />
   <title>Workspace</title>
   <link rel="stylesheet" href="app://local/vendor/@xterm/xterm/css/xterm.css" />
   <script src="theme-boot.js"></script>
@@ -56,6 +56,7 @@
             <span id="viewer-path"></span>
             <div class="spacer"></div>
             <div id="viewer-actions">
+              <button id="btn-view" class="btn small hidden" title="Switch between the SVG image and its source code">Source</button>
               <button id="btn-edit" class="btn small">Edit</button>
               <button id="btn-save" class="btn small" disabled>Save</button>
               <button id="btn-reveal" class="btn small ghost" title="Reveal in Explorer">⌕</button>
@@ -67,6 +68,7 @@
             <div id="git-main"><div id="diff-editor"></div><div id="diff-empty"><p>No uncommitted changes.</p></div></div>
           </div>
           <div id="monaco-host"></div>
+          <div id="media-host" class="hidden"></div>
           <div id="viewer-placeholder">
             <p>Select a file from the tree to preview it.</p>
             <p class="dim">Editing is off by default — hit <b>Edit</b> for a quick fix, <b>Ctrl+S</b> saves.</p>
@@ -117,7 +119,7 @@
       <div class="prefs-row prefs-col">
         <div>
           <div class="prefs-label">Worktree setup command</div>
-          <div class="prefs-hint">PowerShell, runs in the new worktree before claude starts (+ ▾ → New agent in a worktree), visible in its tab. If it fails, claude starts anyway. Empty = none.</div>
+          <div id="wt-setup-hint" class="prefs-hint">PowerShell, runs in the new worktree before claude starts (+ ▾ → New agent in a worktree), visible in its tab. If it fails, claude starts anyway. Empty = none.</div>
         </div>
         <input id="wt-setup" class="prefs-input" type="text" placeholder="e.g. npm ci; Copy-Item ..\..\..\.secrets.json ." autocomplete="off" spellcheck="false" />
       </div>
@@ -235,7 +237,7 @@
       <div id="acct-ep-note" class="acct-note hidden"></div>
 
       <div class="prefs-label" style="margin-top: 14px;">Notifications</div>
-      <div class="prefs-hint">Windows pop-ups — one choice for all workspaces. Tab lights and the taskbar badge always show every state.</div>
+      <div id="notify-hint" class="prefs-hint">Windows pop-ups — one choice for all workspaces. Tab lights and the taskbar badge always show every state.</div>
       <div class="prefs-row">
         <div>
           <div class="prefs-label">An agent needs your answer</div>

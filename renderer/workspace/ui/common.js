@@ -1,5 +1,32 @@
 export const $ = (sel) => document.querySelector(sel);
 
+// ---------- platform (vs.platform from the preload; launcher + workspace) ----------
+export const isMac = () => Boolean(globalThis.vs && globalThis.vs.platform === 'darwin');
+// App shortcuts: Cmd on a Mac, where Ctrl+P/F/B/U/D are readline and claude
+// keys inside a terminal; Ctrl (or the Windows key, as always) elsewhere.
+export const modKey = (e) => (isMac() ? e.metaKey : (e.ctrlKey || e.metaKey));
+// A UI string as this platform says it: on a Mac Ctrl+Shift+B → ⌘⇧B,
+// Ctrl+S → ⌘S and (File) Explorer → Finder. Unchanged anywhere else.
+export function osText(s) {
+  if (!isMac()) return s;
+  return String(s).replace(/Ctrl\+Shift\+/g, '⌘⇧').replace(/Ctrl\+/g, '⌘').replace(/\b(?:File )?Explorer\b/g, 'Finder');
+}
+// osText over a page's static text, tooltips and placeholders (index.html)
+export function osLabels(root = document.body) {
+  if (!isMac() || !root) return;
+  const walk = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+    const t = osText(n.nodeValue);
+    if (t !== n.nodeValue) n.nodeValue = t;
+  }
+  for (const e of root.querySelectorAll('[title], [placeholder]')) {
+    for (const a of ['title', 'placeholder']) {
+      const v = e.getAttribute(a);
+      if (v && osText(v) !== v) e.setAttribute(a, osText(v));
+    }
+  }
+}
+
 export function el(tag, cls, text) {
   const e = document.createElement(tag);
   if (cls) e.className = cls;

@@ -1,5 +1,5 @@
 'use strict';
-const { app, BrowserWindow, ipcMain, dialog, protocol, shell, clipboard, Notification, screen } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, protocol, shell, clipboard, Notification, screen, Menu } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
 const { spawn } = require('node:child_process');
@@ -7,6 +7,7 @@ const { spawn } = require('node:child_process');
 // FIRST: rebuild PATH from the registry (machine + user). Windows spawned from
 // stripped environments (agent shells) otherwise break node/python/git for every
 // terminal AND every process we spawn (git status, claude --version, builds).
+// macOS: the login shell's PATH instead (Finder apps get only /usr/bin:/bin).
 const U = require('./util.cjs');
 process.env.PATH = U.rebuildPath();
 const logger = require('./logger.cjs');
@@ -74,20 +75,25 @@ logger.init(workspaceId || 'launcher');
 logger.teeConsole();
 
 // ---------- per-workspace identity (must happen before app is ready) ----------
+// macOS has no AppUserModelID (the API doesn't exist there): each workspace is
+// its own process, so it gets its own Dock tile, and setDockIcon() paints it.
 if (workspaceId) {
   app.setPath('userData', path.join(U.dataRoot(), 'instances', workspaceId));
-  app.setAppUserModelId(shortcuts.aumidFor(workspaceId));
-} else {
+  if (process.platform !== 'darwin') app.setAppUserModelId(shortcuts.aumidFor(workspaceId));
+} else if (process.platform !== 'darwin') {
   app.setAppUserModelId('vibespace.app');
 }
 
-// Register the renderer protocol before ready
+// Register the renderer protocol before ready (+ vsfile: the image/video/audio
+// preview, main/mediaserve.cjs; `stream` lets videos seek)
 protocol.registerSchemesAsPrivileged([
   { scheme: 'app', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } },
+  { scheme: 'vsfile', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } },
 ]);
 
 // terminals and code panes don't need the GPU; software compositing is far more
-// stable on remote-display setups (RDP / viewer software blanking the window)
+// stable on remote-display setups (RDP / viewer software blanking the window).
+// Also off on macOS for now (a Windows remote-display fix: re-check it there).
 app.disableHardwareAcceleration();
 
 // --smoke shares the launcher's default userData, so it must not compete for (or
@@ -97,6 +103,8 @@ if (!gotLock) {
   app.quit();
 } else {
   app.on('second-instance', () => {
+    // a macOS launcher stays alive with no window (Dock convention): open it again
+    if (process.platform === 'darwin' && !workspaceId && !BrowserWindow.getAllWindows().length) { createLauncherWindow(); return; }
     for (const win of BrowserWindow.getAllWindows()) {
       if (!win.isDestroyed()) {
         if (win.isMinimized()) win.restore();
@@ -308,6 +316,15 @@ function notifyAttention(wsId, termId, st) {
   } else {
     logger.info(`toast skipped (notifications: ${st} off): ws=${wsId} term=${termId}`);
   }
+  if (process.platform === 'darwin') {
+    // macOS: a Dock badge instead of the overlay icon (one dot; focusing the
+    // window clears it), and one bounce when the agent needs you
+    try {
+      app.dock.setBadge('•');
+      if (st !== 'done') app.dock.bounce('informational');
+    } catch {}
+    return;
+  }
   const icon = overlayIcons[st === 'failed' ? 'waiting' : st]; // a failed turn needs you too: red badge
   if (icon && fs.existsSync(icon)) {
     for (const w of wins) { if (!w.isDestroyed()) { try { w.setOverlayIcon(icon, st); } catch {} } }
@@ -327,6 +344,7 @@ const lastStateJson = new Map(); // wsId -> last JSON written (skip identical wr
 const knownParked = new Map(); // wsId -> last parked list saved (a snapshot without `parked` keeps it)
 const knownCloud = new Map(); // wsId -> last cloud session list saved (same rule as parked)
 let stateFrozen = false; // set on session-end / before-quit: the final save already happened
+let quitting = false; // before-quit ran (the ptys are being killed)
 
 function persistState(wsId) {
   if (stateFrozen) return;
@@ -364,7 +382,17 @@ function persistState(wsId) {
 }
 
 // ---------- protocol ----------
+const mediaserve = require('./mediaserve.cjs'); // vsfile: (also fs:read's media kinds)
+
 function initProtocol() {
+  // media preview: the renderer names its workspace; only a workspace with a
+  // window in THIS process is served (one workspace per process), never a
+  // renderer-given root
+  protocol.handle('vsfile', mediaserve.handler((wsId) => {
+    if (!wsId || !workspaceWindowsFor(wsId).length) return null;
+    const ws = workspaces.get(wsId);
+    return ws ? ws.repoPath : null;
+  }));
   const ROOT = U.ROOT;
   protocol.handle('app', async (request) => {
     const u = new URL(request.url);
@@ -424,6 +452,40 @@ function harden(win) {
   win.webContents.on('will-navigate', (e) => { if (e.url.startsWith('http')) { e.preventDefault(); shell.openExternal(e.url); } });
 }
 
+// macOS app menu. Without an Edit menu of role items, Cmd+C/V/X/A/Z do nothing
+// in inputs and Monaco. Windows keeps no visible menu (autoHideMenuBar).
+// Deliberately no Close (Cmd+W) item: closing a workspace window stops its
+// agents. Cmd+Q quits like closing the window does on Windows (no confirm
+// there either); before-quit saves the state first.
+function buildMacMenu() {
+  const dev = !app.isPackaged;
+  return Menu.buildFromTemplate([
+    {
+      label: app.name,
+      submenu: [
+        { role: 'about' }, { type: 'separator' }, { role: 'services' }, { type: 'separator' },
+        { role: 'hide' }, { role: 'hideOthers' }, { role: 'unhide' }, { type: 'separator' }, { role: 'quit' },
+      ],
+    },
+    {
+      label: 'Edit',
+      submenu: [
+        { role: 'undo' }, { role: 'redo' }, { type: 'separator' },
+        { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'pasteAndMatchStyle' }, { role: 'delete' }, { role: 'selectAll' },
+      ],
+    },
+    {
+      label: 'View',
+      submenu: [
+        // reload keeps the agents (the renderer re-attaches), but it is a dev tool
+        ...(dev ? [{ role: 'reload' }, { role: 'forceReload' }, { role: 'toggleDevTools' }, { type: 'separator' }] : []),
+        { role: 'togglefullscreen' },
+      ],
+    },
+    { label: 'Window', role: 'window', submenu: [{ role: 'minimize' }, { role: 'zoom' }, { type: 'separator' }, { role: 'front' }] },
+  ]);
+}
+
 function createLauncherWindow() {
   const win = new BrowserWindow({
     width: 860,
@@ -432,7 +494,9 @@ function createLauncherWindow() {
     minHeight: 520,
     backgroundColor: '#0d1117',
     autoHideMenuBar: true,
-    icon: path.join(U.ROOT, 'assets', 'app.ico'),
+    // macOS ignores the window icon and can't read .ico: the bundle's .icns (or
+    // setDockIcon in a dev run) is what shows there
+    icon: path.join(U.ROOT, 'assets', process.platform === 'darwin' ? 'logo.png' : 'app.ico'),
     webPreferences: securePrefs(path.join(U.ROOT, 'preload', 'launcher.cjs')),
   });
   harden(win);
@@ -496,6 +560,25 @@ function rebuildTaskbarButton(win, ws) {
     logger.warn('taskbar button rebuild failed: ' + e.message);
   }
   setTimeout(() => { if (!win.isDestroyed()) claimTaskbarIdentity(win, ws); }, 300);
+}
+
+// macOS: the running process's Dock tile shows the workspace logo (a PNG, see
+// workspaces.ICON_EXT; nativeImage can't read .ico). Only the running tile
+// changes: a Dock pin keeps the bundle icon until per-workspace .app clones
+// (RESEARCH-MAC Q1, phase 2). Called at window open and after a logo change.
+function setDockIcon(file) {
+  if (process.platform !== 'darwin' || !app.dock) return false;
+  if (!file || path.extname(file).toLowerCase() !== '.png' || !fs.existsSync(file)) {
+    logger.warn(`dock icon: no PNG to show (${file || 'none'})`);
+    return false;
+  }
+  try {
+    app.dock.setIcon(file);
+    return true;
+  } catch (e) {
+    logger.warn('dock icon failed: ' + e.message);
+    return false;
+  }
 }
 
 // ---------- window geometry memory ----------
@@ -575,7 +658,8 @@ function createWorkspaceWindow(ws, { shot = false } = {}) {
   win.on('close', () => saveWindowState(win));
   logger.info(`workspace window opened: ${ws.name} (${ws.id}) repo=${ws.repoPath}`);
   probeSrc(); // baseline = the code this window is actually running (dev only)
-  claimTaskbarIdentity(win, ws);
+  if (process.platform === 'darwin') setDockIcon(ws.iconPath);
+  else claimTaskbarIdentity(win, ws);
 
   // renderer console warnings/errors go to the log too
   win.webContents.on('console-message', (e) => {
@@ -601,7 +685,10 @@ function createWorkspaceWindow(ws, { shot = false } = {}) {
   baselineClaudeFor(ws.id); // update-button baseline: the version these agents run
 
   // focusing the window answers the attention signal — clear the taskbar badge
-  win.on('focus', () => { try { win.setOverlayIcon(null, ''); } catch {} });
+  win.on('focus', () => {
+    if (process.platform === 'darwin') { try { app.dock.setBadge(''); } catch {} return; }
+    try { win.setOverlayIcon(null, ''); } catch {}
+  });
 
   // if the renderer dies, bring it back WITHOUT killing the ptys — the reloaded
   // renderer re-attaches to the still-live agents (Layer 2)
@@ -676,6 +763,15 @@ async function baselineClaudeFor(wsId) {
 }
 
 
+// pty output → every window (named so the smoke can put it back after its
+// own pty tests replaced the single ptyhost.onData listener)
+function forwardPtyData(termId, chunk) {
+  lagmon.noteOutput(termId);
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed()) win.webContents.send('pty:data', termId, chunk);
+  }
+}
+
 // ---------- IPC ----------
 function initIpc() {
   // launcher
@@ -748,6 +844,7 @@ function initIpc() {
 
   // Explorer right-click menu ("Open with VibeSpace")
   ipcMain.handle('sc:contextMenu', async (e, action) => {
+    if (!contextmenu.SUPPORTED) return { installed: false, unsupported: true }; // macOS: no registry
     const isDev = !app.isPackaged;
     const opts = { targetPath: process.execPath, rootDir: isDev ? U.ROOT : path.dirname(process.execPath) };
     if (action === 'install') return { installed: contextmenu.install(opts) };
@@ -773,8 +870,12 @@ function initIpc() {
     }
     for (const win of workspaceWindowsFor(id)) {
       if (!win.isDestroyed()) {
-        win.setIcon(ws.iconPath);
-        rebuildTaskbarButton(win, ws); // the taskbar cached the old icon when the button was made
+        if (process.platform === 'darwin') {
+          setDockIcon(ws.iconPath); // a new PNG path every time, like the .ico
+        } else {
+          win.setIcon(ws.iconPath);
+          rebuildTaskbarButton(win, ws); // the taskbar cached the old icon when the button was made
+        }
         // reload without killing: the renderer re-attaches to live ptys (Layer 2)
         win.reload(); // pick up the new logo in the top bar
       }
@@ -909,6 +1010,15 @@ function initIpc() {
   const MAX_BYTES = 2 * 1024 * 1024;
   ipcMain.handle('fs:read', (e, file) => {
     const st = fs.statSync(file);
+    // images/video/audio skip Monaco: the viewer shows them from vsfile:// (any
+    // size; mtime lets it reload a file that changed on disk)
+    const media = mediaserve.kindOf(file);
+    if (media) {
+      const out = { media, size: st.size, mtimeMs: st.mtimeMs };
+      // SVG is source code too: the text rides along so the tab can flip to Monaco
+      if (path.extname(file).toLowerCase() === '.svg' && st.size <= MAX_BYTES) out.content = fs.readFileSync(file, 'utf8');
+      return out;
+    }
     if (st.size > MAX_BYTES) return { tooLarge: true, size: st.size };
     if (BIN_EXT.has(path.extname(file).toLowerCase())) return { binary: true, size: st.size };
     const buf = fs.readFileSync(file);
@@ -1230,12 +1340,7 @@ function initIpc() {
 
   // events main -> renderer
   lagmon.start((line) => logger.warn(line));
-  ptyhost.onData((termId, chunk) => {
-    lagmon.noteOutput(termId);
-    for (const win of BrowserWindow.getAllWindows()) {
-      if (!win.isDestroyed()) win.webContents.send('pty:data', termId, chunk);
-    }
-  });
+  ptyhost.onData(forwardPtyData);
   ptyhost.onExit((termId) => {
     lagmon.forget(termId);
     termStatus.delete(termId);
@@ -1763,6 +1868,26 @@ app.whenReady().then(async () => {
   // dev hot-reload: OPT-IN (--watch / VIBESPACE_WATCH=1) — normal windows never watch
   require('./devwatch.cjs').start({ app, BrowserWindow, ptyhost, logger, root: U.ROOT });
 
+  // macOS: the app menu, the launcher's Dock icon in unpackaged runs (a packaged
+  // app shows its .icns), and the final save when the Mac shuts down or
+  // restarts (Windows' session-end never fires there; before-quit may come too
+  // late or not at all when the system kills us)
+  if (process.platform === 'darwin') {
+    Menu.setApplicationMenu(buildMacMenu());
+    if (!workspaceId && !app.isPackaged) setDockIcon(path.join(U.ROOT, 'assets', 'logo.png'));
+    require('electron').powerMonitor.on('shutdown', () => {
+      logger.info('macOS shutting down (shutdown/restart/logout) — final state save, then frozen');
+      finalStateSave();
+      // another app can cancel a Mac shutdown: still running 2 min later (and
+      // not quitting) = cancelled, so saving resumes
+      setTimeout(() => {
+        if (quitting || !stateFrozen) return;
+        stateFrozen = false;
+        logger.info('macOS shutdown was cancelled — state saving resumed');
+      }, 120000).unref?.();
+    });
+  }
+
   // "Open with VibeSpace" from Explorer: ensure a workspace for the folder,
   // spawn its window as a detached process, and quit without ever showing UI
   if (openRepoPath) {
@@ -1790,7 +1915,10 @@ app.whenReady().then(async () => {
     const runSmoke = require('./smoke.cjs');
     let ok = false;
     try {
-      ok = await runSmoke();
+      ok = await runSmoke({
+        openWorkspaceWindow: (ws) => createWorkspaceWindow(ws, { shot: true }),
+        restorePtyData: () => ptyhost.onData(forwardPtyData),
+      });
     } catch (e) {
       console.error('SMOKE CRASHED:', e && e.stack ? e.stack : e);
       ok = false;
@@ -1839,7 +1967,8 @@ app.whenReady().then(async () => {
       setTimeout(() => {
         ptyhost.write('demo1', 'git log --oneline --no-decorate -6\r');
         ptyhost.write('demo2', 'git status -s\r');
-        ptyhost.write('demo3', 'powershell -NoProfile -ExecutionPolicy Bypass -File .\\demo-claude.ps1\r');
+        if (process.platform === 'darwin') ptyhost.write('demo3', 'git log -1 --stat\r');
+        else ptyhost.write('demo3', 'powershell -NoProfile -ExecutionPolicy Bypass -File .\\demo-claude.ps1\r');
       }, 3500);
       setTimeout(() => {
         setStatus('demo1', 'working'); // amber pulse
@@ -1884,21 +2013,26 @@ app.whenReady().then(async () => {
     createLauncherWindow();
   }
 
+  // macOS Dock click with no window open: only the launcher comes back. A
+  // workspace process ends with its window (its ptys are already killed).
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      if (workspaceId) {
-        const ws = workspaces.get(workspaceId);
-        if (ws) createWorkspaceWindow(ws);
-      } else {
-        createLauncherWindow();
-      }
-    }
+    if (BrowserWindow.getAllWindows().length === 0 && !workspaceId) createLauncherWindow();
   });
 });
 
+// A WORKSPACE process quits with its window on every platform: on macOS a
+// windowless one would keep holding its single-instance lock, and the workspace
+// could never be opened again. The macOS launcher stays in the Dock (convention).
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit();
+  if (workspaceId || process.platform !== 'darwin') app.quit();
 });
+
+// Save everything ONE last time (fsynced), then freeze the state files.
+function finalStateSave() {
+  for (const w of BrowserWindow.getAllWindows()) { try { saveWindowState(w); } catch {} }
+  for (const wsId of new Set([...winInfo.values()].map(v => v.wsId))) persistState(wsId);
+  stateFrozen = true;
+}
 
 // Windows shutdown / restart / logoff. Save everything ONE last time (fsynced),
 // then freeze the state files: Windows may kill the terminal processes before
@@ -1907,12 +2041,11 @@ app.on('window-all-closed', () => {
 // as it was (2026-10-01: a reboot cost recruitica its conversation + layout).
 app.on('session-end', () => {
   logger.info('windows session ending (shutdown/restart/logoff) — final state save, then frozen');
-  for (const w of BrowserWindow.getAllWindows()) { try { saveWindowState(w); } catch {} }
-  for (const wsId of new Set([...winInfo.values()].map(v => v.wsId))) persistState(wsId);
-  stateFrozen = true;
+  finalStateSave();
 });
 
 app.on('before-quit', () => {
+  quitting = true;
   for (const wsId of new Set([...winInfo.values()].map(v => v.wsId))) persistState(wsId);
   stateFrozen = true; // killAll below makes every pty "exit" — never save that churn
   board.stopAll();

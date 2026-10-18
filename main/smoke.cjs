@@ -147,6 +147,48 @@ async function ptyTreeKillTest() {
   }
 }
 
+// macOS twin of the above: under the tab's zsh, `sh -c` starts a child (a), a
+// child that ignores TERM and HUP (b: only the SIGKILL round ends it) and an
+// orphan (c: its parent exits at once, so launchd adopts it; only the process
+// GROUP kill reaches it). kill() must end all three and leave the other tab's
+// tree alone; killAll() (window close / quit) ends the rest.
+async function ptyTreeKillTestDarwin() {
+  if (!ptyhost.available()) return { ok: false, detail: 'node-pty unavailable' };
+  const os = require('node:os');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-smoke-tree-'));
+  const alive = (pid) => { try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } };
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+  const waitFor = async (fn, ms) => { const end = Date.now() + ms; while (Date.now() < end) { const v = fn(); if (v) return v; await sleep(200); } return fn(); };
+  const readPid = (f) => { try { return Number(fs.readFileSync(f, 'utf8').trim()) || 0; } catch { return 0; } };
+  const ids = ['smoketree1', 'smoketree2'];
+  const pids = {};
+  try {
+    for (const id of ids) {
+      ptyhost.create(id, U.BIN_ROOT, 160, 30);
+      await sleep(1500);
+      const f = (k) => path.join(dir, `${id}.${k}`);
+      ptyhost.write(id, `sh -c 'sleep 600 & echo $! > "${f('a')}"; (trap "" TERM HUP; exec sleep 600) & echo $! > "${f('b')}"; (sleep 600 & echo $! > "${f('c')}"); wait'\r`);
+      const got = await waitFor(() => { const v = ['a', 'b', 'c'].map(k => readPid(f(k))); return v.every(Boolean) ? v : null; }, 15000);
+      if (!got) return { ok: false, detail: `${id}: the fake tree never started` };
+      pids[id] = got;
+    }
+    const [a, b] = ids.map(id => pids[id]);
+    if (![...a, ...b].every(alive)) return { ok: false, detail: `not alive before kill: ${JSON.stringify(pids)}` };
+    ptyhost.kill(ids[0]);
+    const goneA = await waitFor(() => a.every(p => !alive(p)), 8000);
+    const keptB = b.every(alive) && ptyhost.alive(ids[1]);
+    ptyhost.killAll(); // synchronous tree kill
+    const goneB = await waitFor(() => b.every(p => !alive(p)), 4000);
+    return { ok: goneA && keptB && goneB, detail: `kill(): ${a.join(',')} gone=${goneA}, other tab's ${b.join(',')} kept=${keptB}; killAll(): gone=${goneB}` };
+  } catch (err) {
+    return { ok: false, detail: 'threw: ' + (err && err.message ? err.message : err) };
+  } finally {
+    for (const id of ids) ptyhost.kill(id);
+    for (const p of Object.values(pids).flat()) { if (p && alive(p)) { try { process.kill(p, 'SIGKILL'); } catch {} } }
+    setTimeout(() => { try { fs.rmSync(dir, { recursive: true, force: true }); } catch {} }, 2000);
+  }
+}
+
 // create() on a live termId: the old pty's exit (it closes only after its tree
 // kill, ~1 s) must not clean up or report the NEW pty as exited
 async function ptyRecreateTest() {
@@ -166,19 +208,29 @@ async function ptyRecreateTest() {
   }
 }
 
-async function runSmoke() {
+// hooks (from index.cjs): openWorkspaceWindow(ws) opens a real workspace window
+// (screenshot mode) and restorePtyData() re-wires pty output to windows; both
+// used by the macOS window test
+async function runSmoke(hooks = {}) {
   U.ensureDir(U.dataRoot());
   U.ensureDir(path.join(U.dataRoot(), 'icons'));
 
-  // 1. munge
+  // 1. munge (pure: both platforms' paths everywhere)
   const munged = U.mungeClaudeDir('D:\\Repositories\\PlacementFlow');
   check('claude dir munge', munged === 'D--Repositories-PlacementFlow', munged);
+  const mungedMac = U.mungeClaudeDir('/Users/x/Repo');
+  check('claude dir munge (macOS path)', mungedMac === '-Users-x-Repo', mungedMac);
 
-  // 2. real session store discovery (read-only, against the live ~/.claude)
-  const dir = U.resolveClaudeProjectDir('D:\\Repositories\\PlacementFlow');
-  const jsonl = dir ? fs.readdirSync(dir).filter(f => f.endsWith('.jsonl')).length : 0;
-  check('placementflow session dir found', Boolean(dir), dir || 'not found');
-  check('placementflow has sessions', jsonl > 0, `${jsonl} sessions`);
+  // 2. real session store discovery (read-only, against the live ~/.claude).
+  // Windows dev PC only: it needs Valentin's PlacementFlow transcripts.
+  const dir = process.platform === 'win32' ? U.resolveClaudeProjectDir('D:\\Repositories\\PlacementFlow') : null;
+  if (process.platform === 'win32') {
+    const jsonl = dir ? fs.readdirSync(dir).filter(f => f.endsWith('.jsonl')).length : 0;
+    check('placementflow session dir found', Boolean(dir), dir || 'not found');
+    check('placementflow has sessions', jsonl > 0, `${jsonl} sessions`);
+  } else {
+    check('placementflow session store (real ~/.claude)', true, 'skipped — Windows dev PC only');
+  }
 
   // 3. ico build (default + from generated png)
   const sharp = require('sharp');
@@ -191,18 +243,20 @@ async function runSmoke() {
   check('ico build', headerOk && buf.length > 1000, `${buf.length} bytes, count=${buf.readUInt16LE(4)}`);
 
   // 4. registry CRUD
-  const ws = await workspaces.create({ name: 'Smoke Repo', repoPath: 'D:\\Repositories', logoPath: tmpPng });
+  const smokeRepoPath = process.platform === 'win32' ? 'D:\\Repositories' : require('node:os').tmpdir();
+  const ws = await workspaces.create({ name: 'Smoke Repo', repoPath: smokeRepoPath, logoPath: tmpPng });
   check('workspace create', Boolean(workspaces.get(ws.id)) && ws.iconPath && fs.existsSync(ws.iconPath), ws.id);
   {
     // a logo change must land at a NEW icon path (Windows caches taskbar icons by
-    // path); the first icon stays, older versioned ones are pruned
+    // path); the first icon stays, older versioned ones are pruned. Same scheme
+    // on macOS with .png (workspaces.ICON_EXT)
     const first = ws.iconPath;
     const a = await workspaces.updateLogo(ws.id, tmpPng, 1_000_000);
     const pathA = a.iconPath;
     const b = await workspaces.updateLogo(ws.id, tmpPng, 2_000_000);
     const pathB = b.iconPath;
     const c = await workspaces.updateLogo(ws.id, tmpPng, 3_000_000);
-    const versioned = (p) => path.basename(p).startsWith(ws.id + '.v') && p.endsWith('.ico');
+    const versioned = (p) => path.basename(p).startsWith(ws.id + '.v') && p.endsWith(workspaces.ICON_EXT);
     check('logo change gets a new icon path each time; old versions pruned',
       pathA !== first && pathB !== pathA && c.iconPath !== pathB && versioned(pathA) && versioned(c.iconPath)
       && fs.existsSync(c.iconPath) && fs.existsSync(pathB) && !fs.existsSync(pathA) && fs.existsSync(first)
@@ -227,7 +281,10 @@ async function runSmoke() {
   // 6. fresh-repo session tracking: dir appears only AFTER claude's first message
   {
     const sessions = require('./sessions.cjs');
-    const BS = String.fromCharCode(92); const fakeRepo = 'D:' + BS + 'Repositories' + BS + 'vibespace-smoke-fresh-' + U.randId(6);
+    // fake repo path (never created): a drive path on Windows, a home path on macOS
+    const BS = String.fromCharCode(92);
+    const fakeRoot = process.platform === 'win32' ? 'D:' + BS + 'Repositories' : path.join(require('node:os').homedir(), 'Repositories');
+    const fakeRepo = path.join(fakeRoot, 'vibespace-smoke-fresh-' + U.randId(6));
     sessions.start('smoke-fresh', fakeRepo); // no dir exists yet
     sessions.trackClaudeStart('smoke-fresh', 't1');
     const mungedDir = path.join(U.claudeProjectsDir(), U.mungeClaudeDir(fakeRepo));
@@ -552,7 +609,8 @@ async function runSmoke() {
     statusMod.onData((wsId, termId, st) => { got = { wsId, termId, st }; });
     statusMod.start('smoke-ws', dir);
     fs.writeFileSync(path.join(dir, 't9.status'), 'idle-noise\nworking\n'); // last line wins
-    await new Promise(r => setTimeout(r, 900));
+    // up to 3 s: FSEvents on a loaded Mac runner took longer than 900 ms
+    for (let i = 0; i < 30 && !got; i++) await new Promise(r => setTimeout(r, 100));
     check('status watcher emits last status line', got && got.wsId === 'smoke-ws' && got.termId === 't9' && got.st === 'working', JSON.stringify(got));
     statusMod.stop('smoke-ws');
     try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
@@ -663,6 +721,108 @@ async function runSmoke() {
     check('fsops.remove refuses nonexistent', threw);
 
     try { fs.rmSync(root, { recursive: true, force: true }); } catch {}
+  }
+
+  // 16b. media preview: vsfile:// (main/mediaserve.cjs) on a temp repo — every
+  //      platform. The handler is driven directly (the registered one only
+  //      serves workspaces with a window in this process); net.fetch then
+  //      proves the scheme itself is registered.
+  {
+    const os = require('node:os');
+    const ms = require('./mediaserve.cjs');
+    const mu = await import(require('node:url').pathToFileURL(path.join(U.ROOT, 'renderer', 'workspace', 'ui', 'mediaurl.js')).href);
+    // mkdtemp path as-is (macOS: /var/… is a symlink to /private/var/…)
+    const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'vibespace-media-'));
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'vibespace-media-out-'));
+    try {
+      const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64');
+      const mp4 = Buffer.alloc(100);
+      for (let i = 0; i < mp4.length; i++) mp4[i] = i;
+      fs.mkdirSync(path.join(repo, 'ads', 'week 1'), { recursive: true });
+      const pngFile = path.join(repo, 'ads', 'week 1', 'logo #1.png'); // space + '#' must survive the URL
+      const mp4File = path.join(repo, 'ads', 'clip.mp4');
+      fs.writeFileSync(pngFile, png);
+      fs.writeFileSync(mp4File, mp4);
+      fs.writeFileSync(path.join(repo, 'notes.txt'), 'x');
+      fs.writeFileSync(path.join(outside, 'secret.png'), png);
+      const h = ms.handler((id) => (id === 'smoke-media' ? repo : null));
+      const get = (url, headers = {}) => h(new Request(url, { headers }));
+      const url = (f) => mu.mediaUrl('smoke-media', f, 1234);
+
+      const r1 = await get(url(pngFile));
+      const b1 = Buffer.from(await r1.arrayBuffer());
+      const r2 = await get(url(mp4File));
+      const b2 = Buffer.from(await r2.arrayBuffer());
+      check('media: full GET 200 with type, length, no-store (png + mp4)',
+        r1.status === 200 && r1.headers.get('content-type') === 'image/png' && b1.equals(png)
+        && r1.headers.get('content-length') === String(png.length) && r1.headers.get('cache-control') === 'no-store'
+        && r2.status === 200 && r2.headers.get('content-type') === 'video/mp4' && b2.equals(mp4) && r2.headers.get('accept-ranges') === 'bytes',
+        `${r1.status} ${r1.headers.get('content-type')} ${b1.length}B / ${r2.status} ${r2.headers.get('content-type')} ${b2.length}B`);
+
+      const r3 = await get(url(mp4File), { Range: 'bytes=0-9' });
+      const b3 = Buffer.from(await r3.arrayBuffer());
+      const r4 = await get(url(mp4File), { Range: 'bytes=90-' });
+      const b4 = Buffer.from(await r4.arrayBuffer());
+      const r5 = await get(url(mp4File), { Range: 'bytes=500-' });
+      check('media: Range → 206 + Content-Range + exact bytes; past the end → 416',
+        r3.status === 206 && r3.headers.get('content-range') === 'bytes 0-9/100' && r3.headers.get('content-length') === '10'
+        && b3.equals(mp4.subarray(0, 10)) && r4.status === 206 && b4.equals(mp4.subarray(90))
+        && r5.status === 416 && r5.headers.get('content-range') === 'bytes */100',
+        `${r3.status} ${r3.headers.get('content-range')} ${b3.length}B; ${r4.status} ${b4.length}B; ${r5.status}`);
+
+      const out = await get(url(path.join(outside, 'secret.png')));
+      const base = mu.mediaUrl('smoke-media', repo); // no ?v= — segments get appended
+      const dots = await get(base + '/../' + encodeURIComponent(path.basename(outside)) + '/secret.png');
+      const dots2 = await get(base + '/%2e%2e/' + encodeURIComponent(path.basename(outside)) + '/secret.png');
+      const smuggled = await get(base + '/..%2F' + encodeURIComponent(path.basename(outside)) + '%2Fsecret.png');
+      const txt = await get(url(path.join(repo, 'notes.txt')));
+      const otherWs = await h(new Request(mu.mediaUrl('not-this-process', pngFile)));
+      const missing = await get(url(path.join(repo, 'nope.png')));
+      check('media: outside the repo, .. traversal, non-media, foreign workspace, missing → rejected',
+        out.status === 403 && dots.status === 403 && dots2.status === 403 && smuggled.status === 404
+        && txt.status === 403 && otherWs.status === 404 && missing.status === 404,
+        JSON.stringify({ out: out.status, dots: dots.status, dots2: dots2.status, smuggled: smuggled.status, txt: txt.status, otherWs: otherWs.status, missing: missing.status }));
+
+      // a link inside the repo pointing out (junction on Windows: no admin needed)
+      let linkStatus = 'skipped';
+      try {
+        fs.symlinkSync(outside, path.join(repo, 'linked'), process.platform === 'win32' ? 'junction' : 'dir');
+        linkStatus = (await get(url(path.join(repo, 'linked', 'secret.png')))).status;
+      } catch (e) { linkStatus = 'skipped: ' + e.code; }
+      check('media: symlink/junction escape → 403 (realpath)', linkStatus === 403 || String(linkStatus).startsWith('skipped'), String(linkStatus));
+
+      // pure path/range logic, both platforms' path rules on any machine
+      const win = 'D:\\Users\\Ad Maker\\Kampagne #2\\b%20ild.png';
+      const mac = '/Users/ad maker/Desktop/über?.mp4';
+      const back = (u, p) => { const r = ms.parseUrl(u, p); return r && r.wsId === 'w-1' ? r.file : null; };
+      const rt = back(mu.mediaUrl('w-1', win, 5), path.win32) === win && back(mu.mediaUrl('w-1', win.replace(/\\/g, '/')), path.win32) === win
+        && back(mu.mediaUrl('w-1', mac, 5), path.posix) === mac;
+      const segRefused = [['C%3A', '..', 'x.png'], ['C%3A', 'a%5Cb.png'], ['C%3A', 'f.png%3Astream'], ['%5C%5Cserver', 'x.png'], ['C%3A', '%00.png']]
+        .every(s => ms.pathFromSegments(s, path.win32) === null) && ms.pathFromSegments(['Users', '..', 'x'], path.posix) === null
+        && ms.pathFromSegments(['%E0%A4%A'], path.posix) === null;
+      const pr = (hdr, size) => JSON.stringify(ms.parseRange(hdr, size));
+      const ranges = pr('bytes=0-9', 100) === '{"start":0,"end":9}' && pr('bytes=95-200', 100) === '{"start":95,"end":99}'
+        && pr('bytes=-10', 100) === '{"start":90,"end":99}' && pr('bytes=-500', 100) === '{"start":0,"end":99}'
+        && pr('bytes=100-', 100) === '"unsatisfiable"' && pr('bytes=-0', 100) === '"unsatisfiable"' && pr('bytes=0-', 0) === '"unsatisfiable"'
+        && pr(null, 100) === 'null' && pr('bytes=5-2', 100) === 'null' && pr('bytes=0-1,4-5', 100) === 'null' && pr('items=0-1', 100) === 'null';
+      const kinds = ms.kindOf('a.PNG') === 'image' && ms.kindOf('x.svg') === 'image' && ms.kindOf('c.mov') === 'video'
+        && ms.kindOf('s.m4a') === 'audio' && ms.kindOf('n.txt') === null && ms.kindOf('z.zip') === null;
+      check('media: URL round-trip (Windows + macOS paths), segment guards, Range parsing, kinds',
+        rt && segRefused && ranges && kinds, JSON.stringify({ rt, segRefused, ranges, kinds }));
+
+      // the real registration answers (no window of this ws here → 404, not a network error)
+      if (process.versions.electron) {
+        let st = null;
+        try { st = (await require('electron').net.fetch(mu.mediaUrl('smoke-none', pngFile))).status; } catch (e) { st = 'threw: ' + e.message; }
+        check('media: vsfile:// scheme registered (net.fetch reaches the handler)', st === 404, String(st));
+      }
+    } finally {
+      // drop the link itself first, never through it
+      const link = path.join(repo, 'linked');
+      try { fs.unlinkSync(link); } catch { try { fs.rmdirSync(link); } catch {} }
+      try { fs.rmSync(repo, { recursive: true, force: true }); } catch {}
+      try { fs.rmSync(outside, { recursive: true, force: true }); } catch {}
+    }
   }
 
   // 17. gitdiff: CRLF normalization + end-to-end pairs on a temp git repo
@@ -862,8 +1022,19 @@ async function runSmoke() {
     }
   }
 
-  // 17. PATH rebuild from registry (the stripped/mangled-PATH class of bugs)
-  {
+  // 17. PATH rebuild from registry (the stripped/mangled-PATH class of bugs);
+  //     macOS: from the login shell, merged with fixed fallbacks, never empty
+  if (process.platform === 'darwin') {
+    const rebuilt = U.rebuildPath('/usr/bin:/bin:.:/usr/bin/');
+    const parts = rebuilt.split(':');
+    check('PATH rebuild (macOS): login-shell PATH + fallbacks, deduped, no relative entries',
+      parts.includes('/usr/bin') && parts.includes('/bin') && parts.length === new Set(parts).size && !parts.includes('.') && !parts.includes(''),
+      `${parts.length} entries: ${rebuilt.slice(0, 200)}`);
+    const t0 = Date.now();
+    const noShell = U.rebuildPath('', { shell: '/nonexistent/zsh' });
+    check('PATH rebuild (macOS): a broken login shell still gives a usable PATH', noShell.split(':').includes('/usr/bin') && Date.now() - t0 < 4000, noShell);
+  }
+  if (process.platform === 'win32') {
     const rebuilt = U.rebuildPath('C:\\Windows;C:\\Windows;junk;C:Windows');
     const parts = rebuilt.split(';');
     const dupes = parts.length !== new Set(parts.map(p => p.toLowerCase())).size;
@@ -892,7 +1063,7 @@ async function runSmoke() {
   }
 
   // 19. junk "Electron.lnk" cleanup (pinned-before-shortcut taskbar bug)
-  {
+  if (process.platform === 'win32') {
     const { shell } = require('electron');
     const shortcutsMod = require('./shortcuts.cjs');
     const realAppData = process.env.APPDATA;
@@ -929,7 +1100,33 @@ async function runSmoke() {
 
   // 21. terminal env has ONE path key and resolves user-PATH tools by name
   //     (the Path/PATH duplicate-key bug that broke node/python/MCP servers)
-  {
+  if (process.platform === 'darwin') {
+    // case-sensitive env: PATH is set, "Path" is a different variable and stays
+    const e = ptyhost._withSinglePath({ Path: 'other', PATH: 'old', Other: '1' }, 'final');
+    check('pty env (macOS) sets PATH only, case-sensitive', e.PATH === 'final' && e.Path === 'other' && e.Other === '1', JSON.stringify(e));
+    const r = await new Promise((resolve) => {
+      let buf = '';
+      const termId = 'smokeenv';
+      const marker = `__ENV_${Date.now()}__`;
+      const timer = setTimeout(() => { ptyhost.onData(() => {}); ptyhost.kill(termId); resolve({ ok: false, detail: 'timeout: ' + buf.slice(-200) }); }, 20000);
+      ptyhost.onData((id, chunk) => {
+        if (id !== termId) return;
+        buf += chunk;
+        const flat = buf.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '').replace(/\r?\n/g, '');
+        // the echoed command has a quote right after "GIT="; the OUTPUT does not
+        const m = flat.match(new RegExp(marker + 'GIT=([^"|]*)\\|USRBIN=(\\d)\\|' + marker + 'END'));
+        if (!m) return;
+        clearTimeout(timer);
+        ptyhost.onData(() => {});
+        ptyhost.kill(termId);
+        resolve({ ok: /\/git$/.test(m[1].trim()) && m[2] === '1', detail: `git=${m[1].trim() || 'NOT FOUND'} usrBinOnPath=${m[2]}` });
+      });
+      try { ptyhost.create(termId, U.BIN_ROOT, 200, 30); } catch (err) { clearTimeout(timer); resolve({ ok: false, detail: 'spawn: ' + err.message }); return; }
+      setTimeout(() => ptyhost.write(termId, `echo "${marker}GIT=""$(command -v git)""|USRBIN=""$([[ ":$PATH:" == *:/usr/bin:* ]] && echo 1 || echo 0)""|${marker}END"\r`), 1500);
+    });
+    check('terminal (macOS login zsh) has a full PATH: git by name, /usr/bin', r.ok, r.detail);
+  }
+  if (process.platform === 'win32') {
     const e = ptyhost._withSinglePath({ Path: 'full', PATH: 'stripped', path: 'x', Other: '1' }, 'final');
     const pathKeys = Object.keys(e).filter(k => k.toUpperCase() === 'PATH');
     check('pty env collapses to a single Path key', pathKeys.length === 1 && e.Path === 'final' && e.Other === '1', pathKeys.join(','));
@@ -1132,8 +1329,10 @@ async function runSmoke() {
 
     // C — exact session pin from the feed (only once the transcript exists; the
     // timing heuristic never overrides it afterwards)
+    // fake repo paths (never created): a drive path on Windows, a home path on macOS
     const BS = String.fromCharCode(92);
-    const repo = 'D:' + BS + 'Repositories' + BS + 'vibespace-smoke-feedsess-' + U.randId(6);
+    const fakeRoot = process.platform === 'win32' ? 'D:' + BS + 'Repositories' : path.join(require('node:os').homedir(), 'Repositories');
+    const repo = path.join(fakeRoot, 'vibespace-smoke-feedsess-' + U.randId(6));
     const dir = path.join(U.claudeProjectsDir(), U.mungeClaudeDir(repo));
     fs.mkdirSync(dir, { recursive: true });
     sessions.start('smoke-fs', repo);
@@ -1162,7 +1361,7 @@ async function runSmoke() {
     // file doesn't exist yet, pins each tab once its file appears (a claude that
     // dies with no later tick keeps its conversation).
     {
-      const r1 = 'D:' + BS + 'Repositories' + BS + 'vibespace-smoke-feedlaunch-' + U.randId(6);
+      const r1 = path.join(fakeRoot, 'vibespace-smoke-feedlaunch-' + U.randId(6));
       const d1 = path.join(U.claudeProjectsDir(), U.mungeClaudeDir(r1));
       fs.mkdirSync(d1, { recursive: true });
       const fA = 'a1a1a1a1-0000-4000-8000-000000000011';
@@ -1188,7 +1387,7 @@ async function runSmoke() {
 
       // C1b — a claude WITHOUT the feed still gets the timing guess, which never
       // takes an id the feed named for another tab; a feed pin then wins over it
-      const r2 = 'D:' + BS + 'Repositories' + BS + 'vibespace-smoke-nofeed-' + U.randId(6);
+      const r2 = path.join(fakeRoot, 'vibespace-smoke-nofeed-' + U.randId(6));
       const d2 = path.join(U.claudeProjectsDir(), U.mungeClaudeDir(r2));
       fs.mkdirSync(d2, { recursive: true });
       const nE = 'e5e5e5e5-0000-4000-8000-000000000015';
@@ -1217,7 +1416,7 @@ async function runSmoke() {
     // it with the tab's cwd; the timing heuristic never hands an offRepo term a
     // repo-dir file.
     {
-      const wtCwd = repo + BS + '.claude' + BS + 'worktrees' + BS + 'agent-1';
+      const wtCwd = path.join(repo, '.claude', 'worktrees', 'agent-1');
       const repoDir = path.join(U.claudeProjectsDir(), U.mungeClaudeDir(repo));
       const wtDir = path.join(U.claudeProjectsDir(), U.mungeClaudeDir(wtCwd));
       fs.mkdirSync(repoDir, { recursive: true });
@@ -1250,7 +1449,7 @@ async function runSmoke() {
     // D — background agents: only kind=background under the repo, newest first
     const bg = require('./bgagents.cjs');
     const list = [
-      { id: '6ce06036', kind: 'background', cwd: repo + BS + 'sub', startedAt: 2, name: 'fix it', status: 'busy', state: 'working' },
+      { id: '6ce06036', kind: 'background', cwd: path.join(repo, 'sub'), startedAt: 2, name: 'fix it', status: 'busy', state: 'working' },
       { id: 'aa11bb22', kind: 'background', cwd: repo, startedAt: 3, name: 'newer', status: 'idle', state: 'done' },
       { sessionId: 'x', kind: 'interactive', cwd: repo, startedAt: 4, name: 'tab' },
       { id: 'dd33ee44', kind: 'background', cwd: repo + 'suffix', startedAt: 5 },        // sibling prefix: not ours
@@ -1298,22 +1497,27 @@ async function runSmoke() {
     const sc = await import(require('node:url').pathToFileURL(path.join(U.ROOT, 'renderer', 'workspace', 'ui', 'shellcmd.js')).href);
     const am = await import(require('node:url').pathToFileURL(path.join(U.ROOT, 'renderer', 'workspace', 'ui', 'automove.js')).href);
     const os = require('node:os');
-    const cases = [
-      ['echo one # comment', false], [`echo "it's" 'say "hi"'`, false], ['echo \u2018smart\u2019', false],
-      ['cmd /c exit 3', true], ["throw 'boom'", true], ['echo (', true],
-    ];
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-setup-'));
-    const file = path.join(dir, 'setup.ps1');
-    fs.writeFileSync(file, '\ufeff' + cases.map(([s], i) => `Write-Output 'CASE-${i}'; ` + sc.setupPrefix(s) + `Write-Output 'CLAUDE-${i}'`).join('\r\n') + '\r\n', 'utf8');
-    const ps = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
-    const run = require('node:child_process').spawnSync(ps, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', file], { encoding: 'utf8', timeout: 30000, windowsHide: true });
-    try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
-    const out = String(run.stdout || '') + String(run.stderr || '');
-    const got = cases.map(([, fails], i) => {
-      const part = out.split(`CASE-${i}`)[1] || '';
-      const seg = part.split(`CASE-${i + 1}`)[0];
-      return seg.includes(`CLAUDE-${i}`) && /worktree setup command failed/.test(seg) === fails;
-    });
+    // the PowerShell run is Windows-only (the zsh/bash twins: 22c-posix below)
+    let out = '';
+    let got = [true];
+    if (process.platform === 'win32') {
+      const cases = [
+        ['echo one # comment', false], [`echo "it's" 'say "hi"'`, false], ['echo \u2018smart\u2019', false],
+        ['cmd /c exit 3', true], ["throw 'boom'", true], ['echo (', true],
+      ];
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-setup-'));
+      const file = path.join(dir, 'setup.ps1');
+      fs.writeFileSync(file, '\ufeff' + cases.map(([s], i) => `Write-Output 'CASE-${i}'; ` + sc.setupPrefix(s) + `Write-Output 'CLAUDE-${i}'`).join('\r\n') + '\r\n', 'utf8');
+      const ps = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+      const run = require('node:child_process').spawnSync(ps, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', file], { encoding: 'utf8', timeout: 30000, windowsHide: true });
+      try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+      out = String(run.stdout || '') + String(run.stderr || '');
+      got = cases.map(([, fails], i) => {
+        const part = out.split(`CASE-${i}`)[1] || '';
+        const seg = part.split(`CASE-${i + 1}`)[0];
+        return seg.includes(`CLAUDE-${i}`) && /worktree setup command failed/.test(seg) === fails;
+      });
+    }
     const refusal = sc.bgRefusal('\x1b[31mThat session is running in the\r\n background (6ce06036).\x1b[0m Run `claude attach 6ce06036` or `claude stop 6ce06036` first');
     const lines = am.autoMoveSummary(['a1', 'a2', 'a3', 'a4'].map(name => ({ name, to: 'main', toLabel: 'MAIN', why: 'cache cold' })));
     const r = {
@@ -1323,6 +1527,88 @@ async function runSmoke() {
     };
     check('shell text: setup script block (# / quotes / errors still start claude), bg refusal, one toast per burst',
       Object.values(r).every(v => v === true), JSON.stringify(r) + (got.every(Boolean) ? '' : ' out=' + out.slice(0, 400)));
+  }
+
+  // 22c-posix. the macOS twins in shellcmd.js (zsh/bash): pure string checks on
+  //      every platform; on darwin the lines also RUN under /bin/zsh and
+  //      /bin/bash: the setup goes through eval in a subshell (# / quotes /
+  //      errors / cd still start claude in place, with the warning only on
+  //      failure), and the cloud line runs the real claude from PATH (a shim
+  //      that prints argv + env), never the tab's `claude` function, with the
+  //      task as ONE unchanged argument and the token variables unset for the
+  //      call only
+  {
+    const sc = await import(require('node:url').pathToFileURL(path.join(U.ROOT, 'renderer', 'workspace', 'ui', 'shellcmd.js')).href);
+    const os = require('node:os');
+    const UNSET = 'command env -u CLAUDE_CODE_OAUTH_TOKEN -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN -u ANTHROPIC_BASE_URL';
+    const typed = [sc.setupPrefix('npm ci\n\tcp ../x .', 'darwin'), sc.cloudSendLine('a\nb\tc\x1bd', { platform: 'darwin' }), sc.cloudLoginLine({ platform: 'darwin' })];
+    let junk = false;
+    try { sc.teleportLine('session_x; rm -rf ~', { platform: 'darwin' }); } catch { junk = true; }
+    const r = {
+      quote: sc.shQuote("it's $HOME `x` !!") === "'it'\\''s $HOME `x` !!'" && sc.shQuote('') === "''",
+      string: sc.shString('a\nb\tc\x1b\r\nd') === "'a'$'\\n''b'$'\\t''c'$'\\n''d'" && sc.shString('') === "''" && sc.shString('\n') === "$'\\n'",
+      setup: sc.setupPrefix('', 'darwin') === '' && sc.setupPrefix(' \n ', 'darwin') === ''
+        && sc.setupPrefix('npm ci\ncp ../x .', 'darwin') === "( eval 'npm ci'$'\\n''cp ../x .' ) || printf '\\033[33m%s\\033[0m\\n' 'VibeSpace: the worktree setup command failed; starting claude anyway'; ",
+      claude: sc.cloudSendLine("it's", { platform: 'darwin', configDir: '/Users/a b/cloud/max-2' }) === `${UNSET} CLAUDE_CONFIG_DIR='/Users/a b/cloud/max-2' claude '--cloud' 'it'\\''s'`
+        && sc.teleportLine('session_01ABCdefGHIjkl', { platform: 'darwin' }) === `${UNSET} claude '--teleport' 'session_01ABCdefGHIjkl'`
+        && sc.cloudLoginLine({ platform: 'darwin' }) === `${UNSET} claude`,
+      noControl: typed.every(l => !/[\x00-\x1f\x7f]/.test(l)),
+      junk,
+      winUnchanged: sc.setupPrefix('x', 'win32').startsWith('$vsE = $Error.Count;') && sc.realClaudeLine([], { platform: 'win32' }).startsWith('$vsX = '),
+    };
+    if (process.platform === 'darwin') {
+      const cp = require('node:child_process');
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-posix-'));
+      const bin = path.join(dir, 'bin');
+      fs.mkdirSync(bin);
+      const probe = path.join(dir, 'probe.js');
+      fs.writeFileSync(probe, "process.stdout.write('VSARGS[' + Buffer.from(JSON.stringify({ a: process.argv.slice(2), cfg: process.env.CLAUDE_CONFIG_DIR || null, tok: process.env.CLAUDE_CODE_OAUTH_TOKEN || null, base: process.env.ANTHROPIC_BASE_URL || null })).toString('base64') + ']\\n')");
+      // the real claude on PATH: electron as node runs the probe with claude's args
+      fs.writeFileSync(path.join(bin, 'claude'), '#!/bin/sh\nexec "$VS_NODE" "$VS_PROBE" "$@"\n', { mode: 0o755 });
+      const cfg = path.join(dir, "cloud dir", "it's");
+      const tasks = [
+        'fix "the" login bug # not a comment, $HOME and $(whoami) stay text',
+        'line one\nline two\twith a tab\n/path/ends\\',
+        "it's ‘smart’ and `ticked` and !! !$ \\\"escaped\\\"",
+      ];
+      const setups = [
+        ['echo one # comment', false], [`echo "it's" 'say "hi"'`, false], ['echo ‘smart’ !x $(echo sub)', false],
+        ['false', true], ['exit 3', true], ['echo (', true], ['cd /\necho two\nfalse\necho last', false],
+      ];
+      let script = 'claude() { echo WRAPPER-CALLED; }\n'; // the tab's wrapper must never run
+      tasks.forEach((t, i) => {
+        script += `echo TASK-${i}; ` + sc.cloudSendLine(t, { platform: 'darwin', configDir: i === 1 ? null : cfg })
+          + `; echo "AFTER[$CLAUDE_CODE_OAUTH_TOKEN|$CLAUDE_CONFIG_DIR|$ANTHROPIC_BASE_URL]"\n`;
+      });
+      setups.forEach(([s], i) => { script += `echo SETUP-${i}; ` + sc.setupPrefix(s, 'darwin') + `echo "CLAUDE-${i} [$PWD]"\n`; });
+      script += 'echo SETUP-END\n';
+      const env = { ...process.env, PATH: bin + ':' + (process.env.PATH || '/usr/bin:/bin'), VS_NODE: process.execPath, VS_PROBE: probe,
+        ELECTRON_RUN_AS_NODE: '1', CLAUDE_CODE_OAUTH_TOKEN: 'tok-smoke', ANTHROPIC_BASE_URL: 'http://smoke.invalid' };
+      delete env.CLAUDE_CONFIG_DIR;
+      for (const sh of ['/bin/zsh', '/bin/bash']) {
+        const run = cp.spawnSync(sh, ['-c', script], { encoding: 'utf8', timeout: 30000, env, cwd: dir });
+        const out = String(run.stdout || '') + String(run.stderr || '');
+        const args = tasks.map((t, i) => {
+          const seg = (out.split(`TASK-${i}\n`)[1] || '').split(`TASK-${i + 1}\n`)[0];
+          const m = /VSARGS\[([A-Za-z0-9+/=]+)\]/.exec(seg);
+          let x = null;
+          try { x = JSON.parse(Buffer.from(m[1], 'base64').toString('utf8')); } catch {}
+          const after = /AFTER\[([^\]]*)\]/.exec(seg);
+          return Boolean(x && x.a.length === 2 && x.a[0] === '--cloud' && x.a[1] === t.trim()
+            && x.cfg === (i === 1 ? null : cfg) && x.tok === null && x.base === null
+            && after && after[1] === 'tok-smoke||http://smoke.invalid' && !seg.includes('WRAPPER-CALLED'));
+        });
+        const setup = setups.map(([, fails], i) => {
+          const seg = (out.split(`SETUP-${i}\n`)[1] || '').split(i + 1 < setups.length ? `SETUP-${i + 1}\n` : 'SETUP-END')[0];
+          return seg.includes(`CLAUDE-${i} [`) && !seg.includes(`CLAUDE-${i} [/]`) && /worktree setup command failed/.test(seg) === fails;
+        });
+        const key = path.basename(sh);
+        r[key] = args.every(Boolean) && setup.every(Boolean) ? true : `args ${args.join(',')} setup ${setup.join(',')} out=${out.slice(0, 500)}`;
+      }
+      try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+    }
+    check('shell text (zsh/bash): POSIX quoting, setup via eval in a subshell, real claude via env (task = one arg, token vars unset)',
+      Object.values(r).every(v => v === true), JSON.stringify(r));
   }
 
   // 22d. reasoning effort (statusLine { level }, hook string; subagents ignored)
@@ -1359,28 +1645,33 @@ async function runSmoke() {
       `line one\nline two\twith a tab\nC:\\path\\ends\\`,
       `it's ‘smart’ and \`ticked\` and \\"escaped\\"`,
     ];
-    // the stand-in for claude.exe: electron as node prints its argv + the env it got
-    const probe = "process.stdout.write('VSARGS[' + Buffer.from(JSON.stringify({ a: process.argv.slice(1), cfg: process.env.CLAUDE_CONFIG_DIR || null, tok: process.env.CLAUDE_CODE_OAUTH_TOKEN || null, base: process.env.ANTHROPIC_BASE_URL || null })).toString('base64') + ']')";
-    const lines = tasks.map((t, i) => `Write-Output 'CASE-${i}'; `
-      + sc.realClaudeLine(['-e', probe, '--', '--cloud', sc.cloudTask(t)], { exe: process.execPath, configDir: i === 1 ? null : cfg })
-      + `; Write-Output ('AFTER[' + $env:CLAUDE_CODE_OAUTH_TOKEN + '|' + $env:CLAUDE_CONFIG_DIR + '|' + $env:ANTHROPIC_BASE_URL + ']')`);
-    const file = path.join(dir, 'cloud.ps1');
-    fs.writeFileSync(file, '\ufeff' + lines.join('\r\n') + '\r\n', 'utf8');
-    const ps = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
-    const env = { ...process.env, ELECTRON_RUN_AS_NODE: '1', CLAUDE_CODE_OAUTH_TOKEN: 'tok-smoke', ANTHROPIC_BASE_URL: 'http://smoke.invalid' };
-    delete env.CLAUDE_CONFIG_DIR;
-    const run = require('node:child_process').spawnSync(ps, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', file], { encoding: 'utf8', timeout: 60000, windowsHide: true, env });
-    const out = String(run.stdout || '') + String(run.stderr || '');
-    const got = tasks.map((t, i) => {
-      const seg = (out.split(`CASE-${i}`)[1] || '').split(`CASE-${i + 1}`)[0];
-      const m = /VSARGS\[([A-Za-z0-9+/=]+)\]/.exec(seg);
-      let r = null;
-      try { r = JSON.parse(Buffer.from(m[1], 'base64').toString('utf8')); } catch {}
-      const after = /AFTER\[([^\]]*)\]/.exec(seg);
-      return Boolean(r && r.a.length === 2 && r.a[0] === '--cloud' && r.a[1] === t.trim()
-        && r.cfg === (i === 1 ? null : cfg) && r.tok === null && r.base === null
-        && after && after[1] === 'tok-smoke||http://smoke.invalid');
-    });
+    // the PowerShell run is Windows-only (the zsh/bash twin: 22c-posix)
+    let out = '';
+    let got = [true];
+    if (process.platform === 'win32') {
+      // the stand-in for claude.exe: electron as node prints its argv + the env it got
+      const probe = "process.stdout.write('VSARGS[' + Buffer.from(JSON.stringify({ a: process.argv.slice(1), cfg: process.env.CLAUDE_CONFIG_DIR || null, tok: process.env.CLAUDE_CODE_OAUTH_TOKEN || null, base: process.env.ANTHROPIC_BASE_URL || null })).toString('base64') + ']')";
+      const lines = tasks.map((t, i) => `Write-Output 'CASE-${i}'; `
+        + sc.realClaudeLine(['-e', probe, '--', '--cloud', sc.cloudTask(t)], { exe: process.execPath, configDir: i === 1 ? null : cfg })
+        + `; Write-Output ('AFTER[' + $env:CLAUDE_CODE_OAUTH_TOKEN + '|' + $env:CLAUDE_CONFIG_DIR + '|' + $env:ANTHROPIC_BASE_URL + ']')`);
+      const file = path.join(dir, 'cloud.ps1');
+      fs.writeFileSync(file, '\ufeff' + lines.join('\r\n') + '\r\n', 'utf8');
+      const ps = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+      const env = { ...process.env, ELECTRON_RUN_AS_NODE: '1', CLAUDE_CODE_OAUTH_TOKEN: 'tok-smoke', ANTHROPIC_BASE_URL: 'http://smoke.invalid' };
+      delete env.CLAUDE_CONFIG_DIR;
+      const run = require('node:child_process').spawnSync(ps, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', file], { encoding: 'utf8', timeout: 60000, windowsHide: true, env });
+      out = String(run.stdout || '') + String(run.stderr || '');
+      got = tasks.map((t, i) => {
+        const seg = (out.split(`CASE-${i}`)[1] || '').split(`CASE-${i + 1}`)[0];
+        const m = /VSARGS\[([A-Za-z0-9+/=]+)\]/.exec(seg);
+        let r = null;
+        try { r = JSON.parse(Buffer.from(m[1], 'base64').toString('utf8')); } catch {}
+        const after = /AFTER\[([^\]]*)\]/.exec(seg);
+        return Boolean(r && r.a.length === 2 && r.a[0] === '--cloud' && r.a[1] === t.trim()
+          && r.cfg === (i === 1 ? null : cfg) && r.tok === null && r.base === null
+          && after && after[1] === 'tok-smoke||http://smoke.invalid');
+      });
+    }
     const ansi = "PS D:\\Repos\\x> \x1b[?25l\x1b[32m✓\x1b[0m Created cloud session\r\n  \x1b]8;;https://claude.ai/code/session_01ABCdefGHIjklMNOpqrSTuv\x07\x1b[4mhttps://claude.ai/code/session_01ABCdefGHIjklMNOpqrSTuv\x1b[24m\x1b]8;;\x07.\r\n";
     const hit = sc.cloudSession(ansi);
     const echoed = 'see https://claude.ai/code/session_AAAAbbbbCCCC1111';
@@ -1543,7 +1834,8 @@ async function runSmoke() {
         resolve({ ok: m[1].trim().toLowerCase() === marker.toLowerCase(), detail: m[1].trim() || 'NOT SET' });
       });
       try { ptyhost.create(termId, U.BIN_ROOT, 200, 30); } catch (err) { clearTimeout(timer); resolve({ ok: false, detail: 'spawn: ' + err.message }); return; }
-      setTimeout(() => ptyhost.write(termId, `Write-Output ("${tag}P=" + $env:CLAUDE_CLIENT_PRESENCE_FILE + "|${tag}END")\r`), 900);
+      if (process.platform === 'darwin') setTimeout(() => ptyhost.write(termId, `echo "${tag}P=""$CLAUDE_CLIENT_PRESENCE_FILE""|${tag}END"\r`), 1500);
+      else setTimeout(() => ptyhost.write(termId, `Write-Output ("${tag}P=" + $env:CLAUDE_CLIENT_PRESENCE_FILE + "|${tag}END")\r`), 900);
     });
     check('pty env carries CLAUDE_CLIENT_PRESENCE_FILE', r.ok, r.detail);
   }
@@ -1576,9 +1868,110 @@ async function runSmoke() {
         done(bad.length === 0, bad.length ? 'wrong: ' + bad.join('; ') + ' got=' + JSON.stringify(got) : got.length + ' cases');
       });
       try { ptyhost.create(termId, U.BIN_ROOT, 200, 30, null, { settingsPath: 'S.json', rcLabel: 'WS · t1' }); } catch (err) { done(false, 'spawn: ' + err.message); return; }
-      setTimeout(() => ptyhost.write(termId, '$env:VIBESPACE_CLAUDE_DRYRUN=1; ' + cases.map(c => c[0]).join('; ') + '\r'), 900);
+      const dry = process.platform === 'darwin' ? 'export VIBESPACE_CLAUDE_DRYRUN=1; ' : '$env:VIBESPACE_CLAUDE_DRYRUN=1; ';
+      setTimeout(() => ptyhost.write(termId, dry + cases.map(c => c[0]).join('; ') + '\r'), process.platform === 'darwin' ? 1500 : 900);
     });
     check('pty `claude` wrapper adds tracking flags (hand-typed claude)', r.ok, r.detail);
+  }
+
+  // 23c. macOS process-tree walk (pure, every platform): one `ps` snapshot,
+  //      claude = argv[0] claude* / versions/<v> / node running claude; a tree
+  //      kill takes descendants + their groups, never a shell's group or claude's
+  //      daemon
+  {
+    const snap = ptyhost._parsePs([
+      '    1     0     1 /sbin/launchd',
+      '  600     1   600 /bin/zsh -l -i',
+      '  610   600   610 claude --resume abc',
+      '  620   610   610 node /x/mcp-server.js',
+      '  640   600   640 sleep 60',
+      '  650   600   600 cat',
+      '  660   610   660 claude daemon run',
+      '  700     1   700 /bin/zsh -l -i',
+      '  710   700   710 node /usr/local/lib/node_modules/@anthropic-ai/claude-code/cli.js',
+      '  720   700   720 /Users/v/.local/share/claude/versions/2.1.296 --resume x',
+      '  730   700   730 /Applications/Google Chrome.app/Contents/MacOS/Google Chrome --x',
+    ].join('\n'));
+    const sorted = (a) => JSON.stringify([...a].sort((x, y) => x - y));
+    const t = ptyhost._treeTargets(snap, [600], { shellPids: [600] });
+    const t2 = ptyhost._treeTargets(snap, [610], { includeRoots: true, shellPids: [600] });
+    const w = {
+      parsed: snap.length === 11 && snap[10].args.startsWith('/Applications/Google Chrome.app'),
+      claude600: sorted(ptyhost._claudePidsIn(snap, 600)) === '[610]',
+      claude700: sorted(ptyhost._claudePidsIn(snap, 700)) === '[710,720]',
+      none: ptyhost._claudePidsIn(snap, 640).length === 0,
+      names: ptyhost._isClaudeProc('/opt/homebrew/bin/claude --x') && !ptyhost._isClaudeProc('grep claude') && !ptyhost._isClaudeProc('node /x/mcp.js'),
+      tree: sorted(t.pids) === '[610,620,640,650]' && sorted(t.pgids) === '[610,640]',
+      claudeTree: sorted(t2.pids) === '[610,620]' && sorted(t2.pgids) === '[610]',
+      prompt: ptyhost._endsAtPrompt('x\r\n' + ptyhost._promptMark + 'v@mac ~ % ', 'darwin') && !ptyhost._endsAtPrompt('x\r\nv@mac ~ % ', 'darwin'),
+    };
+    check('macOS process-tree walk + prompt marker (pure)', Object.values(w).every(Boolean), JSON.stringify(w));
+  }
+
+  // 23d. macOS shell: our rc files parse (zsh -n / bash -n), the zsh `claude()`
+  //      per account kind (login → RC, missing Keychain token, endpoint swaps
+  //      --settings and refuses a foreign one, plain runs untouched), and the
+  //      precmd prompt marker after a command
+  if (process.platform === 'darwin') {
+    const cp = require('node:child_process');
+    const dir = ptyhost._shellInitDir();
+    const syn = ['.zshenv', '.zprofile', '.zshrc', '.zlogin', 'bashrc'].map((f) => {
+      const r = cp.spawnSync(f === 'bashrc' ? '/bin/bash' : '/bin/zsh', ['-n', path.join(dir, f)], { encoding: 'utf8', timeout: 10000 });
+      return r.status === 0 ? '' : `${f}: ${(r.stderr || r.error?.message || '').trim()}`;
+    }).filter(Boolean);
+    check('macOS rc files written and parse (zsh -n, bash -n)', syn.length === 0, syn.join('; ') || dir);
+
+    const dryRun = (termId, prep, typed, want, refuse = null) => new Promise((resolve) => {
+      let buf = '';
+      const done = (ok, detail) => { clearTimeout(timer); ptyhost.onData(() => {}); ptyhost.kill(termId); resolve({ ok, detail }); };
+      const timer = setTimeout(() => done(false, 'timeout: ' + buf.slice(-300)), 20000);
+      ptyhost.onData((id, chunk) => {
+        if (id !== termId) return;
+        buf += chunk;
+        const flat = buf.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '').replace(/\r?\n/g, '');
+        const got = [...flat.matchAll(/VS(?:ACCT|CLAUDE)\[[^\]]*\]/g)].map(m => m[0]);
+        if (got.length < want.length || (refuse && !flat.includes(refuse))) return;
+        const ok = got.length === want.length && want.every((x, i) => got[i] === x);
+        done(ok, ok ? `${got.length} lines${refuse ? ' + refusal' : ''}` : 'got=' + JSON.stringify(got));
+      });
+      try { ptyhost.create(termId, U.BIN_ROOT, 400, 30, 'smoke-mac', { settingsPath: 'S.json', rcLabel: 'WS · t1' }); } catch (err) { done(false, 'spawn: ' + err.message); return; }
+      prep(termId);
+      setTimeout(() => ptyhost.write(termId, 'export VIBESPACE_CLAUDE_DRYRUN=1; ' + typed + '\r'), 1500);
+    });
+    const r1 = await dryRun('smokemacacct', (id) => ptyhost.setAccount(id, 'login'),
+      'claude; claude -p hi; printf %s ghost-zz99 > "$VIBESPACE_ACCOUNT_FILE"; claude --resume abc',
+      ['VSACCT[login]', 'VSCLAUDE[--remote-control|WS · t1|--settings|S.json]', 'VSCLAUDE[-p|hi]',
+        'VSACCT[ghost-zz99|missing]', 'VSCLAUDE[--resume|abc|--settings|S.json]']);
+    check('macOS `claude` wrapper dry-run (login → RC, plain -p untouched, missing Keychain token → no RC)', r1.ok, r1.detail);
+    const epsFile = ptyhost.endpointSettingsFor('smoke-mac', 'smokemacep');
+    const r2 = await dryRun('smokemacep', (id) => { ptyhost.setAccount(id, 'smoke-ep'); ptyhost.writeEndpointSettings(id, 'smoke-mac', null, { ANTHROPIC_BASE_URL: 'https://example.invalid' }); },
+      "claude; claude --resume abc --settings 'S.json'; claude --settings '/other.json'",
+      ['VSACCT[smoke-ep|endpoint]', `VSCLAUDE[--settings|${epsFile}]`, 'VSACCT[smoke-ep|endpoint]', `VSCLAUDE[--resume|abc|--settings|${epsFile}]`],
+      "endpoint account 'smoke-ep': start claude without --settings");
+    check('macOS `claude` wrapper dry-run (endpoint swaps --settings, refuses a foreign one)', r2.ok && !fs.existsSync(epsFile), r2.detail);
+
+    // the precmd marker: a finished command → 'prompt'; idle with no claude → 'gone'
+    const termId = 'smokemacprompt';
+    let w1 = null;
+    let w2 = null;
+    let marked = false;
+    let at = null;
+    try {
+      ptyhost.create(termId, U.BIN_ROOT, 120, 30);
+      await new Promise(r => setTimeout(r, 1500));
+      const p1 = ptyhost.waitClaudeExit(termId, 8000);
+      ptyhost.write(termId, 'echo waited\r');
+      w1 = await p1;
+      at = ptyhost.atPrompt(termId);
+      marked = (ptyhost.list().find(p => p.termId === termId)?.buffer || '').includes(ptyhost._promptMark);
+      await new Promise(r => setTimeout(r, 2500));
+      w2 = await ptyhost.waitClaudeExit(termId, 600);
+    } catch (err) {
+      w1 = w1 || { how: 'error: ' + err.message };
+    }
+    ptyhost.kill(termId);
+    check('macOS prompt marker: printed by precmd, ends a wait as prompt; no claude → gone',
+      w1 && w1.how === 'prompt' && w2 && w2.how === 'gone' && marked && at === true, JSON.stringify({ w1, w2, marked, at }));
   }
 
   // 25. accounts (main/accounts.cjs): reset parsing, usage-limit classification,
@@ -1662,7 +2055,101 @@ async function runSmoke() {
     // the checks below are the manual order's ("Move all here", ↑/↓): automatic off
     acc.setAuto(false);
 
-    // store + DPAPI: add → blob → PowerShell decrypt gives the same token back
+    // macOS secret store (main/keychain.cjs): the `security -i` command line is
+    // pure and checked on every platform against a port of Apple's own parser;
+    // the Keychain round-trip runs on darwin only, with throwaway service names
+    // (never Claude's real item). A locked/missing keychain (CI) is a SKIP.
+    const kc = require('./keychain.cjs');
+    {
+      const tok = 'sk-ant-oat01-SmokeFake_' + 'a'.repeat(30) + '-x';
+      const odd = ['say "hi"', 'back\\slash\\', '', "it's", ' lead and trail ', '"', '\\"'];
+      const args = ['add-generic-password', '-U', '-s', 'VibeSpace-account-main-ab12', '-a', 'vibespace', '-w', tok, ...odd];
+      const line = kc.commandLine(args);
+      const throws = (fn) => { try { fn(); return false; } catch { return true; } };
+      const nfc = 'café', nfd = 'café';
+      const q = {
+        roundtrip: line.endsWith('\n') && !line.slice(0, -1).includes('\n') && JSON.stringify(kc.splitLine(line.slice(0, -1))) === JSON.stringify(args),
+        rejects: throws(() => kc.quoteArg('a\nb')) && throws(() => kc.quoteArg('tab\there')) && throws(() => kc.quoteArg('café')),
+        tooLong: throws(() => kc.commandLine(['add-generic-password', '-w', 'x'.repeat(kc.MAX_LINE)])) && !throws(() => kc.commandLine(['-w', 'x'.repeat(3000)])),
+        names: kc.tokenService('main-ab12') === 'VibeSpace-account-main-ab12' && kc.endpointService('zai-cd34') === 'VibeSpace-endpoint-zai-cd34' && kc.ACCOUNT === 'vibespace',
+        claudeNames: kc.claudeService(null) === 'Claude Code-credentials'
+          && kc.claudeService('/Users/test/.claude-work') === 'Claude Code-credentials-' + require('node:crypto').createHash('sha256').update('/Users/test/.claude-work').digest('hex').slice(0, 8)
+          && /^Claude Code-credentials-[0-9a-f]{8}$/.test(kc.claudeService('/x')) && kc.claudeService('/x') !== kc.claudeService('/x/')
+          && kc.claudeService('/Users/' + nfd) === kc.claudeService('/Users/' + nfc)
+          && kc.claudeLoginService({}) === 'Claude Code-credentials' && kc.claudeLoginService({ CLAUDE_CONFIG_DIR: '' }) === 'Claude Code-credentials'
+          && kc.claudeLoginService({ CLAUDE_CONFIG_DIR: '/a' }) === kc.claudeService('/a')
+          && kc.claudeLoginService({ CLAUDE_CONFIG_DIR: '/a', CLAUDE_SECURESTORAGE_CONFIG_DIR: '' }) === 'Claude Code-credentials'
+          && kc.claudeLoginService({ CLAUDE_CONFIG_DIR: '/a', CLAUDE_SECURESTORAGE_CONFIG_DIR: '/b' }) === kc.claudeService('/b'),
+        unavailable: kc.unavailableKind('security: SecKeychainItemCreateFromContent (<default>): User interaction is not allowed.') === 'interaction_not_allowed'
+          && kc.unavailableKind('The specified item could not be found in the keychain.') === null,
+      };
+      check('keychain: security -i command line (Apple parser round-trip, ASCII only, length cap), item names, Claude item hash', Object.values(q).every(Boolean), JSON.stringify(q));
+    }
+    let keychainSkip = null;
+    if (process.platform === 'darwin') {
+      const cloudMain = require('./cloud.cjs');
+      const os = require('node:os');
+      const svc = `VibeSpace-smoke-${U.randId(8)}`;
+      const svc2 = `${svc}-env`;
+      const loginSvc = `${svc}-login`;
+      const cloudRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-kc-'));
+      cloudMain._setRoot(cloudRoot);
+      const cloudSvc = cloudMain.keychainServiceOf('kcsmoke');
+      const tok = 'sk-ant-oat01-SmokeKeychain_' + U.randId(24);
+      const r = {};
+      try {
+        await kc.write(svc, tok);
+        r.readBack = (await kc.read(svc)) === tok;
+        r.exists = kc.exists(svc, kc.ACCOUNT, { maxAgeMs: 0 }) && kc.exists(svc, null, { maxAgeMs: 0 });
+        // exactly what the darwin `claude` wrapper runs for a token account
+        const w = require('node:child_process').spawnSync('/usr/bin/security', ['find-generic-password', '-s', svc, '-a', 'vibespace', '-w'], { encoding: 'utf8', timeout: 10000 });
+        r.wrapperRead = w.status === 0 && String(w.stdout).replace(/\n$/, '') === tok;
+        await kc.write(svc, tok + 'U'); // -U updates in place
+        r.updated = (await kc.read(svc)) === tok + 'U';
+        const text = 'ANTHROPIC_BASE_URL=https://x.io/api\nANTHROPIC_AUTH_TOKEN=a "q" \'s\' b\\c $HOME `x`\nAPI_TIMEOUT_MS=5';
+        await kc.write(svc2, Buffer.from(text, 'utf8').toString('base64'));
+        r.base64 = Buffer.from(await kc.read(svc2), 'base64').toString('utf8') === text;
+        // login detection: a throwaway item stands in for Claude's
+        acc._setLoginService(loginSvc);
+        await kc.write(loginSvc, '{}', 'claude-code-user');
+        r.loginViaKeychain = acc.state().accounts.find(a => a.id === 'login').available === true;
+        kc.remove(loginSvc, 'claude-code-user');
+        acc._setLoginService(null);
+        // cloud readiness: the item named after the cloud dir's hash
+        const cloudBefore = cloudMain.readiness('kcsmoke').ready;
+        await kc.write(cloudSvc, '{}', 'claude-code-user');
+        r.cloudViaKeychain = cloudBefore === false && cloudMain.readiness('kcsmoke').ready === true && !fs.existsSync(path.join(cloudRoot, 'kcsmoke'));
+        kc.remove(cloudSvc, 'claude-code-user');
+        r.cloudGone = cloudMain.readiness('kcsmoke').ready === false;
+        r.removed = kc.remove(svc) && !kc.exists(svc, kc.ACCOUNT, { maxAgeMs: 0 }) && (await kc.read(svc)) === null && kc.remove(svc);
+      } catch (e) {
+        if (kc.unavailableKind(e.message)) keychainSkip = e.message; else r.error = e.message;
+      } finally {
+        acc._setLoginService(null);
+        cloudMain._setRoot(null);
+        for (const [s, a] of [[svc], [svc2], [loginSvc, 'claude-code-user'], [cloudSvc, 'claude-code-user']]) { try { kc.remove(s, a); } catch {} }
+        try { fs.rmSync(cloudRoot, { recursive: true, force: true }); } catch {}
+      }
+      if (keychainSkip) console.log(`SKIP  keychain round-trip (darwin)  — ${keychainSkip}`);
+      else {
+        check('keychain round-trip (darwin): argv-free add → read back → wrapper read → -U update → base64 env → login + cloud detection → delete',
+          Object.values(r).every(v => v === true), JSON.stringify(r).split(tok).join('<tok>'));
+      }
+    }
+    // checks that need a working secret store: a SKIP (not a FAIL) when the
+    // darwin keychain is unavailable
+    const kcCheck = (name, ok, detail) => (keychainSkip ? console.log(`SKIP  ${name}  — keychain unavailable: ${keychainSkip}`) : check(name, ok, detail));
+    // darwin CI has no Claude login: pin the /login as present for the store
+    // checks (Windows keeps testing the real one)
+    let credPin = null;
+    if (process.platform === 'darwin') {
+      credPin = path.join(U.dataRoot(), 'smoke-credentials.json');
+      fs.writeFileSync(credPin, '{}');
+      acc._setCredentialsPath(credPin);
+    }
+
+    // store + secret: add → DPAPI blob (Windows) / Keychain item (darwin) → the
+    // pty wrapper's own read gives the same token back
     const fakeToken = 'sk-ant-oat01-' + 'SmokeFakeToken_' + U.randId(24) + '-x';
     const s0 = acc.state();
     const bad = await acc.add('Nope', 'not-a-token');
@@ -1672,6 +2159,12 @@ async function runSmoke() {
     const blobText = blob && fs.existsSync(blob) ? fs.readFileSync(blob, 'utf8') : '';
     const decrypted = await new Promise((resolve) => {
       if (!blob) { resolve(''); return; }
+      if (process.platform === 'darwin') {
+        // the exact command the darwin wrapper runs (the item name is the contract)
+        require('node:child_process').execFile('/usr/bin/security', ['find-generic-password', '-s', kc.tokenService(id2), '-a', 'vibespace', '-w'],
+          { timeout: 20000 }, (err, out) => resolve(String(out || '').trim()));
+        return;
+      }
       // the exact snippet the pty wrapper runs
       const ps = `$blob = $env:VS_SMOKE_BLOB; ${acc.DECRYPT_PS}; [Console]::Out.Write($tok)`;
       require('node:child_process').execFile(acc._psExe(), ['-NoProfile', '-NonInteractive', '-Command', ps],
@@ -1681,10 +2174,13 @@ async function runSmoke() {
       loginFirst: s0.accounts.length === 1 && s0.accounts[0].id === 'login' && s0.accounts[0].kind === 'login' && s0.pick === 'login',
       badRejected: bad.ok === false && typeof bad.error === 'string',
       added: Boolean(added.ok && id2 && id2 !== 'login' && added.state.accounts[1].kind === 'token' && added.state.accounts[1].label === 'Second Max'),
-      blobOpaque: blobText.length > 100 && !blobText.includes(fakeToken) && !JSON.stringify(acc.state()).includes(fakeToken),
+      blobOpaque: process.platform === 'darwin'
+        ? !fs.existsSync(blob || '') && acc._service(id2 || 'x') === kc.tokenService(id2) && !JSON.stringify(acc.state()).includes(fakeToken)
+        : blobText.length > 100 && !blobText.includes(fakeToken) && !JSON.stringify(acc.state()).includes(fakeToken),
       roundtrip: decrypted === fakeToken,
     };
-    check('accounts DPAPI token blob (add → blob → decrypt round-trip, never in state)', Object.values(dp).every(Boolean),
+    kcCheck(process.platform === 'darwin' ? 'accounts Keychain token item (add → item → wrapper read round-trip, never in state)'
+      : 'accounts DPAPI token blob (add → blob → decrypt round-trip, never in state)', Object.values(dp).every(Boolean),
       JSON.stringify({ ...dp, roundtrip: dp.roundtrip ? 'ok' : 'MISMATCH' }));
 
     if (id2) {
@@ -1770,7 +2266,8 @@ async function runSmoke() {
 
       // wrapper dry-run with an account file: login keeps --remote-control, a token
       // account gets none, a missing blob says so. The pty start clears a stale file.
-      const r = await new Promise((resolve) => {
+      // (PowerShell on Windows, the zsh claude() on macOS)
+      const r = (process.platform !== 'win32' && process.platform !== 'darwin') ? null : await new Promise((resolve) => {
         let buf = '';
         const termId = 'smokeacct';
         const stale = ptyhost.accountFileFor('smoke-acct', termId);
@@ -1796,13 +2293,19 @@ async function runSmoke() {
         const setFile = ptyhost.setAccount(termId, 'login');
         const setOk = fs.readFileSync(setFile, 'utf8') === 'login' && setFile === stale;
         if (!setOk) { done(false, 'setAccount wrote ' + setFile); return; }
-        const setTo = (v) => `Set-Content -NoNewline -LiteralPath $env:VIBESPACE_ACCOUNT_FILE -Value '${v}'`;
-        setTimeout(() => ptyhost.write(termId, `$env:VIBESPACE_CLAUDE_DRYRUN=1; claude; ${setTo(id2)}; claude --resume abc; ${setTo('ghost-zz99')}; claude\r`), 900);
+        if (process.platform === 'darwin') {
+          const setTo = (v) => `printf %s '${v}' > "$VIBESPACE_ACCOUNT_FILE"`;
+          setTimeout(() => ptyhost.write(termId, `export VIBESPACE_CLAUDE_DRYRUN=1; claude; ${setTo(id2)}; claude --resume abc; ${setTo('ghost-zz99')}; claude\r`), 1500);
+        } else {
+          const setTo = (v) => `Set-Content -NoNewline -LiteralPath $env:VIBESPACE_ACCOUNT_FILE -Value '${v}'`;
+          setTimeout(() => ptyhost.write(termId, `$env:VIBESPACE_CLAUDE_DRYRUN=1; claude; ${setTo(id2)}; claude --resume abc; ${setTo('ghost-zz99')}; claude\r`), 900);
+        }
       });
-      check('pty `claude` wrapper per-account dry-run (login → RC, token → no RC, missing blob)', r.ok, r.detail);
+      if (r) check('pty `claude` wrapper per-account dry-run (login → RC, token → no RC, missing blob)', r.ok, r.detail);
 
       acc.remove(id2);
-      check('accounts remove deletes the token blob', !acc.has(id2) && !fs.existsSync(blob));
+      check(`accounts remove deletes the token ${process.platform === 'darwin' ? 'Keychain item' : 'blob'}`, !acc.has(id2) && !fs.existsSync(blob)
+        && (process.platform !== 'darwin' || !kc.exists(kc.tokenService(id2), kc.ACCOUNT, { maxAgeMs: 0 })));
     }
 
     // 25b. API endpoint accounts (z.ai GLM, …): lenient env parser, the whole env
@@ -1837,7 +2340,9 @@ async function runSmoke() {
       };
       check('accounts endpoint env parser (settings block + typo + trailing comma, KEY=VALUE, errors)', Object.values(pe).every(Boolean), JSON.stringify(pe));
 
-      const decrypt = (blobFile) => new Promise((resolve) => {
+      // darwin: the endpoint's Keychain item (base64) instead of the blob file
+      const kcEnv = async (id) => { const b = id ? await kc.read(kc.endpointService(id)).catch(() => null) : null; return b ? Buffer.from(b, 'base64').toString('utf8') : ''; };
+      const decrypt = (blobFile, id) => process.platform === 'darwin' ? kcEnv(id) : new Promise((resolve) => {
         const ps = `$blob = $env:VS_SMOKE_BLOB; ${acc.DECRYPT_PS}; [Console]::Out.Write($tok)`;
         require('node:child_process').execFile(acc._psExe(), ['-NoProfile', '-NonInteractive', '-Command', ps],
           { windowsHide: true, timeout: 20000, env: acc._psEnv({ VS_SMOKE_BLOB: blobFile }) }, (err, out) => resolve(String(out || '')));
@@ -1848,7 +2353,7 @@ async function runSmoke() {
       const epId = epAdd.ok ? (epAdd.state.accounts.find(a => a.kind === 'endpoint') || {}).id : null;
       const epBlob = epId ? acc.blobPath(epId) : null;
       const epText = epBlob && fs.existsSync(epBlob) ? fs.readFileSync(epBlob, 'utf8') : '';
-      const dec = epBlob ? await decrypt(epBlob) : '';
+      const dec = epBlob ? await decrypt(epBlob, epId) : '';
       const logger = require('./logger.cjs');
       const logText = (() => {
         try { return fs.readdirSync(logger.logsDir()).map(f => fs.readFileSync(path.join(logger.logsDir(), f), 'utf8')).join('\n'); } catch { return ''; }
@@ -1858,7 +2363,9 @@ async function runSmoke() {
       const ep = {
         added: Boolean(tokId && epId && epAdd.notes && epAdd.notes.length === 1),
         roundtrip: dec === acc._envText(p.env) && dec.includes('ANTHROPIC_BASE_URL=https://api.z.ai/api/anthropic\n'),
-        blobOpaque: epText.length > 100 && !epText.includes(fakeKey),
+        blobOpaque: process.platform === 'darwin'
+          ? !fs.existsSync(epBlob || '') && kc.exists(kc.endpointService(epId), kc.ACCOUNT, { maxAgeMs: 0 })
+          : epText.length > 100 && !epText.includes(fakeKey),
         noSecret: !JSON.stringify(acc.state()).includes(fakeKey) && !JSON.stringify(epAdd).includes(fakeKey)
           && !fs.readFileSync(path.join(U.dataRoot(), 'accounts.json'), 'utf8').includes(fakeKey) && !logText.includes(fakeKey),
         row: row.kind === 'endpoint' && row.family === 'endpoint:api.z.ai' && row.host === 'api.z.ai'
@@ -1868,7 +2375,7 @@ async function runSmoke() {
         normalize: nz.accounts.e1.kind === 'endpoint' && nz.accounts.e1.baseUrl === 'https://api.z.ai/api/anthropic'
           && nz.accounts.e1.models.opus === 'glm-5.3' && nz.accounts.t1.kind === 'token',
       };
-      check('accounts endpoint add (DPAPI env blob round-trip, family, models, never the key in state/json/log)', Object.values(ep).every(Boolean),
+      kcCheck(`accounts endpoint add (${process.platform === 'darwin' ? 'Keychain' : 'DPAPI'} env blob round-trip, family, models, never the key in state/json/log)`, Object.values(ep).every(Boolean),
         JSON.stringify({ ...ep, roundtrip: ep.roundtrip ? 'ok' : 'MISMATCH' }));
 
       // provider presets: pick z.ai, paste only the key. Same store path as a
@@ -1904,10 +2411,10 @@ async function runSmoke() {
         pa.override = Boolean(r2.models && r2.models.sonnet === 'glm-smoke-x' && r2.models.opus === 'glm-5.3[1m]' && r2.models.haiku === 'glm-5.3-flash[1m]');
         pa.pastedZaiIsPreset = (acc.state().accounts.find(x => x.id === epId) || {}).preset === 'zai'; // a pasted z.ai block is z.ai too
         const b2 = a2.ok ? acc.blobPath(a2.id) : null;
-        const dec2 = b2 ? await decrypt(b2) : '';
+        const dec2 = b2 ? await decrypt(b2, a2.id) : '';
         pa.blob = dec2.includes(`ANTHROPIC_AUTH_TOKEN=${zKey}`) && dec2.includes('ANTHROPIC_DEFAULT_SONNET_MODEL=glm-smoke-x')
           && dec2.includes('ANTHROPIC_BASE_URL=https://api.z.ai/api/anthropic') && dec2.includes('CLAUDE_CODE_AUTO_COMPACT_WINDOW=900000')
-          && dec2.includes('API_TIMEOUT_MS=3000000') && !fs.readFileSync(b2, 'utf8').includes(zKey);
+          && dec2.includes('API_TIMEOUT_MS=3000000') && (process.platform === 'darwin' ? !fs.existsSync(b2) : !fs.readFileSync(b2, 'utf8').includes(zKey));
         const files = acc._files();
         const logNow = (() => {
           try { return fs.readdirSync(logger.logsDir()).map(f => fs.readFileSync(path.join(logger.logsDir(), f), 'utf8')).join('\n'); } catch { return ''; }
@@ -1917,7 +2424,7 @@ async function runSmoke() {
         if (a1.ok) acc.remove(a1.id);
         if (a2.ok) acc.remove(a2.id);
         pa.removed = !(a1.ok && acc.has(a1.id)) && !(a2.ok && acc.has(a2.id));
-        check('accounts addPreset z.ai (key only, preset models + override, " 2" label, Claude/empty key rejected, key never stored in clear)',
+        kcCheck('accounts addPreset z.ai (key only, preset models + override, " 2" label, Claude/empty key rejected, key never stored in clear)',
           Object.values(pa).every(Boolean), JSON.stringify(pa));
       }
 
@@ -1943,7 +2450,7 @@ async function runSmoke() {
         try { acc.switchAll('login'); } catch { refused = true; }
         fp.switchAllRefused = refused;
         acc.clear(tokId);
-        acc._setCredentialsPath(null);
+        acc._setCredentialsPath(credPin);
         fp.loggedInAgain = acc.pick() === 'login' && acc.state().accounts.find(a => a.id === 'login').available === true;
         check('accounts provider families (family-bound pick, no /login without credentials)', Object.values(fp).every(Boolean), JSON.stringify(fp));
         // a conversation's provider comes from its transcript's model when it has
@@ -1993,21 +2500,27 @@ async function runSmoke() {
             oldCodeBlind: !(epId in old) && (tokId in old),
             ownFile: Boolean(rawEps[epId] && rawEps[epId].baseUrl === 'https://api.z.ai/api/anthropic' && rawEps[epId].models.opus === 'glm-5.3[1m]')
               && !JSON.stringify(rawEps).includes(fakeKey) && !(tokId in rawEps),
-            blobName: epBlob === files.endpointBlob(epId) && fs.existsSync(epBlob) && !fs.existsSync(files.tokenBlob(epId)),
+            blobName: process.platform === 'darwin'
+              ? acc._service(epId) === kc.endpointService(epId) && kc.exists(kc.endpointService(epId), kc.ACCOUNT, { maxAgeMs: 0 })
+                && !kc.exists(kc.tokenService(epId), kc.ACCOUNT, { maxAgeMs: 0 })
+              : epBlob === files.endpointBlob(epId) && fs.existsSync(epBlob) && !fs.existsSync(files.tokenBlob(epId)),
           };
-          const legacy = JSON.parse(fs.readFileSync(files.accounts, 'utf8'));
-          legacy.accounts.mig1 = { label: 'Mig', kind: 'endpoint', baseUrl: 'https://mig.example/api', models: { opus: 'm1' } };
-          legacy.order.push('mig1');
-          fs.writeFileSync(files.accounts, JSON.stringify(legacy, null, 2) + '\n');
-          fs.writeFileSync(files.tokenBlob('mig1'), 'ab'.repeat(60));
-          const migRow = acc.state().accounts.find(a => a.id === 'mig1') || {};
-          const afterAcc = JSON.parse(fs.readFileSync(files.accounts, 'utf8'));
-          const afterEps = JSON.parse(fs.readFileSync(files.endpoints, 'utf8'));
-          own.migrated = migRow.kind === 'endpoint' && migRow.family === 'endpoint:mig.example' && migRow.available === true
-            && !('mig1' in afterAcc.accounts) && afterAcc.order.includes('mig1') && Boolean(afterEps.mig1) && Boolean(afterEps[epId])
-            && fs.existsSync(files.endpointBlob('mig1')) && !fs.existsSync(files.tokenBlob('mig1'));
-          acc.remove('mig1');
-          own.migRemoved = !acc.has('mig1') && !fs.existsSync(files.endpointBlob('mig1')) && !('mig1' in JSON.parse(fs.readFileSync(files.endpoints, 'utf8')));
+          // the 0.6.49 blob-file migration exists on Windows only (no Mac build had it)
+          if (process.platform === 'win32') {
+            const legacy = JSON.parse(fs.readFileSync(files.accounts, 'utf8'));
+            legacy.accounts.mig1 = { label: 'Mig', kind: 'endpoint', baseUrl: 'https://mig.example/api', models: { opus: 'm1' } };
+            legacy.order.push('mig1');
+            fs.writeFileSync(files.accounts, JSON.stringify(legacy, null, 2) + '\n');
+            fs.writeFileSync(files.tokenBlob('mig1'), 'ab'.repeat(60));
+            const migRow = acc.state().accounts.find(a => a.id === 'mig1') || {};
+            const afterAcc = JSON.parse(fs.readFileSync(files.accounts, 'utf8'));
+            const afterEps = JSON.parse(fs.readFileSync(files.endpoints, 'utf8'));
+            own.migrated = migRow.kind === 'endpoint' && migRow.family === 'endpoint:mig.example' && migRow.available === true
+              && !('mig1' in afterAcc.accounts) && afterAcc.order.includes('mig1') && Boolean(afterEps.mig1) && Boolean(afterEps[epId])
+              && fs.existsSync(files.endpointBlob('mig1')) && !fs.existsSync(files.tokenBlob('mig1'));
+            acc.remove('mig1');
+            own.migRemoved = !acc.has('mig1') && !fs.existsSync(files.endpointBlob('mig1')) && !('mig1' in JSON.parse(fs.readFileSync(files.endpoints, 'utf8')));
+          }
           check('endpoint accounts in their own file + blob name, invisible to older main code (+ migration)', Object.values(own).every(Boolean), JSON.stringify(own));
         }
 
@@ -2021,7 +2534,7 @@ async function runSmoke() {
         const epsFile = ptyhost.endpointSettingsFor('smoke-acct', 'smokeendpoint');
         let keptAtKill = null; // was the tab's settings file there just before kill()?
         const refuse = 'start claude without --settings';
-        const r = await new Promise((resolve) => {
+        const r = (process.platform !== 'win32' && process.platform !== 'darwin') ? null : await new Promise((resolve) => {
           let buf = '';
           const termId = 'smokeendpoint';
           const done = (ok, detail) => { clearTimeout(timer); ptyhost.onData(() => {}); keptAtKill = fs.existsSync(epsFile); ptyhost.kill(termId); resolve({ ok, detail }); };
@@ -2048,9 +2561,10 @@ async function runSmoke() {
           });
           // plain `claude`, the way claudeCommand types it (explicit hook
           // --settings), then one with someone else's --settings
-          setTimeout(() => ptyhost.write(termId, `$env:VIBESPACE_CLAUDE_DRYRUN=1; claude; claude --resume abc --settings '${baseS}'; claude --settings 'C:\\other.json'\r`), 900);
+          if (process.platform === 'darwin') setTimeout(() => ptyhost.write(termId, `export VIBESPACE_CLAUDE_DRYRUN=1; claude; claude --resume abc --settings '${baseS}'; claude --settings '/other.json'\r`), 1500);
+          else setTimeout(() => ptyhost.write(termId, `$env:VIBESPACE_CLAUDE_DRYRUN=1; claude; claude --resume abc --settings '${baseS}'; claude --settings 'C:\\other.json'\r`), 900);
         });
-        check('endpoint account: main writes the tab settings, wrapper swaps --settings, refuses a foreign --settings, no RC, no key in output', r.ok, r.detail);
+        if (r) check('endpoint account: main writes the tab settings, wrapper swaps --settings, refuses a foreign --settings, no RC, no key in output', r.ok, r.detail);
         // kill() itself deletes the tab's settings file (it holds the key); its
         // onExit no longer knows the workspace. Main start clears an instance's
         // leftovers (no pty survives a restart), account files stay.
@@ -2060,7 +2574,7 @@ async function runSmoke() {
         const cleared = ptyhost.clearInstanceEndpointSettings('smoke-clean');
         const left = fs.readdirSync(cdir).join(',');
         check('pty kill removes the endpoint settings file; main start clears stale ones',
-          keptAtKill === true && !fs.existsSync(epsFile) && cleared === 2 && left === 't1.account', JSON.stringify({ keptAtKill, gone: !fs.existsSync(epsFile), cleared, left }));
+          (!r || (keptAtKill === true && !fs.existsSync(epsFile))) && cleared === 2 && left === 't1.account', JSON.stringify({ keptAtKill, gone: !fs.existsSync(epsFile), cleared, left }));
         // leaving the account deletes the file (it holds the key)
         const epsPath = ptyhost.endpointSettingsFor('smoke-acct', 'smokeendpoint');
         ptyhost.writeEndpointSettings('smokeendpoint', 'smoke-acct', null, { ANTHROPIC_BASE_URL: 'x' });
@@ -2084,8 +2598,11 @@ async function runSmoke() {
           const all = await Promise.all([acc.forTerm(epId), acc.forTerm(epId), acc.endpointEnv(epId)]).catch(() => null);
           ft.oneDecrypt = Boolean(all) && acc._decryptSpawns() - sp0 === 1 && all[0].env.ANTHROPIC_AUTH_TOKEN === fakeKey
             && all[2].ANTHROPIC_AUTH_TOKEN === fakeKey && all[0].env !== all[1].env;
-          const goodBlob = fs.readFileSync(epBlob, 'utf8');
-          fs.writeFileSync(epBlob, 'ab'.repeat(64)); // damaged blob
+          // the secret: the blob file (Windows) or the Keychain item (darwin)
+          const epSvc = kc.endpointService(epId);
+          const goodBlob = process.platform === 'darwin' ? await kc.read(epSvc) : fs.readFileSync(epBlob, 'utf8');
+          const putSecret = (v) => (process.platform === 'darwin' ? kc.write(epSvc, v) : fs.writeFileSync(epBlob, v));
+          await putSecret('ab'.repeat(64)); // damaged blob
           acc._forgetEnv(epId);
           let bad = null;
           try { await acc.forTerm(epId); } catch (e) { bad = e.message; }
@@ -2093,11 +2610,11 @@ async function runSmoke() {
           const sp1 = acc._decryptSpawns();
           try { await acc.forTerm(epId); } catch {}
           ft.failureNotCached = acc._decryptSpawns() - sp1 === 1;
-          fs.rmSync(epBlob, { force: true });
+          if (process.platform === 'darwin') kc.remove(epSvc); else fs.rmSync(epBlob, { force: true });
           let gone = null;
           try { await acc.forTerm(epId); } catch (e) { gone = e.message; }
           ft.missingThrows = Boolean(gone && /missing/.test(gone));
-          fs.writeFileSync(epBlob, goodBlob); // the remove check below needs it back
+          await putSecret(goodBlob); // the remove check below needs it back
           check('accounts.forTerm (setTerm): unknown or undecryptable endpoint throws, one decrypt per id', Object.values(ft).every(Boolean),
             JSON.stringify(ft).split(fakeKey).join('<key>'));
         }
@@ -2123,21 +2640,34 @@ async function runSmoke() {
       }
 
       // the expanded wrapper must stay valid Windows PowerShell 5.1
-      const wf = path.join(U.dataRoot(), 'wrapper-smoke.ps1');
-      fs.writeFileSync(wf, ptyhost._wrapper);
-      const parsed = await new Promise((resolve) => {
-        const ps = '$t = [IO.File]::ReadAllText($env:VS_SMOKE_PS); $e = $null; [void][System.Management.Automation.Language.Parser]::ParseInput($t, [ref]$null, [ref]$e); '
-          + "[Console]::Out.Write([string]$e.Count + '|' + (($e | ForEach-Object { $_.Message }) -join '; '))";
-        require('node:child_process').execFile(acc._psExe(), ['-NoProfile', '-NonInteractive', '-Command', ps],
-          { windowsHide: true, timeout: 20000, env: acc._psEnv({ VS_SMOKE_PS: wf }) }, (err, out) => resolve(String(out || (err && err.message) || '').trim()));
-      });
-      check('pty `claude` wrapper parses in Windows PowerShell 5.1', parsed === '0|', parsed);
-      try { fs.rmSync(wf, { force: true }); } catch {}
+      if (process.platform === 'win32') {
+        const wf = path.join(U.dataRoot(), 'wrapper-smoke.ps1');
+        fs.writeFileSync(wf, ptyhost._wrapper);
+        const parsed = await new Promise((resolve) => {
+          const ps = '$t = [IO.File]::ReadAllText($env:VS_SMOKE_PS); $e = $null; [void][System.Management.Automation.Language.Parser]::ParseInput($t, [ref]$null, [ref]$e); '
+            + "[Console]::Out.Write([string]$e.Count + '|' + (($e | ForEach-Object { $_.Message }) -join '; '))";
+          require('node:child_process').execFile(acc._psExe(), ['-NoProfile', '-NonInteractive', '-Command', ps],
+            { windowsHide: true, timeout: 20000, env: acc._psEnv({ VS_SMOKE_PS: wf }) }, (err, out) => resolve(String(out || (err && err.message) || '').trim()));
+        });
+        check('pty `claude` wrapper parses in Windows PowerShell 5.1', parsed === '0|', parsed);
+        try { fs.rmSync(wf, { force: true }); } catch {}
+      }
+      // macOS: the zsh and bash claude() texts parse (the rc files get their own check in 23d)
+      if (process.platform === 'darwin') {
+        const bad = ['zsh', 'bash'].map((sh) => {
+          const r = require('node:child_process').spawnSync(`/bin/${sh}`, ['-n'], { input: ptyhost._wrapperPosix[sh], encoding: 'utf8', timeout: 10000 });
+          return r.status === 0 ? '' : `${sh}: ${(r.stderr || '').trim()}`;
+        }).filter(Boolean);
+        check('pty `claude` wrapper parses in zsh and bash', bad.length === 0, bad.join('; '));
+      }
 
       if (tokId) acc.remove(tokId);
       if (epId) acc.remove(epId);
-      check('accounts remove deletes the endpoint blob', !acc.has(epId) && !(epBlob && fs.existsSync(epBlob)));
+      kcCheck(`accounts remove deletes the endpoint ${process.platform === 'darwin' ? 'Keychain item' : 'blob'}`, !acc.has(epId) && !(epBlob && fs.existsSync(epBlob))
+        && (process.platform !== 'darwin' || !epId || !kc.exists(kc.endpointService(epId), kc.ACCOUNT, { maxAgeMs: 0 })));
     }
+    acc._setCredentialsPath(null);
+    if (credPin) { try { fs.rmSync(credPin, { force: true }); } catch {} }
 
     // transcript fallback: the LAST api-error line, read from the tail only
     {
@@ -2160,7 +2690,7 @@ async function runSmoke() {
       try { fs.rmSync(tdir, { recursive: true, force: true }); } catch {}
     }
 
-    // claude-exit wait: a PowerShell prompt after the call resolves 'prompt'; no
+    // claude-exit wait: a PowerShell prompt (macOS: our precmd marker) after the call resolves 'prompt'; no
     // output and no claude under the shell resolves 'timeout'
     {
       const termId = 'smokewait';
@@ -2312,9 +2842,9 @@ async function runSmoke() {
       JSON.stringify({ pMain, pSelf, pBadIds, found, txSub }));
   }
 
-  // 8. pty echo (powershell)
+  // 8. pty echo (powershell; the login zsh on macOS)
   const echo = await ptyEchoTest();
-  check('pty spawn + echo (powershell)', echo.ok, echo.detail);
+  check(process.platform === 'darwin' ? 'pty spawn + echo (zsh)' : 'pty spawn + echo (powershell)', echo.ok, echo.detail);
 
   // 9. pty ring buffer + list (Layer 2: reloads must not kill agents)
   const ring = await ptyBufferTest();
@@ -2323,13 +2853,125 @@ async function runSmoke() {
     `now=${ring.busyNow} future=${ring.busyFuture} afterKill=${ring.busyAfterKill}`);
 
   // 9b. tab close kills hidden grandchildren (orphaned MCP servers) + id reuse
-  const tree = await ptyTreeKillTest();
-  check('pty kill takes hidden grandchildren (MCP servers) down, per tab', tree.ok, tree.detail);
+  if (process.platform === 'win32') {
+    const tree = await ptyTreeKillTest();
+    check('pty kill takes hidden grandchildren (MCP servers) down, per tab', tree.ok, tree.detail);
+  }
+  if (process.platform === 'darwin') {
+    const tree = await ptyTreeKillTestDarwin();
+    check('pty kill takes the whole tree down (TERM-ignoring child, orphan in the group), per tab', tree.ok, tree.detail);
+  }
   const recreate = await ptyRecreateTest();
   check('pty re-create on a live id survives the old pty exit', recreate.ok, recreate.detail);
 
+  // ICNS container (pure; the bundle icon for macOS packaging, scripts/make-icns.cjs)
+  {
+    const pngs = new Map(ico.ICNS_TYPES.map(([, size]) => [size, Buffer.from(`png${size}`)]));
+    const icns = ico.buildIcns(pngs);
+    let at = 8;
+    const types = [];
+    while (at + 8 <= icns.length) {
+      const len = icns.readUInt32BE(at + 4);
+      types.push(icns.toString('ascii', at, at + 4));
+      if (len < 8) break;
+      at += len;
+    }
+    check('icns container: header, total length, one chunk per type',
+      icns.toString('ascii', 0, 4) === 'icns' && icns.readUInt32BE(4) === icns.length && at === icns.length
+      && types.join(',') === ico.ICNS_TYPES.map(([t]) => t).join(','), types.join(','));
+  }
+
+  // macOS app identity: Dock icon PNG from a logo (never .ico), app.dock, the
+  // Windows-only shortcut/registry entry points answer "not supported"
+  if (process.platform === 'darwin') {
+    const { app, nativeImage } = require('electron');
+    const sharpMac = require('sharp');
+    const logo = path.join(U.dataRoot(), 'smoke-mac-logo.png');
+    await sharpMac({ create: { width: 300, height: 200, channels: 4, background: { r: 30, g: 160, b: 90, alpha: 1 } } }).png().toFile(logo);
+    const wsMac = await workspaces.create({ name: 'Smoke Mac', repoPath: require('node:os').tmpdir(), logoPath: logo });
+    const meta = await sharpMac(wsMac.iconPath).metadata().catch(() => ({}));
+    const img = nativeImage.createFromPath(wsMac.iconPath);
+    check('mac: workspace icon is a 1024 px PNG nativeImage can read',
+      wsMac.iconPath.endsWith('.png') && meta.format === 'png' && meta.width === 1024 && meta.height === 1024 && !img.isEmpty(),
+      `${path.basename(wsMac.iconPath)} ${meta.format} ${meta.width}x${meta.height} empty=${img.isEmpty()}`);
+    const upd = await workspaces.updateLogo(wsMac.id, logo, 4_000_000);
+    check('mac: logo change gets a new versioned .png', upd.iconPath !== wsMac.iconPath && upd.iconPath.endsWith('.png') && fs.existsSync(upd.iconPath), path.basename(upd.iconPath));
+    const icoLogo = path.join(U.dataRoot(), 'smoke-mac-logo.ico');
+    await ico.buildIcoFromImage(logo, icoLogo);
+    let fromIco = null;
+    try { fromIco = await workspaces.updateLogo(wsMac.id, icoLogo, 5_000_000); } catch (e) { fromIco = { error: e.message }; }
+    check('mac: an .ico logo becomes a PNG icon (sharp can\'t read .ico)', Boolean(fromIco && fromIco.iconPath && fromIco.iconPath.endsWith('.png') && fs.existsSync(fromIco.iconPath)), JSON.stringify(fromIco && (fromIco.error || path.basename(fromIco.iconPath))));
+    let dockErr = null;
+    try { app.dock.setIcon(upd.iconPath); app.dock.setBadge('•'); app.dock.setBadge(''); } catch (e) { dockErr = e.message; }
+    check('mac: app.dock.setIcon / setBadge do not throw', dockErr === null, dockErr || 'ok');
+    const shortcutsMod = require('./shortcuts.cjs');
+    const cm = require('./contextmenu.cjs');
+    let sc = null;
+    try {
+      sc = await shortcutsMod.create({ workspace: wsMac, targetPath: process.execPath, targetArgs: '', workingDir: U.BIN_ROOT });
+    } catch (e) { sc = { threw: e.message }; }
+    const lsc = await shortcutsMod.createLauncherShortcut({ targetPath: process.execPath, workingDir: U.BIN_ROOT }).catch(e => ({ threw: e.message }));
+    const quiet = shortcutsMod.removeJunkElectronLinks(process.execPath).length === 0 && (await shortcutsMod.ensureStartMenu({ workspace: wsMac })) === false
+      && (await shortcutsMod.refreshIcons({ workspace: wsMac })) === true;
+    shortcutsMod.removeShortcuts(wsMac);
+    check('mac: shortcut + right-click menu entry points answer "not supported" (no throw)',
+      sc && sc.unsupported === true && sc.ok === false && lsc && lsc.unsupported === true && quiet
+      && cm.isInstalled() === false && cm.install({ targetPath: process.execPath, rootDir: U.BIN_ROOT }) === false && cm.uninstall() === true,
+      JSON.stringify({ sc, lsc, quiet }));
+    workspaces.remove(wsMac.id);
+  }
+
+  // macOS: a REAL workspace window (renderer + preload + one plain terminal),
+  // captured with webContents.capturePage (no Screen Recording permission
+  // needed) to VIBESPACE_SMOKE_SHOT (CI artifact) or the smoke home
+  if (process.platform === 'darwin' && typeof hooks.openWorkspaceWindow === 'function') {
+    const os = require('node:os');
+    const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-smoke-win-'));
+    fs.writeFileSync(path.join(repo, 'README.md'), '# VibeSpace smoke\n\nA throwaway repo for the macOS window test.\n');
+    const wsWin = await workspaces.create({ name: 'Smoke Window', repoPath: repo });
+    U.ensureDir(path.join(U.dataRoot(), 'instances', wsWin.id));
+    U.writeJsonAtomic(path.join(U.dataRoot(), 'instances', wsWin.id, 'state.json'), {
+      terminals: [{ termId: 'smokewin1', name: 'shell', cwd: repo, isClaude: false, claudeSessionId: null }],
+      autoResume: false,
+    });
+    const out = process.env.VIBESPACE_SMOKE_SHOT || path.join(U.dataRoot(), 'smoke-window.png');
+    let detail = '';
+    let ok = false;
+    try {
+      if (typeof hooks.restorePtyData === 'function') hooks.restorePtyData(); // the pty tests above replaced it
+      const win = hooks.openWorkspaceWindow(wsWin);
+      await new Promise((resolve) => {
+        const t = setTimeout(resolve, 20000);
+        win.webContents.once('did-finish-load', () => { clearTimeout(t); resolve(); });
+      });
+      win.show();
+      await new Promise(r => setTimeout(r, 5000)); // terminal spawned + painted
+      let png = null;
+      for (let i = 0; i < 5 && !png; i++) {
+        if (i) await new Promise(r => setTimeout(r, 800));
+        try {
+          const buf = (await win.webContents.capturePage()).toPNG();
+          if (buf.length > 1000) png = buf;
+        } catch (e) { detail = e.message; }
+      }
+      if (png) {
+        U.ensureDir(path.dirname(out));
+        fs.writeFileSync(out, png);
+        ok = true;
+        detail = `${out} (${png.length} bytes)`;
+        console.log('SCREENSHOT_SAVED: ' + out);
+      } else {
+        detail = 'capturePage never produced pixels' + (detail ? ': ' + detail : '');
+      }
+    } catch (e) {
+      detail = 'threw: ' + (e && e.message ? e.message : e);
+    }
+    check('mac: workspace window opens and captures a screenshot', ok, detail);
+  }
+
   const failed = results.filter(r => !r.ok);
-  console.log(`\nSMOKE RESULT: ${results.length - failed.length}/${results.length} passed`);
+  const skipped = results.filter(r => r.ok && /^skipped\b/.test(r.detail || '')).length;
+  console.log(`\nSMOKE RESULT: ${results.length - failed.length}/${results.length} passed${skipped ? ` (${skipped} of them skipped on ${process.platform})` : ''}`);
   return failed.length === 0;
 }
 

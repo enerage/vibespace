@@ -42,13 +42,18 @@ must check these before merging (details in the branch summary / CLAUDE.md):
 
 ## macOS port (decided 2026-10-18, RESEARCH-MAC.md)
 
-- [ ] Phase 1 core port on branch `mac-port` (5 builders: shell/PATH/processes, accounts+Keychain, renderer, app/packaging/CI, image/video preview).
-- [ ] Mac CI green: unpackaged + packaged `--smoke` on Apple Silicon and Intel runners.
+- [x] Phase 1 core port (0.7.0, 2026-10-18; 5 builders: shell/PATH/processes, accounts+Keychain, renderer, app/packaging/CI, image/video preview).
+- [x] Mac CI green: unpackaged + packaged `--smoke` on Apple Silicon and Intel runners (156/156, 2026-10-18).
 - [ ] Hands-on checklist on the sister's MacBook (z.ai preset, one workspace, preview).
 - [ ] Phase 2: per-repo Dock pins (per-workspace .app clones, spike on a real Mac first).
 - [ ] Phase 2: Send to cloud on Mac (`cloud-send.sh`, `script -q /dev/null` for the TTY).
 - [ ] Phase 2: Finder "Open with VibeSpace" (Quick Action / `open-file`).
 - [ ] Later: $99 Developer ID + notarization if the Mac build stays in use.
+- [ ] Mac: `macOptionIsMeta` as a setting (non-US layouts type `@`/`{` with Option); maybe default from `navigator.keyboard.getLayoutMap()`.
+- [ ] Mac: skip the 0.3-3 s login-shell PATH probe in workspaces when the launcher already resolved it (pass it down in env).
+- [ ] Mac: confirm on ⌘Q while agents are busy? (no busy-confirm on Windows close either; decide with Valentin.)
+- [ ] Mac real-machine checks: ⌘C/⌘V not pasting twice with the Edit-menu roles, powerlevel10k instant prompt + our precmd, `!` in single quotes in interactive zsh, Dock tile per workspace launched from the executable, notification permission prompt.
+- [ ] `fs:read` IPC doesn't check that the path is inside the sender's repo (unlike `fs:write`); found while building preview.
 
 ## Packaging & distribution
 - [x] **electron-builder packaging** (0.5.0) — NSIS installer + unpacked build

@@ -112,7 +112,7 @@ VibeSpace is that place, built for people who live in agents all day.
 
 ## Install
 
-**Windows 10/11.** New here? Follow **[GETTING-STARTED.md](GETTING-STARTED.md)**:
+**Windows 10/11, and macOS 13+ (since 0.7.0; Mac guide: [GETTING-STARTED-MAC.md](GETTING-STARTED-MAC.md)).** New here on Windows? Follow **[GETTING-STARTED.md](GETTING-STARTED.md)**:
 Git for Windows, Claude Code, the installer, and a Claude login or a z.ai key, in
 about 10 minutes.
 

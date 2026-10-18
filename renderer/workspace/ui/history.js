@@ -1,4 +1,4 @@
-import { $, el, toast } from './common.js';
+import { $, el, toast, isMac } from './common.js';
 
 // History mode of the git pane: paged commit list (search, per-file filter),
 // drill-down into one commit (message + changed files), and each file's
@@ -290,7 +290,7 @@ function renderDetail(host) {
 
 let repoRoot = '';
 export function setRepo(root) { repoRoot = root; }
-function absOf(rel) { return repoRoot + '\\' + rel.replace(/\//g, '\\'); }
+function absOf(rel) { return isMac() ? repoRoot + '/' + rel : repoRoot + '\\' + rel.replace(/\//g, '\\'); }
 
 async function selectFile(f, open = false) {
   if (!f || !detail) return;

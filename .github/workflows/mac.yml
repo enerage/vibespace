@@ -1,0 +1,157 @@
+# macOS build + smoke (RESEARCH-MAC.md Q6). Each arch builds on its own runner
+# (sharp's native package is installed for the host arch only), runs the
+# unpackaged smoke, packages dmg + zip (ad-hoc signed), checks the signature
+# and runs the packaged smoke. A failed smoke fails the job (SMOKE_EXIT:1 ->
+# exit code 1). Artifacts: smoke logs + window screenshots always, installers
+# on success.
+name: mac
+
+on:
+  push:
+    branches: [mac-port, main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mac-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: macOS ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15        # Apple Silicon
+            arch: arm64
+          - runner: macos-15-intel  # Intel (macos-13 is retired)
+            arch: x64
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v5
+        timeout-minutes: 5
+
+      - uses: actions/setup-node@v5
+        timeout-minutes: 5
+        with:
+          node-version: 24
+          cache: npm
+
+      # (runner.temp isn't available in job-level env, hence GITHUB_ENV)
+      - name: Prepare folders
+        timeout-minutes: 1
+        run: |
+          set -euo pipefail
+          echo "ARTIFACTS=$RUNNER_TEMP/artifacts" >> "$GITHUB_ENV"
+          # short and known: the smoke's throwaway home is $TMPDIR/vibespace-smoke-<ts>
+          echo "TMPDIR=$RUNNER_TEMP/t" >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/artifacts" "$RUNNER_TEMP/t"
+
+      - name: npm ci
+        timeout-minutes: 20
+        run: npm ci
+
+      - name: node-pty spawn-helper is executable
+        timeout-minutes: 1
+        run: |
+          set -euo pipefail
+          found=0
+          for f in node_modules/node-pty/prebuilds/darwin-*/spawn-helper; do
+            ls -l "$f"
+            test -x "$f" || { echo "::error::not executable: $f (scripts/postinstall.cjs)"; exit 1; }
+            found=1
+          done
+          test "$found" = 1 || { echo "::error::no darwin spawn-helper in node-pty"; exit 1; }
+
+      - name: Install Claude Code (no login)
+        timeout-minutes: 10
+        run: |
+          set -euo pipefail
+          npm install -g @anthropic-ai/claude-code || curl -fsSL https://claude.ai/install.sh | bash
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          export PATH="$HOME/.local/bin:$PATH"
+          claude --version
+
+      - name: Smoke (unpackaged)
+        timeout-minutes: 15
+        env:
+          VIBESPACE_SMOKE_SHOT: ${{ runner.temp }}/artifacts/window-unpackaged-${{ matrix.arch }}.png
+        run: |
+          set -uo pipefail
+          # an inherited Claude session env changes claude's behaviour (no transcripts)
+          for v in $(env | grep -o '^CLAUDE[A-Za-z0-9_]*' || true); do unset "$v"; done
+          npx electron . --smoke 2>&1 | tee "$ARTIFACTS/smoke-unpackaged-${{ matrix.arch }}.log"
+          code=${PIPESTATUS[0]}
+          if [ "$code" = 0 ] && ! grep -q '^SMOKE_EXIT:0' "$ARTIFACTS/smoke-unpackaged-${{ matrix.arch }}.log"; then code=1; fi
+          exit "$code"
+
+      - name: Package (dmg + zip, ${{ matrix.arch }})
+        timeout-minutes: 30
+        run: npm run dist:mac -- --${{ matrix.arch }} --publish never
+
+      - name: Check the packaged app (spawn-helper, signature)
+        timeout-minutes: 5
+        run: |
+          set -euo pipefail
+          APP=$(find dist -maxdepth 2 -name 'VibeSpace.app' -type d | head -1)
+          test -n "$APP" || { echo "::error::no VibeSpace.app under dist/"; exit 1; }
+          echo "APP=$APP" >> "$GITHUB_ENV"
+          helpers=$(find "$APP/Contents/Resources/app.asar.unpacked" -name spawn-helper -type f)
+          test -n "$helpers" || { echo "::error::no spawn-helper in the package"; exit 1; }
+          for f in $helpers; do ls -l "$f"; test -x "$f" || { echo "::error::not executable: $f"; exit 1; }; done
+          codesign -dv --verbose=2 "$APP" 2>&1 | tee "$ARTIFACTS/codesign-${{ matrix.arch }}.txt"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          grep -q 'Signature=adhoc' "$ARTIFACTS/codesign-${{ matrix.arch }}.txt" || { echo "::error::not ad-hoc signed"; exit 1; }
+          grep -q 'Identifier=app.vibespace$' "$ARTIFACTS/codesign-${{ matrix.arch }}.txt" || { echo "::error::signing identifier is not the bundle id"; exit 1; }
+          if grep -q 'Sealed Resources=none' "$ARTIFACTS/codesign-${{ matrix.arch }}.txt"; then echo "::error::linker signature only (no sealed resources)"; exit 1; fi
+          lipo -archs "$APP/Contents/MacOS/VibeSpace"
+
+      - name: Smoke (packaged)
+        timeout-minutes: 15
+        env:
+          VIBESPACE_SMOKE_SHOT: ${{ runner.temp }}/artifacts/window-packaged-${{ matrix.arch }}.png
+        run: |
+          set -uo pipefail
+          for v in $(env | grep -o '^CLAUDE[A-Za-z0-9_]*' || true); do unset "$v"; done
+          "$APP/Contents/MacOS/VibeSpace" --smoke 2>&1 | tee "$ARTIFACTS/smoke-packaged-${{ matrix.arch }}.log"
+          code=${PIPESTATUS[0]}
+          if [ "$code" = 0 ] && ! grep -q '^SMOKE_EXIT:0' "$ARTIFACTS/smoke-packaged-${{ matrix.arch }}.log"; then code=1; fi
+          exit "$code"
+
+      - name: Collect smoke logs
+        if: always()
+        timeout-minutes: 2
+        run: |
+          for d in "$TMPDIR"/vibespace-smoke-*; do
+            [ -d "$d/logs" ] && cp -R "$d/logs" "$ARTIFACTS/logs-$(basename "$d")"
+          done
+          ls -la "$ARTIFACTS" || true
+
+      - name: Upload smoke logs + screenshots
+        if: always()
+        timeout-minutes: 5
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-${{ matrix.arch }}
+          path: ${{ runner.temp }}/artifacts
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload installers
+        if: success()
+        timeout-minutes: 10
+        uses: actions/upload-artifact@v4
+        with:
+          name: vibespace-mac-${{ matrix.arch }}
+          path: |
+            dist/*.dmg
+            dist/*.zip
+          if-no-files-found: error
+          retention-days: 14
