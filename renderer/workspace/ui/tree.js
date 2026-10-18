@@ -1,4 +1,4 @@
-import { $, el, toast, askText, confirmBox, showMenu as showCtxMenu, menuOpen } from './common.js';
+import { $, el, toast, askText, confirmBox, showMenu as showCtxMenu, menuOpen, isMac, osText } from './common.js';
 
 let rootPath = '';
 let onOpenFile = () => {};
@@ -57,7 +57,7 @@ export function init(root, onOpen, savedExpanded, ops = {}) {
         { label: 'New file', run: () => newFileIn(rootPath) },
         { label: 'New folder', run: () => newFolderIn(rootPath) },
         { sep: true },
-        { label: 'Open in File Explorer', run: () => openFolder(rootPath) },
+        { label: osText('Open in File Explorer'), run: () => openFolder(rootPath) },
       ]);
       return;
     }
@@ -69,9 +69,9 @@ export function init(root, onOpen, savedExpanded, ops = {}) {
         { label: 'New file here', run: () => newFileIn(absOf(rel)) },
         { label: 'New folder here', run: () => newFolderIn(absOf(rel)) },
         { sep: true },
-        { label: 'Open in File Explorer', run: () => openFolder(absOf(rel)) },
+        { label: osText('Open in File Explorer'), run: () => openFolder(absOf(rel)) },
       ];
-      if (rel) items.push({ label: 'Reveal in File Explorer', run: () => vs.reveal(absOf(rel)) });
+      if (rel) items.push({ label: osText('Reveal in File Explorer'), run: () => vs.reveal(absOf(rel)) });
       if (rel) { // the repo root itself is never renamed or deleted
         if (hooks.onHistory) items.push({ label: 'Git history', run: () => hooks.onHistory(rel, true) });
         items.push({ label: 'Rename', run: () => startRename(rel) });
@@ -82,7 +82,7 @@ export function init(root, onOpen, savedExpanded, ops = {}) {
       showCtxMenu(ev.clientX, ev.clientY, [
         { label: 'New file', run: () => newFileIn(absOf(parentRelOf(rel))) },
         { sep: true },
-        { label: 'Reveal in File Explorer', run: () => vs.reveal(absOf(rel)) },
+        { label: osText('Reveal in File Explorer'), run: () => vs.reveal(absOf(rel)) },
         ...(hooks.onHistory ? [{ label: 'Git history', run: () => hooks.onHistory(rel, false) }] : []),
         { label: 'Rename', run: () => startRename(rel) },
         { label: 'Delete', danger: true, run: () => startDelete(rel, false) },
@@ -295,7 +295,7 @@ function nameOf(rel) { return rel.split('/').pop(); }
 function parentRelOf(rel) { const i = rel.lastIndexOf('/'); return i < 0 ? '' : rel.slice(0, i); }
 function expandDir(dirAbs) {
   expanded.add(dirAbs);
-  expanded.add(dirAbs.replace(/\//g, '\\'));
+  if (!isMac()) expanded.add(dirAbs.replace(/\//g, '\\')); // a Mac has only the '/' form
 }
 
 async function newFileIn(dirAbs) {

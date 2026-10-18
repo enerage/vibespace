@@ -1,4 +1,4 @@
-import { $, el, debounce, fileIcon } from './common.js';
+import { $, el, debounce, fileIcon, modKey } from './common.js';
 
 // Search tab of the left pane (Files | Git | Search), also Ctrl+Shift+F.
 // main/textsearch.cjs runs `git grep` in this window's repo (a bounded walk for
@@ -38,7 +38,7 @@ export function init(callbacks) {
   });
   // capture + stopPropagation: neither xterm nor Monaco may also act on it
   document.addEventListener('keydown', (e) => {
-    if ((e.ctrlKey || e.metaKey) && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'f') {
+    if (modKey(e) && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'f') {
       e.preventDefault();
       e.stopPropagation();
       openSearch();

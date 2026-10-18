@@ -1298,22 +1298,27 @@ async function runSmoke() {
     const sc = await import(require('node:url').pathToFileURL(path.join(U.ROOT, 'renderer', 'workspace', 'ui', 'shellcmd.js')).href);
     const am = await import(require('node:url').pathToFileURL(path.join(U.ROOT, 'renderer', 'workspace', 'ui', 'automove.js')).href);
     const os = require('node:os');
-    const cases = [
-      ['echo one # comment', false], [`echo "it's" 'say "hi"'`, false], ['echo \u2018smart\u2019', false],
-      ['cmd /c exit 3', true], ["throw 'boom'", true], ['echo (', true],
-    ];
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-setup-'));
-    const file = path.join(dir, 'setup.ps1');
-    fs.writeFileSync(file, '\ufeff' + cases.map(([s], i) => `Write-Output 'CASE-${i}'; ` + sc.setupPrefix(s) + `Write-Output 'CLAUDE-${i}'`).join('\r\n') + '\r\n', 'utf8');
-    const ps = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
-    const run = require('node:child_process').spawnSync(ps, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', file], { encoding: 'utf8', timeout: 30000, windowsHide: true });
-    try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
-    const out = String(run.stdout || '') + String(run.stderr || '');
-    const got = cases.map(([, fails], i) => {
-      const part = out.split(`CASE-${i}`)[1] || '';
-      const seg = part.split(`CASE-${i + 1}`)[0];
-      return seg.includes(`CLAUDE-${i}`) && /worktree setup command failed/.test(seg) === fails;
-    });
+    // the PowerShell run is Windows-only (the zsh/bash twins: 22c-posix below)
+    let out = '';
+    let got = [true];
+    if (process.platform === 'win32') {
+      const cases = [
+        ['echo one # comment', false], [`echo "it's" 'say "hi"'`, false], ['echo \u2018smart\u2019', false],
+        ['cmd /c exit 3', true], ["throw 'boom'", true], ['echo (', true],
+      ];
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-setup-'));
+      const file = path.join(dir, 'setup.ps1');
+      fs.writeFileSync(file, '\ufeff' + cases.map(([s], i) => `Write-Output 'CASE-${i}'; ` + sc.setupPrefix(s) + `Write-Output 'CLAUDE-${i}'`).join('\r\n') + '\r\n', 'utf8');
+      const ps = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+      const run = require('node:child_process').spawnSync(ps, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', file], { encoding: 'utf8', timeout: 30000, windowsHide: true });
+      try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+      out = String(run.stdout || '') + String(run.stderr || '');
+      got = cases.map(([, fails], i) => {
+        const part = out.split(`CASE-${i}`)[1] || '';
+        const seg = part.split(`CASE-${i + 1}`)[0];
+        return seg.includes(`CLAUDE-${i}`) && /worktree setup command failed/.test(seg) === fails;
+      });
+    }
     const refusal = sc.bgRefusal('\x1b[31mThat session is running in the\r\n background (6ce06036).\x1b[0m Run `claude attach 6ce06036` or `claude stop 6ce06036` first');
     const lines = am.autoMoveSummary(['a1', 'a2', 'a3', 'a4'].map(name => ({ name, to: 'main', toLabel: 'MAIN', why: 'cache cold' })));
     const r = {
@@ -1323,6 +1328,88 @@ async function runSmoke() {
     };
     check('shell text: setup script block (# / quotes / errors still start claude), bg refusal, one toast per burst',
       Object.values(r).every(v => v === true), JSON.stringify(r) + (got.every(Boolean) ? '' : ' out=' + out.slice(0, 400)));
+  }
+
+  // 22c-posix. the macOS twins in shellcmd.js (zsh/bash): pure string checks on
+  //      every platform; on darwin the lines also RUN under /bin/zsh and
+  //      /bin/bash: the setup goes through eval in a subshell (# / quotes /
+  //      errors / cd still start claude in place, with the warning only on
+  //      failure), and the cloud line runs the real claude from PATH (a shim
+  //      that prints argv + env), never the tab's `claude` function, with the
+  //      task as ONE unchanged argument and the token variables unset for the
+  //      call only
+  {
+    const sc = await import(require('node:url').pathToFileURL(path.join(U.ROOT, 'renderer', 'workspace', 'ui', 'shellcmd.js')).href);
+    const os = require('node:os');
+    const UNSET = 'command env -u CLAUDE_CODE_OAUTH_TOKEN -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN -u ANTHROPIC_BASE_URL';
+    const typed = [sc.setupPrefix('npm ci\n\tcp ../x .', 'darwin'), sc.cloudSendLine('a\nb\tc\x1bd', { platform: 'darwin' }), sc.cloudLoginLine({ platform: 'darwin' })];
+    let junk = false;
+    try { sc.teleportLine('session_x; rm -rf ~', { platform: 'darwin' }); } catch { junk = true; }
+    const r = {
+      quote: sc.shQuote("it's $HOME `x` !!") === "'it'\\''s $HOME `x` !!'" && sc.shQuote('') === "''",
+      string: sc.shString('a\nb\tc\x1b\r\nd') === "'a'$'\\n''b'$'\\t''c'$'\\n''d'" && sc.shString('') === "''" && sc.shString('\n') === "$'\\n'",
+      setup: sc.setupPrefix('', 'darwin') === '' && sc.setupPrefix(' \n ', 'darwin') === ''
+        && sc.setupPrefix('npm ci\ncp ../x .', 'darwin') === "( eval 'npm ci'$'\\n''cp ../x .' ) || printf '\\033[33m%s\\033[0m\\n' 'VibeSpace: the worktree setup command failed; starting claude anyway'; ",
+      claude: sc.cloudSendLine("it's", { platform: 'darwin', configDir: '/Users/a b/cloud/max-2' }) === `${UNSET} CLAUDE_CONFIG_DIR='/Users/a b/cloud/max-2' claude '--cloud' 'it'\\''s'`
+        && sc.teleportLine('session_01ABCdefGHIjkl', { platform: 'darwin' }) === `${UNSET} claude '--teleport' 'session_01ABCdefGHIjkl'`
+        && sc.cloudLoginLine({ platform: 'darwin' }) === `${UNSET} claude`,
+      noControl: typed.every(l => !/[\x00-\x1f\x7f]/.test(l)),
+      junk,
+      winUnchanged: sc.setupPrefix('x', 'win32').startsWith('$vsE = $Error.Count;') && sc.realClaudeLine([], { platform: 'win32' }).startsWith('$vsX = '),
+    };
+    if (process.platform === 'darwin') {
+      const cp = require('node:child_process');
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-posix-'));
+      const bin = path.join(dir, 'bin');
+      fs.mkdirSync(bin);
+      const probe = path.join(dir, 'probe.js');
+      fs.writeFileSync(probe, "process.stdout.write('VSARGS[' + Buffer.from(JSON.stringify({ a: process.argv.slice(2), cfg: process.env.CLAUDE_CONFIG_DIR || null, tok: process.env.CLAUDE_CODE_OAUTH_TOKEN || null, base: process.env.ANTHROPIC_BASE_URL || null })).toString('base64') + ']\\n')");
+      // the real claude on PATH: electron as node runs the probe with claude's args
+      fs.writeFileSync(path.join(bin, 'claude'), '#!/bin/sh\nexec "$VS_NODE" "$VS_PROBE" "$@"\n', { mode: 0o755 });
+      const cfg = path.join(dir, "cloud dir", "it's");
+      const tasks = [
+        'fix "the" login bug # not a comment, $HOME and $(whoami) stay text',
+        'line one\nline two\twith a tab\n/path/ends\\',
+        "it's ‘smart’ and `ticked` and !! !$ \\\"escaped\\\"",
+      ];
+      const setups = [
+        ['echo one # comment', false], [`echo "it's" 'say "hi"'`, false], ['echo ‘smart’ !x $(echo sub)', false],
+        ['false', true], ['exit 3', true], ['echo (', true], ['cd /\necho two\nfalse\necho last', false],
+      ];
+      let script = 'claude() { echo WRAPPER-CALLED; }\n'; // the tab's wrapper must never run
+      tasks.forEach((t, i) => {
+        script += `echo TASK-${i}; ` + sc.cloudSendLine(t, { platform: 'darwin', configDir: i === 1 ? null : cfg })
+          + `; echo "AFTER[$CLAUDE_CODE_OAUTH_TOKEN|$CLAUDE_CONFIG_DIR|$ANTHROPIC_BASE_URL]"\n`;
+      });
+      setups.forEach(([s], i) => { script += `echo SETUP-${i}; ` + sc.setupPrefix(s, 'darwin') + `echo "CLAUDE-${i} [$PWD]"\n`; });
+      script += 'echo SETUP-END\n';
+      const env = { ...process.env, PATH: bin + ':' + (process.env.PATH || '/usr/bin:/bin'), VS_NODE: process.execPath, VS_PROBE: probe,
+        ELECTRON_RUN_AS_NODE: '1', CLAUDE_CODE_OAUTH_TOKEN: 'tok-smoke', ANTHROPIC_BASE_URL: 'http://smoke.invalid' };
+      delete env.CLAUDE_CONFIG_DIR;
+      for (const sh of ['/bin/zsh', '/bin/bash']) {
+        const run = cp.spawnSync(sh, ['-c', script], { encoding: 'utf8', timeout: 30000, env, cwd: dir });
+        const out = String(run.stdout || '') + String(run.stderr || '');
+        const args = tasks.map((t, i) => {
+          const seg = (out.split(`TASK-${i}\n`)[1] || '').split(`TASK-${i + 1}\n`)[0];
+          const m = /VSARGS\[([A-Za-z0-9+/=]+)\]/.exec(seg);
+          let x = null;
+          try { x = JSON.parse(Buffer.from(m[1], 'base64').toString('utf8')); } catch {}
+          const after = /AFTER\[([^\]]*)\]/.exec(seg);
+          return Boolean(x && x.a.length === 2 && x.a[0] === '--cloud' && x.a[1] === t.trim()
+            && x.cfg === (i === 1 ? null : cfg) && x.tok === null && x.base === null
+            && after && after[1] === 'tok-smoke||http://smoke.invalid' && !seg.includes('WRAPPER-CALLED'));
+        });
+        const setup = setups.map(([, fails], i) => {
+          const seg = (out.split(`SETUP-${i}\n`)[1] || '').split(i + 1 < setups.length ? `SETUP-${i + 1}\n` : 'SETUP-END')[0];
+          return seg.includes(`CLAUDE-${i} [`) && !seg.includes(`CLAUDE-${i} [/]`) && /worktree setup command failed/.test(seg) === fails;
+        });
+        const key = path.basename(sh);
+        r[key] = args.every(Boolean) && setup.every(Boolean) ? true : `args ${args.join(',')} setup ${setup.join(',')} out=${out.slice(0, 500)}`;
+      }
+      try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+    }
+    check('shell text (zsh/bash): POSIX quoting, setup via eval in a subshell, real claude via env (task = one arg, token vars unset)',
+      Object.values(r).every(v => v === true), JSON.stringify(r));
   }
 
   // 22d. reasoning effort (statusLine { level }, hook string; subagents ignored)
@@ -1359,28 +1446,33 @@ async function runSmoke() {
       `line one\nline two\twith a tab\nC:\\path\\ends\\`,
       `it's ‘smart’ and \`ticked\` and \\"escaped\\"`,
     ];
-    // the stand-in for claude.exe: electron as node prints its argv + the env it got
-    const probe = "process.stdout.write('VSARGS[' + Buffer.from(JSON.stringify({ a: process.argv.slice(1), cfg: process.env.CLAUDE_CONFIG_DIR || null, tok: process.env.CLAUDE_CODE_OAUTH_TOKEN || null, base: process.env.ANTHROPIC_BASE_URL || null })).toString('base64') + ']')";
-    const lines = tasks.map((t, i) => `Write-Output 'CASE-${i}'; `
-      + sc.realClaudeLine(['-e', probe, '--', '--cloud', sc.cloudTask(t)], { exe: process.execPath, configDir: i === 1 ? null : cfg })
-      + `; Write-Output ('AFTER[' + $env:CLAUDE_CODE_OAUTH_TOKEN + '|' + $env:CLAUDE_CONFIG_DIR + '|' + $env:ANTHROPIC_BASE_URL + ']')`);
-    const file = path.join(dir, 'cloud.ps1');
-    fs.writeFileSync(file, '\ufeff' + lines.join('\r\n') + '\r\n', 'utf8');
-    const ps = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
-    const env = { ...process.env, ELECTRON_RUN_AS_NODE: '1', CLAUDE_CODE_OAUTH_TOKEN: 'tok-smoke', ANTHROPIC_BASE_URL: 'http://smoke.invalid' };
-    delete env.CLAUDE_CONFIG_DIR;
-    const run = require('node:child_process').spawnSync(ps, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', file], { encoding: 'utf8', timeout: 60000, windowsHide: true, env });
-    const out = String(run.stdout || '') + String(run.stderr || '');
-    const got = tasks.map((t, i) => {
-      const seg = (out.split(`CASE-${i}`)[1] || '').split(`CASE-${i + 1}`)[0];
-      const m = /VSARGS\[([A-Za-z0-9+/=]+)\]/.exec(seg);
-      let r = null;
-      try { r = JSON.parse(Buffer.from(m[1], 'base64').toString('utf8')); } catch {}
-      const after = /AFTER\[([^\]]*)\]/.exec(seg);
-      return Boolean(r && r.a.length === 2 && r.a[0] === '--cloud' && r.a[1] === t.trim()
-        && r.cfg === (i === 1 ? null : cfg) && r.tok === null && r.base === null
-        && after && after[1] === 'tok-smoke||http://smoke.invalid');
-    });
+    // the PowerShell run is Windows-only (the zsh/bash twin: 22c-posix)
+    let out = '';
+    let got = [true];
+    if (process.platform === 'win32') {
+      // the stand-in for claude.exe: electron as node prints its argv + the env it got
+      const probe = "process.stdout.write('VSARGS[' + Buffer.from(JSON.stringify({ a: process.argv.slice(1), cfg: process.env.CLAUDE_CONFIG_DIR || null, tok: process.env.CLAUDE_CODE_OAUTH_TOKEN || null, base: process.env.ANTHROPIC_BASE_URL || null })).toString('base64') + ']')";
+      const lines = tasks.map((t, i) => `Write-Output 'CASE-${i}'; `
+        + sc.realClaudeLine(['-e', probe, '--', '--cloud', sc.cloudTask(t)], { exe: process.execPath, configDir: i === 1 ? null : cfg })
+        + `; Write-Output ('AFTER[' + $env:CLAUDE_CODE_OAUTH_TOKEN + '|' + $env:CLAUDE_CONFIG_DIR + '|' + $env:ANTHROPIC_BASE_URL + ']')`);
+      const file = path.join(dir, 'cloud.ps1');
+      fs.writeFileSync(file, '\ufeff' + lines.join('\r\n') + '\r\n', 'utf8');
+      const ps = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+      const env = { ...process.env, ELECTRON_RUN_AS_NODE: '1', CLAUDE_CODE_OAUTH_TOKEN: 'tok-smoke', ANTHROPIC_BASE_URL: 'http://smoke.invalid' };
+      delete env.CLAUDE_CONFIG_DIR;
+      const run = require('node:child_process').spawnSync(ps, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', file], { encoding: 'utf8', timeout: 60000, windowsHide: true, env });
+      out = String(run.stdout || '') + String(run.stderr || '');
+      got = tasks.map((t, i) => {
+        const seg = (out.split(`CASE-${i}`)[1] || '').split(`CASE-${i + 1}`)[0];
+        const m = /VSARGS\[([A-Za-z0-9+/=]+)\]/.exec(seg);
+        let r = null;
+        try { r = JSON.parse(Buffer.from(m[1], 'base64').toString('utf8')); } catch {}
+        const after = /AFTER\[([^\]]*)\]/.exec(seg);
+        return Boolean(r && r.a.length === 2 && r.a[0] === '--cloud' && r.a[1] === t.trim()
+          && r.cfg === (i === 1 ? null : cfg) && r.tok === null && r.base === null
+          && after && after[1] === 'tok-smoke||http://smoke.invalid');
+      });
+    }
     const ansi = "PS D:\\Repos\\x> \x1b[?25l\x1b[32m✓\x1b[0m Created cloud session\r\n  \x1b]8;;https://claude.ai/code/session_01ABCdefGHIjklMNOpqrSTuv\x07\x1b[4mhttps://claude.ai/code/session_01ABCdefGHIjklMNOpqrSTuv\x1b[24m\x1b]8;;\x07.\r\n";
     const hit = sc.cloudSession(ansi);
     const echoed = 'see https://claude.ai/code/session_AAAAbbbbCCCC1111';

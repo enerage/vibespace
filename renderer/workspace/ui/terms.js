@@ -1,4 +1,4 @@
-import { $, el, toast, confirmBox, showMenu } from './common.js';
+import { $, el, toast, confirmBox, showMenu, isMac, modKey } from './common.js';
 import { termTheme, onThemeChange } from './themes.js';
 import { openTabMenu } from './tabmenu.js';
 import * as feedui from './feedui.js';
@@ -7,7 +7,7 @@ import * as parked from './parked.js';
 import * as cloud from './cloud.js';
 import * as inputsel from './inputsel.js';
 import * as automove from './automove.js';
-import { setupPrefix, setupLines, bgRefusal, JOB_ID, cloudSendLine, teleportLine, cloudLoginLine, cloudSession, shortTask, CLOUD_ID } from './shellcmd.js';
+import { setupPrefix, setupLines, bgRefusal, JOB_ID, cloudSendLine, teleportLine, cloudLoginLine, cloudSession, shortTask, CLOUD_ID, shQuote } from './shellcmd.js';
 
 // terminal tabs: each hosts a PowerShell pty; "claude" tabs run Claude Code and
 // get their session id tracked (main process) so they can be resumed after updates.
@@ -443,11 +443,16 @@ function autoReason(from, to) {
 
 const TERM_OPTS = {
   fontSize: 13,
-  fontFamily: '"Cascadia Mono", Consolas, "Courier New", monospace',
+  // Mac fonts after the Windows ones (which Windows always has), and before
+  // Courier New, which a Mac has too
+  fontFamily: '"Cascadia Mono", Consolas, "SF Mono", Menlo, Monaco, "Courier New", monospace',
   cursorBlink: true,
   scrollback: 6000,
   // theme comes from ui/themes.js per workspace (see createTab + onThemeChange)
   allowProposedApi: true,
+  // Mac: Option sends ESC-prefixed keys, as claude's Option shortcuts
+  // (Option+Enter newline, Option+P model) need
+  ...(isMac() ? { macOptionIsMeta: true } : {}),
 };
 
 // Typing-lag evidence (main/lagmon.cjs logs it with CPU load + echo time).
@@ -555,8 +560,11 @@ export function init(opts) {
     toast(`${tab.name}: ${reason || 'usage limit'}, continuing on ${toLabel || to}`);
     // tell the agent WHY it was restarted: without it, an agent whose subagents
     // died on the limit assumed nothing could run until the reset (2026-10-15).
-    // Typed inside "…" in PowerShell: no quotes, $ or backticks in it.
-    const plain = (x) => String(x || '').replace(/["$`\r\n]/g, '').slice(0, 60);
+    // Typed inside "…" in PowerShell: no quotes (PowerShell counts “ ” „ as
+    // quotes too), $, backticks or control characters in it. On a Mac it goes
+    // in single quotes (claudeCommand), where only ' is special and shQuote
+    // escapes that.
+    const plain = (x) => String(x || '').replace(/["“”„$`\x00-\x1f\x7f]/g, '').slice(0, 60);
     const why = plain(reason || 'usage limit');
     relaunchOnAccount(tab, to, { prompt: `continue - VibeSpace moved this conversation to the account ${plain(toLabel || to)} because the previous one hit its ${why}. This account has room, so restart any subagents or background agents that failed on that limit.` });
   });
@@ -624,7 +632,7 @@ export function init(opts) {
     if (e.key === 'Escape') { e.preventDefault(); closeTermFind(); }
   });
   document.addEventListener('keydown', (e) => {
-    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'f') {
+    if (modKey(e) && !e.shiftKey && e.key.toLowerCase() === 'f') {
       // Monaco has its own find — only handle when focus is NOT in the editor
       const ae = document.activeElement;
       if (ae && $('#monaco-host')?.contains(ae)) return;
@@ -734,7 +742,9 @@ export function init(opts) {
 // An agent in its own git worktree (<repo>\.claude\worktrees\<name>, branch
 // vs/<name>): parallel agents never touch each other's files. VibeSpace owns the
 // worktree; git writes beyond add/remove (commit, merge) stay with the agents.
-const normPath = (p) => String(p || '').replace(/\//g, '\\').replace(/\\+$/, '').toLowerCase();
+const normPath = (p) => (isMac()
+  ? String(p || '').replace(/\/+$/, '').toLowerCase() // default APFS is case-insensitive
+  : String(p || '').replace(/\//g, '\\').replace(/\\+$/, '').toLowerCase());
 const samePath = (a, b) => normPath(a) === normPath(b);
 const wtInfo = (w) => ({ name: w.name, path: w.path, branch: w.branch, base: w.base });
 
@@ -792,8 +802,11 @@ async function openClaudeMenu() {
   const items = [
     { label: 'New agent', run: () => createTab({ name: nextName('agent'), cwd: repoPath, claude: true }) },
     { label: 'New agent in a worktree', hint: "Its own git worktree and branch vs/<name>: parallel agents never touch each other's files", run: () => newWorktreeAgent() },
-    { label: 'New terminal', hint: 'A plain PowerShell terminal', run: () => createTab({ name: nextName('term'), cwd: repoPath }) },
-    { label: 'Send to cloud…', hint: 'Start a Claude Code cloud session on a chosen account: it works on a GitHub clone of this repo and keeps running when this PC sleeps', run: () => sendToCloud() },
+    { label: 'New terminal', hint: isMac() ? 'A plain terminal' : 'A plain PowerShell terminal', run: () => createTab({ name: nextName('term'), cwd: repoPath }) },
+    // Send to cloud is Windows-only for now (phase 2 on a Mac: cloud-send.sh)
+    isMac()
+      ? { label: 'Send to cloud…', disabled: true, hint: 'Send to cloud is coming to Mac later' }
+      : { label: 'Send to cloud…', hint: 'Start a Claude Code cloud session on a chosen account: it works on a GitHub clone of this repo and keeps running when this PC sleeps', run: () => sendToCloud() },
     ...newAgentModelItems(),
     ...newAgentOnItems(),
     { sep: true },
@@ -1238,6 +1251,19 @@ function wireClipboard(term, id) {
     // Shift(+Ctrl)+arrows select text in claude's prompt (ui/inputsel.js)
     if (inputsel.onKey(term, ev, (d) => vs.ptyWrite(id, d))) { ev.preventDefault(); return false; }
     const key = ev.key.toLowerCase();
+    if (isMac()) {
+      // Mac: Cmd+C copies a selection, Cmd+V pastes. Ctrl+C (interrupt) and
+      // Ctrl+V (claude's image paste) go to the pty untouched. preventDefault
+      // also keeps the Edit menu's own copy/paste from acting a second time.
+      if (!ev.metaKey || ev.ctrlKey || ev.altKey) return true;
+      if (key === 'c') {
+        ev.preventDefault();
+        if (term.hasSelection()) copySelection(term);
+        return false;
+      }
+      if (key === 'v') { ev.preventDefault(); pasteInto(term); return false; }
+      return true;
+    }
     if (key === 'insert') {
       if (ev.ctrlKey && term.hasSelection()) { ev.preventDefault(); copySelection(term); return false; }
       if (ev.shiftKey) { ev.preventDefault(); pasteInto(term); return false; }
@@ -1311,12 +1337,17 @@ const REL_PATH_LINE = /(?<![\w.\\/:])([\w][\w.\-]*(?:[\\/][^\s:"'<>|]+)+):(\d+)(
 // quoted paths may contain spaces — claude quotes those; requires a separator
 // so arbitrary quoted "text: 5" doesn't light up
 const QUOTED_PATH_LINE = /"((?:[A-Za-z]:)?[^"]*?[\\/][^"]*?):(\d+)"/g;
+// Mac: absolute POSIX paths (/Users/me/repo/src/app.js:42, two segments at
+// least), unquoted or in single quotes; drive-letter paths don't exist there.
+// The lookbehind skips URLs (https://host/x:1, file:///x:1) and ~/ paths.
+const POSIX_ABS_PATH_LINE = /(?<![\w./:~\\])(\/[^\s:"'<>|/]+(?:\/[^\s:"'<>|/]+)+):(\d+)(?::(\d+))?/g;
+const SQUOTED_PATH_LINE = /'(\/[^']*?\/[^']*?):(\d+)'/g;
 
 const baseName = (p) => p.split(/[\\/]/).pop();
 
 async function openPathAt(tab, rawPath, line) {
   const p = rawPath.replace(/^["']+|["']+$/g, ''); // claude quotes paths with spaces
-  const isAbs = /^[A-Za-z]:[\\/]/.test(p) || p.startsWith('\\\\');
+  const isAbs = isMac() ? p.startsWith('/') : (/^[A-Za-z]:[\\/]/.test(p) || p.startsWith('\\\\'));
   if (isAbs) { if (openFile) openFile(p, baseName(p), line); return; }
   // relative: try the terminal's spawn cwd first, then the workspace root
   for (const base of [tab.cwd, repoPath]) {
@@ -1341,7 +1372,10 @@ function registerFileLinks(term, tab) {
           const inHit = (i) => hits.some(h => i >= h.start && i < h.start + h.len);
           const add = (m) => hits.push({ start: m.index, len: m[0].length, path: m[1], line: +m[2] });
           for (const m of text.matchAll(QUOTED_PATH_LINE)) add(m); // quoted (spaces) first…
-          for (const m of text.matchAll(ABS_PATH_LINE)) if (!inHit(m.index)) add(m); // …then unquoted
+          if (isMac()) {
+            for (const m of text.matchAll(SQUOTED_PATH_LINE)) if (!inHit(m.index)) add(m);
+            for (const m of text.matchAll(POSIX_ABS_PATH_LINE)) if (!inHit(m.index)) add(m);
+          } else for (const m of text.matchAll(ABS_PATH_LINE)) if (!inHit(m.index)) add(m); // …then unquoted
           for (const m of text.matchAll(REL_PATH_LINE)) if (!inHit(m.index)) add(m);
           if (!hits.length) return cb(undefined);
           cb(hits.map(h => ({
@@ -1521,16 +1555,19 @@ function launchOpts(tab, picker) {
 // endpoint accounts get no --remote-control (Remote Control refuses
 // setup-tokens and non-Anthropic base URLs).
 // prompt: only ever the literal `continue` (account switch after a limit).
+// Quoting: "…" for PowerShell; single quotes on a Mac, because zsh expands
+// $, ! and backticks inside double quotes.
+const cmdArg = (s) => (isMac() ? shQuote(s) : `"${s}"`);
 function claudeCommand(tab, resumeId = null, prompt = null) {
   let cmd = resumeId == null ? 'claude' : `claude --resume${resumeId ? ' ' + resumeId : ''}`;
   const model = resumeId == null || (resumeId && tab.modelSwitch) ? cleanModel(tab.model) : null;
   if (model) cmd += ` --model ${model}`;
   if (remote() && !(tab.account && tab.account !== 'login')) {
     const label = rcLabel(tab.name);
-    if (label) cmd += ` --remote-control "${label}"`;
+    if (label) cmd += ` --remote-control ${cmdArg(label)}`;
   }
-  if (tab.hookSettings) cmd += ` --settings "${tab.hookSettings}"`;
-  if (prompt) cmd += ` "${prompt}"`;
+  if (tab.hookSettings) cmd += ` --settings ${cmdArg(tab.hookSettings)}`;
+  if (prompt) cmd += ` ${cmdArg(prompt)}`;
   return cmd;
 }
 

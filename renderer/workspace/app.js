@@ -1,4 +1,4 @@
-import { $, toast, debounce, confirmBox } from './ui/common.js';
+import { $, toast, debounce, confirmBox, isMac, modKey, osLabels } from './ui/common.js';
 import * as tree from './ui/tree.js';
 import * as viewer from './ui/viewer.js';
 import * as terms from './ui/terms.js';
@@ -80,7 +80,9 @@ function wireLayoutToggle() {
     }
   };
   const logoImg = $('#ws-logo');
-  logoImg.title = 'Change this workspace’s logo (pick an image from the repo or browse). The window and taskbar icon update right away.';
+  logoImg.title = isMac()
+    ? 'Change this workspace’s logo (pick an image from the repo or browse). The window and Dock icon update right away.'
+    : 'Change this workspace’s logo (pick an image from the repo or browse). The window and taskbar icon update right away.';
   logoImg.onclick = changeLogo;
 
   // drop an image ON the logo to set it (drag a png from the desktop → logo)
@@ -153,12 +155,12 @@ function wireLayoutToggle() {
     paintRestart();
   });
   document.addEventListener('keydown', (e) => {
-    if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'd') {
+    if (modKey(e) && e.shiftKey && e.key.toLowerCase() === 'd') {
       e.preventDefault();
       vs.copyDiagnostics(wsId).then(() =>
         toast('Diagnostics copied — paste it to your agent when reporting an issue', 'ok'));
     }
-    if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'u') {
+    if (modKey(e) && e.shiftKey && e.key.toLowerCase() === 'u') {
       e.preventDefault();
       if (!terms.jumpToAttention()) toast('No agent needs attention right now', '');
     }
@@ -341,7 +343,18 @@ function wirePresence() {
   vs.presenceGet().then(paint).catch(() => {});
 }
 
+// Mac wording for the static page (index.html): ⌘ and Finder everywhere
+// (osLabels), plus the few phrases that name a Windows thing
+function macLabels() {
+  if (!isMac()) return;
+  osLabels(document.body);
+  $('#wt-setup-hint').textContent = 'A shell command, runs in the new worktree before claude starts (+ ▾ → New agent in a worktree), visible in its tab. If it fails, claude starts anyway. Empty = none.';
+  $('#wt-setup').placeholder = 'e.g. npm ci; cp ../../../.secrets.json .';
+  $('#notify-hint').textContent = 'Mac notifications — one choice for all workspaces. Tab lights and the Dock badge always show every state.';
+}
+
 async function main() {
+  macLabels();
   ws = await vs.getWorkspace(wsId);
   if (!ws) {
     toast('Workspace not found — close this window and open the launcher.', 'err');
@@ -394,7 +407,8 @@ async function main() {
   vs.onTreeChanged(() => viewer.onFilesChanged());
   tree.init(ws.repoPath, (path, name) => viewer.open(path, name), state.expandedFolders, {
     // tabs are keyed by fsList/fsRead paths (backslashes); the tree joins with '/'
-    onRename: (from, to) => viewer.renameTab(from.replace(/\//g, '\\'), to.replace(/\//g, '\\')),
+    // (a Mac's paths already use '/')
+    onRename: (from, to) => (isMac() ? viewer.renameTab(from, to) : viewer.renameTab(from.replace(/\//g, '\\'), to.replace(/\//g, '\\'))),
     // close every open tab at or under the deleted path (separator/case-insensitive)
     onHistory: (rel, dir) => openGitPane('history', { rel, dir }),
     onDeleted: (abs) => {
@@ -426,7 +440,7 @@ async function main() {
     quiet: Boolean(shot),
   });
   wirePresence();
-  if (shot) viewer.open(ws.repoPath + '\\README.md', 'README.md'); // docs mode: show code in the preview
+  if (shot) viewer.open(ws.repoPath + (isMac() ? '/README.md' : '\\README.md'), 'README.md'); // docs mode: show code in the preview
 
   wireSplitters();
 

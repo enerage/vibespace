@@ -1,4 +1,4 @@
-import { el, toast, showMenu, confirmBox } from './common.js';
+import { el, toast, showMenu, confirmBox, isMac, osText } from './common.js';
 import { feedFor, accounts, tabFamily, relaunchOnAccount, sendToAgent, repoRoot } from './terms.js';
 
 // Right-click menu for terminal tabs (was: right-click = rename) + the
@@ -14,6 +14,7 @@ function copy(text, what) {
 // munging every non-alphanumeric char of the cwd to '-' (see sessions.cjs)
 function transcriptPath(cwd, sessionId) {
   if (!cwd || !sessionId) return null;
+  if (isMac()) return `~/.claude/projects/${cwd.replace(/[^a-zA-Z0-9]/g, '-')}/${sessionId}.jsonl`;
   return `%USERPROFILE%\\.claude\\projects\\${cwd.replace(/[^a-zA-Z0-9]/g, '-')}\\${sessionId}.jsonl`;
 }
 
@@ -111,7 +112,7 @@ function worktreeItems(tab) {
       run: () => { if (sendToAgent(tab.id, prompt)) toast(`Asked ${tab.name} to merge ${wt.branch} into ${wt.base}`, 'ok'); },
     },
     {
-      label: 'Open worktree folder in Explorer',
+      label: osText('Open worktree folder in Explorer'),
       hint: wt.path,
       run: () => vs.openFolder(wt.path).catch((e) => toast('Could not open folder: ' + (e.message || e), 'err')),
     },

@@ -1,6 +1,6 @@
 // Keyboard text selection in Claude Code's prompt: Shift+←/→, Ctrl+Shift+←/→
-// (by word), Shift+Home/End. Then Backspace/Delete removes the selection,
-// Ctrl+C copies it, and typing replaces it.
+// (by word; Option on a Mac), Shift+Home/End. Then Backspace/Delete removes
+// the selection, Ctrl+C copies it, and typing replaces it.
 //
 // Claude Code (2.1.289) has no keyboard-STARTED selection in its input
 // (anthropics/claude-code#80734): Shift+arrows just move the caret. In
@@ -18,6 +18,12 @@
 //     not move the caret; a press+release on one cell is a click (clears the
 //     selection and puts the caret there);
 //   - Shift+←/→ move the selection's focus end by one cell; Esc does NOT clear.
+//
+// On a Mac the keys follow its text fields: Option+Shift+←/→ by word (Ctrl
+// arrows belong to macOS Spaces there), Cmd+Shift+←/→ to the line's start/end,
+// Shift+Home/End as everywhere.
+
+import { isMac } from './common.js';
 
 const CSI = '\x1b[';
 const SHIFT_LEFT = CSI + '1;2D';
@@ -134,8 +140,12 @@ export function onKey(term, ev, send) {
   const k = ev.key;
   if (k === 'Shift' || k === 'Control' || k === 'Alt' || k === 'Meta') return false;
 
-  const isSelKey = ev.shiftKey && !ev.altKey && !ev.metaKey
-    && (k === 'ArrowLeft' || k === 'ArrowRight' || ((k === 'Home' || k === 'End') && !ev.ctrlKey));
+  const mac = isMac();
+  const arrow = k === 'ArrowLeft' || k === 'ArrowRight';
+  const isSelKey = mac
+    ? ev.shiftKey && !ev.ctrlKey && ((arrow && !(ev.altKey && ev.metaKey)) || ((k === 'Home' || k === 'End') && !ev.altKey && !ev.metaKey))
+    : ev.shiftKey && !ev.altKey && !ev.metaKey
+      && (k === 'ArrowLeft' || k === 'ArrowRight' || ((k === 'Home' || k === 'End') && !ev.ctrlKey));
   let st = states.get(term);
 
   if (!isSelKey) {
@@ -158,8 +168,10 @@ export function onKey(term, ev, send) {
 
   const b = p.caret + st.count; // the moving end of the selection
   let target;
-  if (k === 'ArrowLeft') target = ev.ctrlKey ? wordLeft(p.text, b) : b - 1;
-  else if (k === 'ArrowRight') target = ev.ctrlKey ? wordRight(p.text, b, p.end) : b + 1;
+  const byWord = mac ? ev.altKey : ev.ctrlKey;
+  if (mac && arrow && ev.metaKey) target = k === 'ArrowLeft' ? TEXT_START : p.end; // Cmd: line start/end
+  else if (k === 'ArrowLeft') target = byWord ? wordLeft(p.text, b) : b - 1;
+  else if (k === 'ArrowRight') target = byWord ? wordRight(p.text, b, p.end) : b + 1;
   else target = k === 'Home' ? TEXT_START : p.end;
   target = Math.max(TEXT_START, Math.min(p.end, target));
 

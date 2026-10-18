@@ -1,4 +1,4 @@
-import { $, el, toast, confirmBox } from './common.js';
+import { $, el, toast, confirmBox, isMac } from './common.js';
 import { THEMES, applyTheme, currentTheme } from './themes.js';
 import { openSetupTokenTab, openCloudSetupTab, onCloudReadyChanged } from './terms.js';
 import { roomText } from './automove.js';
@@ -193,7 +193,7 @@ export function init(opts) {
   };
   $('#acct-ep-add-btn').onclick = addEndpoint;
   $('#acct-ep-label').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); addEndpoint(); } });
-  $('#acct-ep-env').addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.ctrlKey) { e.preventDefault(); addEndpoint(); } });
+  $('#acct-ep-env').addEventListener('keydown', (e) => { if (e.key === 'Enter' && (isMac() ? e.metaKey : e.ctrlKey)) { e.preventDefault(); addEndpoint(); } });
 
   // rows that moved out of the header
   $('#btn-logs').onclick = () => vs.openLogs();
@@ -310,7 +310,8 @@ export function init(opts) {
       const actions = el('div', 'acct-actions');
       // cloud sessions need a claude.ai sign-in: the /login is one; a token
       // account signs in once in its own cloud-only config (never used by agents)
-      if (a.kind === 'login' || a.kind === 'token') {
+      // (Send to cloud is Windows-only for now: no cloud sign-in on a Mac)
+      if ((a.kind === 'login' || a.kind === 'token') && !isMac()) {
         const c = cloudReady[a.id];
         const ok = Boolean(c && c.ready);
         const cb = el('button', 'btn small ghost acct-cloud' + (ok ? ' ready' : ''), ok ? 'Cloud ready ✓' : 'Set up cloud…');
