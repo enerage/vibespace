@@ -2265,8 +2265,8 @@ async function runSmoke(hooks = {}) {
 
       // wrapper dry-run with an account file: login keeps --remote-control, a token
       // account gets none, a missing blob says so. The pty start clears a stale file.
-      // (PowerShell wrapper: Windows only; the zsh wrapper has its own darwin test)
-      const r = process.platform !== 'win32' ? null : await new Promise((resolve) => {
+      // (PowerShell on Windows, the zsh claude() on macOS)
+      const r = (process.platform !== 'win32' && process.platform !== 'darwin') ? null : await new Promise((resolve) => {
         let buf = '';
         const termId = 'smokeacct';
         const stale = ptyhost.accountFileFor('smoke-acct', termId);
@@ -2533,7 +2533,7 @@ async function runSmoke(hooks = {}) {
         const epsFile = ptyhost.endpointSettingsFor('smoke-acct', 'smokeendpoint');
         let keptAtKill = null; // was the tab's settings file there just before kill()?
         const refuse = 'start claude without --settings';
-        const r = process.platform !== 'win32' ? null : await new Promise((resolve) => {
+        const r = (process.platform !== 'win32' && process.platform !== 'darwin') ? null : await new Promise((resolve) => {
           let buf = '';
           const termId = 'smokeendpoint';
           const done = (ok, detail) => { clearTimeout(timer); ptyhost.onData(() => {}); keptAtKill = fs.existsSync(epsFile); ptyhost.kill(termId); resolve({ ok, detail }); };
