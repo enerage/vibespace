@@ -2,6 +2,49 @@
 
 Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 
+## [0.7.0] — 2026-10-18
+
+### Added
+- **VibeSpace runs on macOS** (Apple Silicon and Intel, macOS 13+). Phase 1 of
+  the port (RESEARCH-MAC.md) covers terminals, agents, every account kind, session
+  tracking, worktrees, the Git pane, the file tree, preview, the Dock icon and
+  badge, and Mac keys and menu:
+  - Terminals run your own zsh (or bash) as a login shell. The `claude`
+    function that adds tracking comes in through a VibeSpace `ZDOTDIR` that
+    loads your own rc files first. Prompts are detected by a private OSC
+    marker, not a prompt pattern.
+  - An app opened from the Dock gets only `/usr/bin:/bin`, so VibeSpace reads
+    your login shell's PATH once at start (with fallbacks).
+  - Extra Claude accounts and z.ai keys are stored in the Keychain
+    (`/usr/bin/security`, never on a command line). Claude's own login is
+    found through its Keychain item.
+  - Closing a tab ends its whole process tree (MCP servers included), as on
+    Windows.
+  - Keys: ⌘C/⌘V copy and paste, Ctrl+C/Ctrl+V go to Claude (interrupt, image
+    paste), ⌘ for app shortcuts (⌘P, ⌘F, ⌘⇧B…), Option+Shift+←/→ selects by
+    word. Labels show ⌘ and Finder.
+  - Each workspace has its own Dock tile with the repo's logo. A dot badge and
+    one bounce show when an agent needs you.
+  - The download is a dmg, ad-hoc signed (no Apple developer account yet), so
+    the first launch needs Open Anyway in System Settings once
+    (GETTING-STARTED-MAC.md).
+  - GitHub Actions builds both architectures on every push to `mac-port` and
+    `main`. It runs the full smoke on the unpackaged and the packaged app, real
+    window included.
+  - Not on Mac yet (phase 2): a separate pinnable Dock icon per repo, Send to
+    cloud, the Finder right-click entry.
+- **Image, video and audio preview** (both platforms). Clicking a picture,
+  video or sound in the tree shows it in the preview instead of "binary file":
+  - Images are fitted on a checkerboard; a click toggles 100 %.
+  - Videos and sounds get native controls and seek instantly (Range requests).
+  - SVGs open as images, with a **Source** button for their XML.
+  - The files are served by a new `vsfile://` scheme, only from inside the
+    window's repo, read fresh from disk every time.
+
+### Fixed
+- The limit-switch resume prompt also strips curly quotes and control
+  characters from account names (PowerShell treats curly quotes as quotes).
+
 ## [0.6.61] — 2026-10-15
 
 ### Changed
