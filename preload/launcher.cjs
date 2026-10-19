@@ -18,4 +18,10 @@ contextBridge.exposeInMainWorld('vs', {
   openLogs: () => ipcRenderer.invoke('util:openLogs'),
   imageDataUrl: (p) => ipcRenderer.invoke('util:imageDataUrl', p),
   reveal: (p) => ipcRenderer.invoke('fs:reveal', p),
+  // packaged self-update (main/appupdate.cjs)
+  appUpdateGet: () => ipcRenderer.invoke('appupdate:get'),
+  appUpdateInstall: () => ipcRenderer.invoke('appupdate:install'),
+  appUpdateBusy: () => ipcRenderer.invoke('appupdate:busyElsewhere'),
+  appUpdateNotes: () => ipcRenderer.invoke('appupdate:notes'),
+  onAppUpdateState: (cb) => ipcRenderer.on('appupdate:state', (e, v) => cb(v)),
 });

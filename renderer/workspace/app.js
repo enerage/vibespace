@@ -11,6 +11,7 @@ import { applyTheme } from './ui/themes.js';
 import * as limits from './ui/limits.js';
 import * as netchip from './ui/netchip.js';
 import { pickLogo } from './ui/logopick.js';
+import * as appupdate from './ui/appupdate.js';
 
 const wsId = new URLSearchParams(location.search).get('id');
 let ws = null;
@@ -126,11 +127,23 @@ function wireLayoutToggle() {
   // "new Claude" here means it's ALREADY on disk — restarting the agents is all
   // that's left, and the app restart does exactly that (0.6.32 merged the old
   // ⟳ "Update & Restart All" into this button).
-  const why = { code: false, claude: null };
+  // A newer VibeSpace RELEASE (packaged builds, main/appupdate.cjs) takes the
+  // same button: "↻ Update to <v>" in the accent colour; the update restarts
+  // every window anyway, so it covers the other two reasons too.
+  const why = { code: false, claude: null, app: null };
   const paintRestart = () => {
-    const show = why.code || Boolean(why.claude);
+    const show = why.code || Boolean(why.claude) || Boolean(why.app);
     restartBtn.classList.toggle('hidden', !show);
+    restartBtn.classList.toggle('accent', Boolean(why.app));
     if (!show) return;
+    if (why.app) {
+      restartBtn.textContent = appupdate.label(why.app);
+      restartBtn.title = appupdate.tooltip(why.app);
+      restartBtn.disabled = Boolean(why.app.busy);
+      restartBtn.dataset.appUpdate = '1';
+      return;
+    }
+    if (restartBtn.dataset.appUpdate) { delete restartBtn.dataset.appUpdate; restartBtn.disabled = false; }
     restartBtn.textContent = why.code && why.claude ? '↻ Restart · updates ready'
       : why.claude ? `↻ Restart · Claude ${why.claude}`
       : '↻ Restart VibeSpace';
@@ -143,7 +156,19 @@ function wireLayoutToggle() {
   const question = () => (why.code && why.claude ? 'Restart to pick up the new VibeSpace code and Claude Code?'
     : why.claude ? `Restart all agents onto Claude Code ${why.claude}?`
     : 'Restart VibeSpace to pick up the new code?');
-  restartBtn.onclick = () => restartWorkspace(question(), restartBtn);
+  restartBtn.onclick = () => {
+    if (!why.app) return restartWorkspace(question(), restartBtn);
+    appupdate.run(async () => {
+      persistNow(); // main needs fresh tab names/ids to answer who is busy
+      const r = await vs.ptyBusy(wsId).catch(() => null);
+      return (r && r.names) || [];
+    });
+  };
+  restartBtn.oncontextmenu = (e) => { if (why.app) { e.preventDefault(); appupdate.openNotes(); } };
+  appupdate.watch((v) => {
+    why.app = v && v.enabled && v.update ? v : null;
+    paintRestart();
+  });
   $('#btn-restart-ws').onclick = () => restartWorkspace('Restart this workspace window?', $('#btn-restart-ws'));
   vs.onAppUpdateAvailable(() => {
     why.code = true;

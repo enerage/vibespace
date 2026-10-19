@@ -63,6 +63,8 @@ body { margin: 0; background: var(--bg); color: var(--text); font: 13.5px/1.45 "
 .btn.ghost { background: transparent; }
 .btn:disabled { opacity: 0.45; cursor: default; }
 #btn-away.away { border-color: var(--accent); color: var(--accent-text); background: color-mix(in srgb, var(--accent) 16%, transparent); }
+/* a newer VibeSpace release: ↻ turns into "Update to <v>" (ui/appupdate.js) */
+#btn-app-restart.accent { border-color: var(--accent); color: var(--accent-text); background: color-mix(in srgb, var(--accent) 16%, transparent); }
 
 /* ---------- layout ---------- */
 #body { flex: 1; display: flex; min-height: 0; }
