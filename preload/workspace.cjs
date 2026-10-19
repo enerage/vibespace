@@ -24,6 +24,8 @@ contextBridge.exposeInMainWorld('vs', {
   gitCommit: (sha) => ipcRenderer.invoke('git:commit', sha),
   gitCommitFileDiff: (sha, file) => ipcRenderer.invoke('git:commitFileDiff', sha, file),
   gitBranch: () => ipcRenderer.invoke('git:branch'),
+  gitIncoming: () => ipcRenderer.invoke('git:incoming'),
+  gitPull: () => ipcRenderer.invoke('git:pull'),
   // Search tab: { query, caseSensitive, wholeWord, regex } in the window's own repo
   searchText: (q) => ipcRenderer.invoke('search:text', q),
   onGitFetched: (cb) => ipcRenderer.on('git:fetched', (e, r) => cb(r)),

@@ -212,7 +212,7 @@ function info(wsId) {
 }
 
 module.exports = {
-  start, stop, info, onResult, fetchOnce,
+  start, stop, info, onResult, fetchOnce, run,
   INTERVAL_MS, BACKOFF_MS, BACKOFF_AFTER,
   _fetchEnv: fetchEnv,
 };

@@ -929,6 +929,57 @@ async function runSmoke(hooks = {}) {
         check('gitfetch skips while index.lock exists', r2.skipped === 'index.lock present', JSON.stringify(r2));
         check('gitfetch skips a repo without upstream', (await gf.fetchOnce(root)).skipped === 'no upstream');
 
+        // 17b3. ⬇ Update (main/gitpull.cjs) on the same clones: a is behind by
+        // one (two.txt). Fast-forward keeps unrelated local work; a file
+        // changed on both sides, an untracked file the update would create and
+        // commits on both sides are all refused with NOTHING changed.
+        {
+          const gp = require('./gitpull.cjs');
+          const head = (c) => cp.spawnSync('git', ['rev-parse', 'HEAD'], { cwd: c, encoding: 'utf8' }).stdout.trim();
+          const inc = await gp.incoming(a);
+          check('gitpull incoming lists the waiting commit', inc && inc.count === 1 && inc.subjects[0] === 'two', JSON.stringify(inc));
+          fs.writeFileSync(path.join(a, 'one.txt'), '1 local'); // tracked edit the update doesn't touch
+          fs.writeFileSync(path.join(a, 'mine.txt'), 'untracked');
+          const p1 = await gp.fastForward(a);
+          check('gitpull fast-forward keeps unrelated local work', p1.ok && p1.count === 1 && fs.existsSync(path.join(a, 'two.txt'))
+            && fs.readFileSync(path.join(a, 'one.txt'), 'utf8') === '1 local' && fs.existsSync(path.join(a, 'mine.txt'))
+            && (await gh.branch(a)).behind === 0, JSON.stringify(p1));
+          check('gitpull with nothing new is up to date', (await gp.fastForward(a)).upToDate === true);
+          // b changes one.txt too → a's edit is in the way
+          fs.writeFileSync(path.join(b, 'one.txt'), '1 from b');
+          g(b, ['commit', '-qam', 'one from b']) && g(b, ['push', '-q', 'origin', 'main']);
+          let h0 = head(a);
+          const p2 = await gp.fastForward(a);
+          check('gitpull refuses a file changed on both sides, changes nothing', !p2.ok && p2.reason === 'local-changes'
+            && p2.tracked.join() === 'one.txt' && !p2.untracked.length && head(a) === h0
+            && fs.readFileSync(path.join(a, 'one.txt'), 'utf8') === '1 local', JSON.stringify(p2));
+          // b adds three.txt while a has an untracked three.txt
+          g(a, ['checkout', '-q', '--', 'one.txt']);
+          fs.writeFileSync(path.join(b, 'three.txt'), '3');
+          g(b, ['add', '.']) && g(b, ['commit', '-qm', 'three']) && g(b, ['push', '-q', 'origin', 'main']);
+          fs.writeFileSync(path.join(a, 'three.txt'), 'mine');
+          h0 = head(a);
+          const p3 = await gp.fastForward(a);
+          check('gitpull refuses an untracked file the update would create', !p3.ok && p3.reason === 'local-changes'
+            && p3.untracked.join() === 'three.txt' && head(a) === h0 && fs.readFileSync(path.join(a, 'three.txt'), 'utf8') === 'mine', JSON.stringify(p3));
+          fs.rmSync(path.join(a, 'three.txt'));
+          // commits on both sides
+          fs.writeFileSync(path.join(a, 'four.txt'), '4');
+          g(a, ['add', 'four.txt']) && g(a, ['commit', '-qm', 'four']);
+          h0 = head(a);
+          const p4 = await gp.fastForward(a);
+          check('gitpull refuses diverged history', !p4.ok && p4.reason === 'diverged' && p4.ahead === 1 && p4.behind === 2 && head(a) === h0, JSON.stringify(p4));
+          fs.writeFileSync(path.join(a, '.git', 'index.lock'), '');
+          const p5 = await gp.fastForward(a, { fetch: false });
+          fs.rmSync(path.join(a, '.git', 'index.lock'), { force: true });
+          check('gitpull waits while an agent commits (index.lock)', !p5.ok && p5.reason === 'busy', JSON.stringify(p5));
+          check('gitpull refuses a branch without upstream', (await gp.fastForward(root, { fetch: false })).reason === 'no-upstream');
+          const ps = gp._parseStatus(' M a b.txt\0R  new.txt\0old.txt\0?? x.txt\0');
+          check('gitpull status parser skips rename sources', JSON.stringify(ps.map(e => e.path)) === '["a b.txt","new.txt","x.txt"]', JSON.stringify(ps));
+          check('gitpull auth error detection', gp.isAuthError("fatal: could not read Username for 'https://github.com': terminal prompts disabled")
+            && gp.isAuthError('remote: Repository not found.') && !gp.isAuthError('Could not resolve host: github.com'));
+        }
+
         const marker = path.join(d, 'askpass-ran.txt');
         const askpass = path.join(d, 'askpass.cmd');
         fs.writeFileSync(askpass, `@echo off\r\necho ran>>"${marker}"\r\necho secret\r\n`);

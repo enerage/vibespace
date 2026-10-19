@@ -12,6 +12,7 @@ import * as limits from './ui/limits.js';
 import * as netchip from './ui/netchip.js';
 import { pickLogo } from './ui/logopick.js';
 import * as appupdate from './ui/appupdate.js';
+import * as gitupdate from './ui/gitupdate.js';
 
 const wsId = new URLSearchParams(location.search).get('id');
 let ws = null;
@@ -298,6 +299,7 @@ function wireGitChip() {
     busy = true;
     try {
       const b = await vs.gitBranch().catch(() => null);
+      gitupdate.paint(b); // ⬇ Update pill next to the chip
       if (!b) { chip.classList.add('hidden'); return; }
       chip.classList.remove('hidden');
       const name = b.head || (b.oid ? 'detached @ ' + b.oid.slice(0, 7) : 'no commits');
@@ -322,6 +324,7 @@ function wireGitChip() {
       busy = false;
     }
   };
+  gitupdate.init({ wsId, refresh: () => update(true), persistNow });
   update(true);
   setInterval(update, 10000);
   window.addEventListener('focus', () => update(true));

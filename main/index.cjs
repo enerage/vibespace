@@ -30,6 +30,7 @@ const githistory = require('./githistory.cjs');
 const cloud = require('./cloud.cjs');
 const textsearch = require('./textsearch.cjs');
 const gitfetch = require('./gitfetch.cjs');
+const gitpull = require('./gitpull.cjs');
 const worktrees = require('./worktrees.cjs');
 const fsops = require('./fsops.cjs');
 const srcstate = require('./srcstate.cjs');
@@ -999,8 +1000,28 @@ function initIpc() {
     if (b) {
       const win = BrowserWindow.fromWebContents(e.sender);
       b.fetch = gitfetch.info(win && winInfo.get(win.id)?.wsId); // chip tooltip: "fetched 3m ago"
+      // the ⬇ Update pill turns into "can't check" when the fetch can't sign in
+      if (b.fetch && b.fetch.failures) b.fetch.auth = gitpull.isAuthError(b.fetch.error);
     }
     return b;
+  });
+  // ⬇ Update (main/gitpull.cjs): what's waiting upstream, and the fast-forward
+  // itself. Always the SENDER's repo; a refusal comes back with its reason and
+  // the renderer offers an agent instead.
+  ipcMain.handle('git:incoming', async (e) => {
+    const root = repoFor(e);
+    return root ? gitpull.incoming(root) : null;
+  });
+  ipcMain.handle('git:pull', async (e) => {
+    const root = repoFor(e);
+    if (!root) return { ok: false, reason: 'error', error: 'no repository' };
+    const win = BrowserWindow.fromWebContents(e.sender);
+    const wsId = win && winInfo.get(win.id)?.wsId;
+    let r;
+    try { r = await gitpull.fastForward(root); } catch (err) { r = { ok: false, reason: 'error', error: err.message }; }
+    if (r.ok) logger.info(`git update: ws=${wsId} ${r.upToDate ? 'already up to date' : `fast-forward ${r.count} commit(s) ${String(r.from || '').slice(0, 7)}..${String(r.to || '').slice(0, 7)}`}${r.fetchError ? ` (fetch failed: ${r.fetchError})` : ''}`);
+    else logger.warn(`git update refused: ws=${wsId} ${r.reason}${r.error ? ' ' + r.error : ''}${r.tracked ? ` tracked=${r.tracked.length} untracked=${r.untracked.length}` : ''}${r.ahead ? ` ahead=${r.ahead} behind=${r.behind}` : ''}`);
+    return r;
   });
   // Search tab (Ctrl+Shift+F): always the sender's own repo. A newer search from
   // the same window kills the one still running.
