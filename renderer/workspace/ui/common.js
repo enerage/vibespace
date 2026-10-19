@@ -27,6 +27,22 @@ export function osLabels(root = document.body) {
   }
 }
 
+// Right-click in a text field → Cut / Copy / Paste / Select All (main pops a
+// native menu with the standard roles). Terminals and Monaco keep their own
+// right-click; checkboxes, buttons etc. get nothing. Launcher + workspace.
+const TEXT_INPUTS = new Set(['text', 'password', 'search', 'url', 'email', 'number', 'tel', '']);
+export function installEditMenu(root = document) {
+  root.addEventListener('contextmenu', (e) => {
+    const t = e.target instanceof Element ? e.target.closest('input, textarea') : null;
+    if (!t || t.closest('.xterm, .monaco-editor')) return;
+    if (t.tagName === 'INPUT' && !TEXT_INPUTS.has((t.getAttribute('type') || '').toLowerCase())) return;
+    if (!globalThis.vs || !globalThis.vs.editMenu) return;
+    e.preventDefault();
+    t.focus();
+    globalThis.vs.editMenu();
+  });
+}
+
 export function el(tag, cls, text) {
   const e = document.createElement(tag);
   if (cls) e.className = cls;

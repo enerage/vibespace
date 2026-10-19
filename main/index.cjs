@@ -800,6 +800,18 @@ function initIpc() {
     if (ws) shortcuts.removeShortcuts(ws);
     return workspaces.remove(id);
   });
+  // Cut/Copy/Paste on right-click in a text field (2026-10-19: a Mac user was
+  // told "right-click → Paste" for the z.ai key box, and nothing happened:
+  // Electron shows no context menu by itself). The renderer asks only for
+  // inputs and textareas outside xterm/Monaco (common.js installEditMenu).
+  ipcMain.handle('ui:editMenu', (e) => {
+    const win = BrowserWindow.fromWebContents(e.sender);
+    if (!win) return false;
+    Menu.buildFromTemplate([
+      { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { type: 'separator' }, { role: 'selectAll' },
+    ]).popup({ window: win });
+    return true;
+  });
   ipcMain.handle('dialog:pickRepo', async (e) => {
     const win = BrowserWindow.fromWebContents(e.sender);
     const r = await dialog.showOpenDialog(win, { properties: ['openDirectory'] });

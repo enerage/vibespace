@@ -1,4 +1,4 @@
-import { $, toast, debounce, confirmBox, isMac, modKey, osLabels } from './ui/common.js';
+import { $, toast, debounce, confirmBox, isMac, modKey, osLabels, installEditMenu } from './ui/common.js';
 import * as tree from './ui/tree.js';
 import * as viewer from './ui/viewer.js';
 import * as terms from './ui/terms.js';
@@ -373,6 +373,7 @@ function wirePresence() {
 function macLabels() {
   if (!isMac()) return;
   osLabels(document.body);
+  installEditMenu();
   $('#wt-setup-hint').textContent = 'A shell command, runs in the new worktree before claude starts (+ ▾ → New agent in a worktree), visible in its tab. If it fails, claude starts anyway. Empty = none.';
   $('#wt-setup').placeholder = 'e.g. npm ci; cp ../../../.secrets.json .';
   $('#notify-hint').textContent = 'Mac notifications — one choice for all workspaces. Tab lights and the Dock badge always show every state.';

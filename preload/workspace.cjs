@@ -4,6 +4,7 @@ const { contextBridge, ipcRenderer, webUtils } = require('electron');
 contextBridge.exposeInMainWorld('vs', {
   kind: 'workspace',
   platform: process.platform,
+  editMenu: () => ipcRenderer.invoke('ui:editMenu'),
   getWorkspace: (id) => ipcRenderer.invoke('ws:get', id),
   loadState: (id) => ipcRenderer.invoke('state:load', id),
   saveState: (id, state) => ipcRenderer.invoke('state:save', id, state),
