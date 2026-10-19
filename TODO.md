@@ -59,6 +59,7 @@ must check these before merging (details in the branch summary / CLAUDE.md):
 - [ ] Mac real-machine checks: ⌘C/⌘V not pasting twice with the Edit-menu roles, powerlevel10k instant prompt + our precmd, `!` in single quotes in interactive zsh, Dock tile per workspace launched from the executable, notification permission prompt.
 - [ ] `fs:read` IPC doesn't check that the path is inside the sender's repo (unlike `fs:write`); found while building preview.
 - [x] "⬇ Update (N)" pill: one-click fast-forward of new upstream commits, refusals → Ask an agent, "Can't check for updates" on a sign-in failure (0.7.3).
+- [ ] Seen in the 0.7.3 live test (throwaway home): the `--remote-control` name of new tabs lost its "·" (ws · tab), and an idle tab once counted as "working" right after a window resize. Check on a real workspace.
 - [ ] Sister's Mac: does VibeSpace's git fetch sign in to the private ad-studio repo she cloned with GitHub Desktop? (hover the branch chip; if not, the pill offers an agent to set up `gh auth setup-git`.)
 
 ## Packaging & distribution

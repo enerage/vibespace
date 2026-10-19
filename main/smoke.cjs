@@ -944,7 +944,13 @@ async function runSmoke(hooks = {}) {
           check('gitpull fast-forward keeps unrelated local work', p1.ok && p1.count === 1 && fs.existsSync(path.join(a, 'two.txt'))
             && fs.readFileSync(path.join(a, 'one.txt'), 'utf8') === '1 local' && fs.existsSync(path.join(a, 'mine.txt'))
             && (await gh.branch(a)).behind === 0, JSON.stringify(p1));
+          // the click's fetch clears a failing schedule ("Can't check" must not outlive a sign-in fix)
+          const sched = gf.start('smoke-pull', a, { firstMs: 3600000 });
+          sched.failures = 3; sched.error = 'could not read Username';
           check('gitpull with nothing new is up to date', (await gp.fastForward(a)).upToDate === true);
+          const inf = gf.info('smoke-pull');
+          gf.stop('smoke-pull');
+          check('gitpull fetch clears the background fetch failure state', inf && inf.failures === 0 && !inf.error && inf.at, JSON.stringify(inf));
           // b changes one.txt too → a's edit is in the way
           fs.writeFileSync(path.join(b, 'one.txt'), '1 from b');
           g(b, ['commit', '-qam', 'one from b']) && g(b, ['push', '-q', 'origin', 'main']);

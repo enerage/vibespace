@@ -96,6 +96,7 @@ async function fastForward(repoPath, { fetch = true } = {}) {
   if (fetch) {
     const f = await gitfetch.fetchOnce(repoPath);
     if (f && f.ok === false) fetchError = f.error || 'fetch failed';
+    gitfetch.noteManual(repoPath, f);
     b = (await githistory.branch(repoPath)) || b;
   }
   if (!b.behind) return { ok: true, upToDate: true, fetchError };

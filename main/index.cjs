@@ -1527,6 +1527,10 @@ function initIpc() {
   gitfetch.onResult((wsId, r, info) => {
     if (!r.ok) {
       logger.warn(`git fetch failed: ws=${wsId} (${info.failures} in a row${info.backoff ? ', next try in 30 min' : ''}) ${r.error}`);
+      // the ⬇ Update pill shows "Can't check for updates" on a sign-in failure
+      for (const win of workspaceWindowsFor(wsId)) {
+        if (!win.isDestroyed()) win.webContents.send('git:fetched', { changed: false, failed: true });
+      }
       return;
     }
     if (info.recovered) logger.info(`git fetch ok again: ws=${wsId}`);

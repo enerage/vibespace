@@ -100,6 +100,7 @@ async function run() {
   running = false;
   btn.disabled = false;
   tipKey = '';
+  if (r && r.ok) btn.classList.add('hidden'); // don't wait for the refresh
   try { await ctx.refresh(); } catch {}
   report(b, r || { ok: false, reason: 'error', error: 'no answer' });
 }
