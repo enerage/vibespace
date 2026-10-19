@@ -373,13 +373,13 @@ function wirePresence() {
 function macLabels() {
   if (!isMac()) return;
   osLabels(document.body);
-  installEditMenu();
   $('#wt-setup-hint').textContent = 'A shell command, runs in the new worktree before claude starts (+ ▾ → New agent in a worktree), visible in its tab. If it fails, claude starts anyway. Empty = none.';
   $('#wt-setup').placeholder = 'e.g. npm ci; cp ../../../.secrets.json .';
   $('#notify-hint').textContent = 'Mac notifications — one choice for all workspaces. Tab lights and the Dock badge always show every state.';
 }
 
 async function main() {
+  installEditMenu(); // right-click Cut/Copy/Paste in text fields (both platforms)
   macLabels();
   ws = await vs.getWorkspace(wsId);
   if (!ws) {
