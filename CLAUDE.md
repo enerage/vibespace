@@ -860,7 +860,10 @@ Key facts encoded in `main/sessions.cjs`:
   - Testing tip (2026-10-19): `--remote-debugging-port` opened no port under
     Electron 44.4.5; drive test windows through each process's main-process
     inspector (`--inspect=<port>`, `webContents.debugger`), which still sends real
-    CDP input events.
+    CDP input events. Pick inspector ports outside Windows' reserved range
+    (9281–9380 here: 9341 failed; 12341 works). A test that writes the clipboard
+    must restore it (it emptied Valentin's once; a native Menu.popup can't be
+    screenshotted, so wrap `Menu.prototype.popup` to record it).
 - **z.ai tabs and claude's `/model`** (0.7.1, verified on claude 2.1.303 with a
   throwaway `CLAUDE_CONFIG_DIR`):
   - **Every `/model` pick saves `model` to the GLOBAL

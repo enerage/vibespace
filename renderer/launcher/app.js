@@ -1,7 +1,9 @@
 'use strict';
 // In-page confirm shared with the workspace windows: native confirm() leaves a
 // Windows Electron window without real focus afterwards (CLAUDE.md).
-import { confirmBox, isMac } from '../workspace/ui/common.js';
+import { confirmBox, isMac, installEditMenu } from '../workspace/ui/common.js';
+
+installEditMenu();
 import * as appupdate from '../workspace/ui/appupdate.js';
 
 const $ = (sel) => document.querySelector(sel);

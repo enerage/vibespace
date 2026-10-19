@@ -1,4 +1,4 @@
-import { $, toast, debounce, confirmBox, isMac, modKey, osLabels } from './ui/common.js';
+import { $, toast, debounce, confirmBox, isMac, modKey, osLabels, installEditMenu } from './ui/common.js';
 import * as tree from './ui/tree.js';
 import * as viewer from './ui/viewer.js';
 import * as terms from './ui/terms.js';
@@ -379,6 +379,7 @@ function macLabels() {
 }
 
 async function main() {
+  installEditMenu(); // right-click Cut/Copy/Paste in text fields (both platforms)
   macLabels();
   ws = await vs.getWorkspace(wsId);
   if (!ws) {

@@ -4,6 +4,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('vs', {
   kind: 'launcher',
   platform: process.platform,
+  editMenu: () => ipcRenderer.invoke('ui:editMenu'),
   listWorkspaces: () => ipcRenderer.invoke('launcher:list'),
   createWorkspace: (opts) => ipcRenderer.invoke('launcher:create', opts),
   removeWorkspace: (id) => ipcRenderer.invoke('launcher:remove', id),
