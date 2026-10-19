@@ -58,6 +58,8 @@ must check these before merging (details in the branch summary / CLAUDE.md):
 - [ ] Mac: confirm on ⌘Q while agents are busy? (no busy-confirm on Windows close either; decide with Valentin.)
 - [ ] Mac real-machine checks: ⌘C/⌘V not pasting twice with the Edit-menu roles, powerlevel10k instant prompt + our precmd, `!` in single quotes in interactive zsh, Dock tile per workspace launched from the executable, notification permission prompt.
 - [ ] `fs:read` IPC doesn't check that the path is inside the sender's repo (unlike `fs:write`); found while building preview.
+- [x] "⬇ Update (N)" pill: one-click fast-forward of new upstream commits, refusals → Ask an agent, "Can't check for updates" on a sign-in failure (0.7.3).
+- [ ] Sister's Mac: does VibeSpace's git fetch sign in to the private ad-studio repo she cloned with GitHub Desktop? (hover the branch chip; if not, the pill offers an agent to set up `gh auth setup-git`.)
 
 ## Packaging & distribution
 - [x] **electron-builder packaging** (0.5.0) — NSIS installer + unpacked build

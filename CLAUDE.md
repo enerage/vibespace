@@ -681,6 +681,18 @@ Key facts encoded in `main/sessions.cjs`:
   `ssh -o BatchMode=yes` only when the user set no ssh command), skips on
   `index.lock` / merge / rebase. On timeout it kills the whole TREE: killing
   only the `git` wrapper left the real fetch running.
+- **⬇ Update pill** (0.7.3, `main/gitpull.cjs` + `ui/gitupdate.js`): the ONE
+  git write VibeSpace does itself, and only `merge --ff-only @{upstream}`
+  after a fresh fetch. The preflight compares `diff --name-only HEAD
+  @{upstream}` with `status --untracked-files=all` and refuses with the file
+  list (nothing changed) on any overlap, on ahead>0, on index.lock or an open
+  merge/rebase. Don't parse git's refusal text: it is translated on some
+  machines. Refusals go to a NEW agent (`terms.newAgentWithTask`, the task
+  is claude's first argument; on Windows it sits inside `"…"`, so `"`, `$`,
+  backticks and line breaks are stripped). `b.fetch.auth`
+  (`gitpull.isAuthError`) turns the pill into "Can't check for updates":
+  GitHub Desktop keeps its sign-in to itself, so command-line git in a repo it
+  cloned often can't fetch a private repo.
 - **Worktree tabs** (0.6.36, `main/worktrees.cjs`): ▾ → New agent in a worktree
   makes `<repo>\.claude\worktrees\<name>` on `vs/<name>` with a plain
   `git worktree add`. **Never use `claude -w`**: it moves the transcript between

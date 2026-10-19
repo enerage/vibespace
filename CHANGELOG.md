@@ -2,6 +2,24 @@
 
 Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 
+## [0.7.3] — 2026-10-19
+
+### Added
+- **"⬇ Update (N)" when the project has new commits on GitHub.** The branch
+  chip's small ↓N had no button. Now a pill next to it brings the commits in
+  with one click; its tooltip lists them.
+  - It only fast-forwards: git applies the whole update or nothing, so there is
+    never a half-done merge.
+  - Local work is kept. If a file was changed here AND in the update, an
+    untracked file would be overwritten, or both sides have commits, nothing
+    is changed: a box lists why and offers **Ask an agent**, which opens a new
+    agent with the merge task (it commits your work first, merges, doesn't
+    push).
+  - Asks first only when an agent is working (files change under it).
+  - When the background fetch can't sign in (a private repo cloned with GitHub
+    Desktop, for example), the pill says **⚠ Can't check for updates**, and a
+    click asks an agent to set up the sign-in, instead of staying silent.
+
 ## [0.7.2] — 2026-10-19
 
 ### Added
