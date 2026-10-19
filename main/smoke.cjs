@@ -646,6 +646,10 @@ async function runSmoke(hooks = {}) {
     let ignoredFired = false;
     tw.onData((wsId) => { if (wsId === 'tw-ws') fired++; if (wsId === 'tw-bad') ignoredFired = true; });
     tw.start('tw-ws', path.join(U.dataRoot(), 'treewatch-smoke'));
+    // macOS: an FSEvents stream starts asynchronously and misses writes made in
+    // its first moments (arm64 runner: fired=0). The app reads the tree from disk
+    // after starting the watch, so only later writes matter: let it settle.
+    if (process.platform === 'darwin') await new Promise(r => setTimeout(r, 1000));
     fs.writeFileSync(path.join(dir, 'new-file.ts'), 'x');
     const deadline = Date.now() + 4000;
     while (!fired && Date.now() < deadline) await new Promise(r => setTimeout(r, 150));
