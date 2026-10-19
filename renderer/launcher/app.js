@@ -2,6 +2,7 @@
 // In-page confirm shared with the workspace windows: native confirm() leaves a
 // Windows Electron window without real focus afterwards (CLAUDE.md).
 import { confirmBox, isMac } from '../workspace/ui/common.js';
+import * as appupdate from '../workspace/ui/appupdate.js';
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -196,7 +197,25 @@ function macLabels() {
   $('#btn-explorer').classList.add('hidden');
 }
 
+// a newer VibeSpace release (packaged builds, main/appupdate.cjs): the same flow
+// as the workspace's ↻ button; the launcher has no agents of its own, so only
+// the other windows' working agents can make it ask first
+function wireAppUpdate() {
+  const btn = $('#btn-app-update');
+  btn.onclick = () => appupdate.run();
+  btn.oncontextmenu = (e) => { e.preventDefault(); appupdate.openNotes(); };
+  appupdate.watch((v) => {
+    const on = Boolean(v && v.enabled && v.update);
+    btn.classList.toggle('hidden', !on);
+    if (!on) return;
+    btn.textContent = appupdate.label(v);
+    btn.title = appupdate.tooltip(v);
+    btn.disabled = Boolean(v.busy);
+  });
+}
+
 async function main() {
+  wireAppUpdate();
   wireForm();
   if (isMac()) macLabels();
   else {

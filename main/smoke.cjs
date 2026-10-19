@@ -2921,6 +2921,14 @@ async function runSmoke(hooks = {}) {
     workspaces.remove(wsMac.id);
   }
 
+  // packaged self-update (main/appupdate.cjs): pure parts everywhere, a local
+  // feed + download everywhere, an end-to-end bundle swap on darwin
+  try {
+    await require('./smoke-appupdate.cjs')(check);
+  } catch (e) {
+    check('app update: smoke block ran', false, 'threw: ' + (e && e.stack ? e.stack : e));
+  }
+
   // macOS: a REAL workspace window (renderer + preload + one plain terminal),
   // captured with webContents.capturePage (no Screen Recording permission
   // needed) to VIBESPACE_SMOKE_SHOT (CI artifact) or the smoke home

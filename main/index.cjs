@@ -42,6 +42,7 @@ const bgagents = require('./bgagents.cjs');
 const presence = require('./presence.cjs');
 const accounts = require('./accounts.cjs');
 const netwatch = require('./netwatch.cjs');
+const appupdate = require('./appupdate.cjs'); // packaged self-update (GitHub Releases)
 
 // ---------- CLI args ----------
 function parseArgv() {
@@ -1862,6 +1863,8 @@ app.whenReady().then(async () => {
   if (!gotLock) return;
   initProtocol();
   initIpc();
+  // self-update IPC (every mode: a smoke window asks too); checks only start below
+  appupdate.init({ app, BrowserWindow, ipcMain, shell, logger, wsId: workspaceId, quit: () => app.quit() });
   initStateFlush();
   ensureOverlayIcons(); // fire-and-forget: taskbar badge icons for agent status
 
@@ -2008,9 +2011,14 @@ app.whenReady().then(async () => {
     // away mode: workspace processes only (not the launcher, smoke or screenshot
     // runs) — each one tracks lock/idle and keeps the shared marker in sync
     try { presence.start(); } catch (e) { logger.warn('presence start failed: ' + e.message); }
+    appupdate.start();
     createWorkspaceWindow(ws);
   } else {
-    createLauncherWindow();
+    appupdate.start();
+    // first start after a self-update: reopen the workspaces that were open
+    // (their agents resume as after ↻ Restart); no launcher window unless it was open
+    if (appupdate.reopenAfterUpdate((id) => { if (workspaces.get(id)) launchWorkspaceProcess(id); }) === 'quit') setTimeout(() => app.quit(), 1500);
+    else createLauncherWindow();
   }
 
   // macOS Dock click with no window open: only the launcher comes back. A

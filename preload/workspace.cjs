@@ -109,4 +109,10 @@ contextBridge.exposeInMainWorld('vs', {
   onTreeChanged: (cb) => ipcRenderer.on('tree:changed', () => cb()),
   onUpdaterState: (cb) => ipcRenderer.on('updater:state', (e, state) => cb(state)),
   onAppUpdateAvailable: (cb) => ipcRenderer.on('app:updateAvailable', (e, info) => cb(info)),
+  // packaged self-update (main/appupdate.cjs): a newer release, download/install
+  appUpdateGet: () => ipcRenderer.invoke('appupdate:get'),
+  appUpdateInstall: () => ipcRenderer.invoke('appupdate:install'),
+  appUpdateBusy: () => ipcRenderer.invoke('appupdate:busyElsewhere'),
+  appUpdateNotes: () => ipcRenderer.invoke('appupdate:notes'),
+  onAppUpdateState: (cb) => ipcRenderer.on('appupdate:state', (e, v) => cb(v)),
 });
