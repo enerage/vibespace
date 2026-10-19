@@ -246,7 +246,7 @@ function applyTermAccount(termId, wsId, id, env) {
     // endpoint tabs also carry PostModelSwitch: a /model pick there must not
     // change the user's global default (modelguard.cjs undoes claude's save)
     ptyhost.writeEndpointSettings(termId, wsId || null, wsId ? ensureHookSettings(wsId) : null, env, { hooks: claudefeed.modelSwitchHooks() });
-    modelguard.start({ termInfo: modelGuardTermInfo });
+    modelguard.start({ termInfo: modelGuardTermInfo, hasClaude: accounts.hasClaudeAccount });
   }
   else ptyhost.clearEndpointSettings(termId, wsId || null);
   ptyhost.setAccount(termId, id, wsId || null);

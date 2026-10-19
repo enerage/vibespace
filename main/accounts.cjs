@@ -257,6 +257,15 @@ const loggedIn = () => {
   } catch { return false; }
 };
 
+// Does this machine have a Claude (Anthropic) account at all: the /login per
+// loggedIn(), or any token account? (modelguard: a z.ai-only machine has no
+// Claude tab whose default a GLM pick could change.) No spawn on Windows; the
+// macOS Keychain check is cached by keychain.exists.
+function hasClaudeAccount() {
+  if (Object.values(read().accounts).some(a => a && a.kind === 'token')) return true;
+  return loggedIn();
+}
+
 function usable(d, id, now) {
   if (!d.accounts[id] || isExhausted(d, id, now)) return false;
   if (id === LOGIN) return loggedIn();
@@ -1398,6 +1407,7 @@ module.exports = {
   endpointEnv,
   endpointTabSettings,
   endpointModels,
+  hasClaudeAccount,
   forTerm,
   sessionFamily,
   familyForNewSession,

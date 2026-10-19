@@ -21,7 +21,9 @@
 //      the endpoint picker rows carry them, accounts.endpointTabSettings) and
 //      that tab posted to the feed within WINDOW_MS (claude re-runs the
 //      statusLine ~0.3 s after a pick, even one that keeps the model).
-// Never when a Claude tab here switched model in the same window. A change
+// Never when a Claude tab here switched model in the same window, and never on
+// a machine with no Claude account (no /login, no token account: z.ai only),
+// where a GLM pick as the default is what the user expects. A change
 // nobody here explains is kept (and becomes the new remembered value).
 // Known gap: picking "Default" (or typing `/model opus`) while the endpoint
 // tab is ALREADY on that model saves an alias / removes the key with no
@@ -61,8 +63,12 @@ const isEndpointModel = (value, models) => typeof value === 'string' && !isClaud
 // { prev, next, at } = the saved `model` before/after (undefined = no key) and
 // when the change was seen; signals = [{ termId, at, endpoint, models, kind:
 // 'switch'|'activity', to?, requested? }] → { restore, termId?, why }
-function decide({ prev, next, at, signals = [] }) {
+// claudeAccount false = no Claude login/token on this machine (z.ai only):
+// no Claude tab to protect, and a GLM pick as the default is what that user
+// expects.
+function decide({ prev, next, at, signals = [], claudeAccount = true }) {
   if (same(prev, next)) return { restore: false, why: 'unchanged' };
+  if (!claudeAccount) return { restore: false, why: 'no Claude account on this machine' };
   const near = signals.filter(s => s && Math.abs(s.at - at) <= WINDOW_MS);
   if (near.some(s => !s.endpoint && s.kind === 'switch')) return { restore: false, why: 'a Claude tab switched model in the same moment' };
   for (const s of near) {
@@ -178,6 +184,7 @@ function patchModel(text, value) {
 // ---------- the watcher ----------
 let file = null;
 let termInfo = () => null; // termId -> { endpoint, models } (index.cjs)
+let hasClaude = () => true; // this machine has a Claude login/token account (index.cjs: accounts.hasClaudeAccount)
 let known = undefined; // the remembered `model` (undefined = no key)
 let started = false;
 let pending = null; // { prev, next, at }
@@ -203,6 +210,7 @@ function readModel() {
 
 function start(opts = {}) {
   if (typeof opts.termInfo === 'function') termInfo = opts.termInfo;
+  if (typeof opts.hasClaude === 'function') hasClaude = opts.hasClaude;
   if (started) return;
   started = true;
   file = opts.file || settingsFile();
@@ -261,12 +269,17 @@ function check() {
   const cur = r.value;
   if (pending) {
     if (same(cur, pending.prev)) { pending = null; return; }
-    if (!same(cur, pending.next)) { pending.next = cur; pending.at = Date.now(); }
+    if (!same(cur, pending.next)) { pending.next = cur; pending.at = Date.now(); pending.claudeAccount = claudeAccountNow(); }
   } else {
     if (same(cur, known)) return;
-    pending = { prev: known, next: cur, at: Date.now() };
+    // judged once per change, never per feed tick
+    pending = { prev: known, next: cur, at: Date.now(), claudeAccount: claudeAccountNow() };
   }
   evaluate();
+}
+
+function claudeAccountNow() {
+  try { return hasClaude() !== false; } catch { return true; }
 }
 
 function evaluate() {

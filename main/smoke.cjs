@@ -1684,6 +1684,10 @@ async function runSmoke(hooks = {}) {
       unchanged: d('opus[1m]', 'opus[1m]', [ep('switch', { to: 'x' })]).restore === false,
       claudeIdNeverEndpoint: d('opus[1m]', 'claude-opus-5-5', [ep('activity')]).restore === false && mg.isClaudeName('fable[1m]') && !mg.isClaudeName('glm-5.3'),
       resolve: mg.resolveFor('fable', M) === 'glm-5.3' && mg.resolveFor('haiku[1m]', M) === 'glm-5.3-flash' && mg.resolveFor(undefined, M) === null,
+      // z.ai-only machine (no /login, no token account): a GLM pick is meant to be the default
+      noClaudeAccount: mg.decide({ prev: 'opus[1m]', next: 'glm-5.3-flash[1m]', at: t0, claudeAccount: false, signals: [ep('switch', { to: 'glm-5.3-flash[1m]' })] }).restore === false
+        && mg.decide({ prev: 'opus[1m]', next: 'glm-5.3[1m]', at: t0, claudeAccount: false, signals: [ep('activity')] }).restore === false
+        && typeof acc.hasClaudeAccount() === 'boolean',
     };
     check('model guard: undoes a global model saved by an endpoint tab (its switch / its GLM id), never a Claude tab\'s', Object.values(g).every(Boolean), JSON.stringify(g));
 
