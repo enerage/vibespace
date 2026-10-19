@@ -194,6 +194,17 @@ async function round(wsId, st) {
   schedule(wsId, st, st.failures >= BACKOFF_AFTER ? BACKOFF_MS : INTERVAL_MS);
 }
 
+// a fetch run outside the schedule (the ⬇ Update click) counts for the
+// schedule too: a success clears the failure state, so "Can't check for
+// updates" doesn't outlive a sign-in fix by up to 30 min
+function noteManual(repoPath, r) {
+  if (!r || !r.ok) return;
+  for (const st of active.values()) {
+    if (st.repoPath !== repoPath) continue;
+    st.failures = 0; st.at = Date.now(); st.error = null;
+  }
+}
+
 function stop(wsId) {
   const st = active.get(wsId);
   if (!st) return;
@@ -212,7 +223,7 @@ function info(wsId) {
 }
 
 module.exports = {
-  start, stop, info, onResult, fetchOnce,
+  start, stop, info, onResult, fetchOnce, run, noteManual,
   INTERVAL_MS, BACKOFF_MS, BACKOFF_AFTER,
   _fetchEnv: fetchEnv,
 };

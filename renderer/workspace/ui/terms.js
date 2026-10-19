@@ -1389,7 +1389,7 @@ function registerFileLinks(term, tab) {
   } catch {} // xterm without link-provider support — links simply don't light up
 }
 
-export function createTab({ name = 'agent', cwd = repoPath, claude = false, resumeId = null, activate = true, termId = null, attachBuffer = null, savedIsClaude = null, savedSessionId = null, pickSession = false, run = null, account = null, accountAt = 0, worktree = null, family = null, model = null, modelSwitch = false, setup = '', cloudTab = null } = {}) {
+export function createTab({ name = 'agent', cwd = repoPath, claude = false, resumeId = null, activate = true, termId = null, attachBuffer = null, savedIsClaude = null, savedSessionId = null, pickSession = false, run = null, account = null, accountAt = 0, worktree = null, family = null, model = null, modelSwitch = false, setup = '', cloudTab = null, prompt = null } = {}) {
   const id = termId || newTermId();
   const host = el('div', 'term-host');
   host.style.display = 'none';
@@ -1519,7 +1519,8 @@ export function createTab({ name = 'agent', cwd = repoPath, claude = false, resu
         }
       }
       if (!tabs.has(id)) return;
-      const cmd = claudeCommand(tab, pickSession ? '' : resumeId); // '' = picker: saved id is dead
+      // '' = picker: saved id is dead; a first message only for a brand-new agent
+      const cmd = claudeCommand(tab, pickSession ? '' : resumeId, !resumeId && !pickSession ? prompt : null);
       // a fresh worktree's setup runs first on the same line. claude then starts
       // later than launchedAt, which is fine: a worktree tab is offRepo, so the
       // timing heuristic never uses it (the feed pins it)
@@ -2168,6 +2169,14 @@ function netResume(ids) {
       vs.netReport(id, nudge ? 'nudged' : 'continued');
     }
   }).catch((e) => console.warn('net resume failed', e && e.message));
+}
+
+// A new agent that starts on a task (⬇ Update's "Ask an agent"). The task
+// becomes claude's first message on the command line: on Windows it sits
+// inside "…" in PowerShell, so ", $, backticks and line breaks are dropped.
+export function newAgentWithTask(name, task) {
+  const clean = String(task || '').replace(/["$`\r\n]+/g, ' ').replace(/\s+/g, ' ').trim();
+  return createTab({ name: nextName(name), cwd: repoPath, claude: true, prompt: clean || null });
 }
 
 // board quick reply: the same path as typing — term.paste (bracketed when the
