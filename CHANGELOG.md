@@ -2,6 +2,14 @@
 
 Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 
+## [0.7.2] — 2026-10-19
+
+### Added
+- **Right-click in a text field: Cut / Copy / Paste / Select All** (Mac and
+  Windows, workspace and launcher). Electron shows no menu there by itself, so
+  "right-click → Paste" into the z.ai key box did nothing on a Mac. Terminals
+  and the code preview keep their own right-click.
+
 ## [0.7.1] — 2026-10-19
 
 ### Added
