@@ -49,6 +49,8 @@ must check these before merging (details in the branch summary / CLAUDE.md):
 - [ ] Phase 2: Send to cloud on Mac (`cloud-send.sh`, `script -q /dev/null` for the TTY).
 - [ ] Phase 2: Finder "Open with VibeSpace" (Quick Action / `open-file`).
 - [ ] Later: $99 Developer ID + notarization if the Mac build stays in use.
+- [ ] One-click self-updater (Mac + Windows), folded into ↻ Restart; releases only on Valentin's "release" (branch vs/app-update, 2026-10-19).
+- [ ] z.ai tabs: GLM-only /model list, Fable slot → GLM, effort levels GLM really has, global-default guard (branch vs/zai-models, 2026-10-19).
 - [ ] Mac: `macOptionIsMeta` as a setting (non-US layouts type `@`/`{` with Option); maybe default from `navigator.keyboard.getLayoutMap()`.
 - [ ] Mac: skip the 0.3-3 s login-shell PATH probe in workspaces when the launcher already resolved it (pass it down in env).
 - [ ] Mac: confirm on ⌘Q while agents are busy? (no busy-confirm on Windows close either; decide with Valentin.)
