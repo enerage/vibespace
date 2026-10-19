@@ -257,6 +257,15 @@ const loggedIn = () => {
   } catch { return false; }
 };
 
+// Does this machine have a Claude (Anthropic) account at all: the /login per
+// loggedIn(), or any token account? (modelguard: a z.ai-only machine has no
+// Claude tab whose default a GLM pick could change.) No spawn on Windows; the
+// macOS Keychain check is cached by keychain.exists.
+function hasClaudeAccount() {
+  if (Object.values(read().accounts).some(a => a && a.kind === 'token')) return true;
+  return loggedIn();
+}
+
 function usable(d, id, now) {
   if (!d.accounts[id] || isExhausted(d, id, now)) return false;
   if (id === LOGIN) return loggedIn();
@@ -936,9 +945,93 @@ const PRESETS = {
       ANTHROPIC_DEFAULT_HAIKU_MODEL: 'glm-5.3-flash[1m]',
       CLAUDE_CODE_AUTO_COMPACT_WINDOW: '900000',
     },
+    // the /model picker rows of a tab on this provider, by model id without
+    // claude's `[1m]` suffix (endpointTabSettings). A model not listed here
+    // (renamed by z.ai, or set under Advanced) gets the generic row.
+    modelLabels: {
+      'glm-5.3': { name: 'GLM-5.3 (full)', description: 'z.ai · the full model' },
+      'glm-5.3-flash': { name: 'GLM-5.3 Flash (fast)', description: 'z.ai · faster and lighter' },
+    },
   },
 };
 const PRESET_MODEL_KEYS = { opus: 'ANTHROPIC_DEFAULT_OPUS_MODEL', sonnet: 'ANTHROPIC_DEFAULT_SONNET_MODEL', haiku: 'ANTHROPIC_DEFAULT_HAIKU_MODEL' };
+
+// ---------- an endpoint tab's /model picker (pure) ----------
+// What main adds to an endpoint tab's settings file on top of the account's
+// own env, derived from that env at every write (so existing accounts get it
+// without being re-added). Verified on claude 2.1.303 (2026-10-19):
+// - `modelPicker` from a --settings file curates /model; with
+//   replaceBuiltInOptions only "Default" + these rows show (no Fable/Opus/…).
+//   Rows carry the EXACT model id, not the opus/sonnet alias: a pick claude
+//   saves into ~/.claude/settings.json is then a GLM id that no Claude tab
+//   would write, so main's model guard can tell it apart (modelguard.cjs),
+//   and the user's `opus[1m]` resolves onto the GLM-5.3 row (an alias row
+//   list made claude add a stray "Opus (1M context)" row).
+// - ANTHROPIC_DEFAULT_<SLOT>_MODEL_NAME/_DESCRIPTION name the slots wherever
+//   claude shows them ("Default … (currently GLM-5.3 (full))").
+// - ANTHROPIC_DEFAULT_FABLE_MODEL = the endpoint's opus model, so a subagent
+//   or skill asking for `fable` never sends a Claude model name to the endpoint.
+// - Effort: nothing is set. ANTHROPIC_DEFAULT_*_SUPPORTED_CAPABILITIES is
+//   IGNORED for a base-URL endpoint (claude reads it only for Bedrock/Vertex/
+//   Foundry/Mantle; checked live: effort still sent with it set), and the
+//   /effort slider always lists low…max. z.ai's Anthropic endpoint maps every
+//   level itself (docs.z.ai/devpack/latest-model: low; medium/high → high;
+//   xhigh/max → max), so each level claude sends is accepted.
+// The account's own env always wins: a key it already sets is never replaced.
+const SLOT_ROLE = { opus: 'main model', sonnet: 'fast model', haiku: 'small model' };
+const bareModel = (m) => String(m || '').replace(/\[1m\]$/i, '').trim();
+function endpointTabSettings(env) {
+  const e = env && typeof env === 'object' ? env : {};
+  const slots = {
+    opus: e.ANTHROPIC_DEFAULT_OPUS_MODEL || e.ANTHROPIC_MODEL || null,
+    sonnet: e.ANTHROPIC_DEFAULT_SONNET_MODEL || null,
+    haiku: e.ANTHROPIC_DEFAULT_HAIKU_MODEL || null,
+  };
+  const presetId = e.ANTHROPIC_BASE_URL ? presetOf(e.ANTHROPIC_BASE_URL) : null;
+  const labels = (presetId && PRESETS[presetId].modelLabels) || {};
+  let host = '';
+  try { host = new URL(e.ANTHROPIC_BASE_URL).host; } catch {}
+  const rowFor = (model, slot) => {
+    const known = labels[bareModel(model).toLowerCase()];
+    const ctx = /\[1m\]$/i.test(model) ? ' · 1M context' : '';
+    if (known) return { name: known.name, description: known.description + ctx };
+    return { name: bareModel(model), description: `${host || 'API endpoint'} · ${SLOT_ROLE[slot]}${ctx}` };
+  };
+  const out = { env: {}, modelPicker: null };
+  const put = (k, v) => { if (v && !(k in e)) out.env[k] = v; };
+  const rows = [];
+  for (const slot of ['opus', 'sonnet', 'haiku']) {
+    const model = slots[slot];
+    if (!model) continue;
+    const KEY = `ANTHROPIC_DEFAULT_${slot.toUpperCase()}_MODEL`;
+    const row = rowFor(model, slot);
+    // the account's own names win, in the picker too
+    if (e[`${KEY}_NAME`]) row.name = String(e[`${KEY}_NAME`]);
+    if (e[`${KEY}_DESCRIPTION`]) row.description = String(e[`${KEY}_DESCRIPTION`]);
+    // names only for a slot the env maps (opus via ANTHROPIC_MODEL alone would
+    // label claude's own Opus)
+    if (e[KEY]) {
+      put(`${KEY}_NAME`, row.name);
+      put(`${KEY}_DESCRIPTION`, row.description);
+    }
+    if (!rows.some(r => r.model === model)) rows.push({ model, label: row.name, description: row.description });
+  }
+  const fable = slots.opus || slots.sonnet || slots.haiku;
+  if (fable) {
+    put('ANTHROPIC_DEFAULT_FABLE_MODEL', fable);
+    const row = rowFor(fable, slots.opus ? 'opus' : slots.sonnet ? 'sonnet' : 'haiku');
+    put('ANTHROPIC_DEFAULT_FABLE_MODEL_NAME', row.name);
+    put('ANTHROPIC_DEFAULT_FABLE_MODEL_DESCRIPTION', row.description);
+  }
+  if (rows.length) out.modelPicker = { replaceBuiltInOptions: true, options: rows };
+  return out;
+}
+
+// an endpoint account's slot → model map ({ opus, sonnet, haiku }), else null
+function endpointModels(id) {
+  const a = read().accounts[id];
+  return a && a.kind === 'endpoint' && a.models ? { ...a.models } : null;
+}
 
 // for the UI: no secrets in a preset, but only the display fields go out
 function presets() {
@@ -1312,6 +1405,9 @@ module.exports = {
   addPreset,
   kindOf,
   endpointEnv,
+  endpointTabSettings,
+  endpointModels,
+  hasClaudeAccount,
   forTerm,
   sessionFamily,
   familyForNewSession,
