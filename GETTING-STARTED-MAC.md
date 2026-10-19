@@ -33,10 +33,10 @@ comes with them.
 
 ## 2. Install VibeSpace
 
-1. Open the [VibeSpace 0.7.1 release](https://github.com/enerage/vibespace/releases/tag/v0.7.1)
+1. Open the [VibeSpace 0.7.2 release](https://github.com/enerage/vibespace/releases/tag/v0.7.2)
    and, under **Assets**, download the `.dmg` for your Mac:
-   - Apple menu  → **About This Mac**. "Chip: Apple M…" → `VibeSpace-0.7.1-arm64.dmg`;
-     "Processor: Intel" → `VibeSpace-0.7.1.dmg` (the Intel one).
+   - Apple menu  → **About This Mac**. "Chip: Apple M…" → `VibeSpace-0.7.2-arm64.dmg`;
+     "Processor: Intel" → `VibeSpace-0.7.2.dmg` (the Intel one).
 2. Open the `.dmg` and drag **VibeSpace** onto **Applications**.
 3. Open **VibeSpace** from Applications. The first time, macOS says it can't
    check the app, because it isn't from the App Store. Click **Done** (not
