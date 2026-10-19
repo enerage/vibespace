@@ -33,10 +33,10 @@ comes with them.
 
 ## 2. Install VibeSpace
 
-1. Open the [VibeSpace 0.7.0 release](https://github.com/enerage/vibespace/releases/tag/v0.7.0)
+1. Open the [VibeSpace 0.7.1 release](https://github.com/enerage/vibespace/releases/tag/v0.7.1)
    and, under **Assets**, download the `.dmg` for your Mac:
-   - Apple menu  → **About This Mac**. "Chip: Apple M…" → `VibeSpace-0.7.0-arm64.dmg`;
-     "Processor: Intel" → `VibeSpace-0.7.0.dmg` (the Intel one).
+   - Apple menu  → **About This Mac**. "Chip: Apple M…" → `VibeSpace-0.7.1-arm64.dmg`;
+     "Processor: Intel" → `VibeSpace-0.7.1.dmg` (the Intel one).
 2. Open the `.dmg` and drag **VibeSpace** onto **Applications**.
 3. Open **VibeSpace** from Applications. The first time, macOS says it can't
    check the app, because it isn't from the App Store. Click **Done** (not
@@ -46,6 +46,10 @@ comes with them.
    password or Touch ID, then click **Open**.
 
 You only do steps 3–4 once; after that VibeSpace opens normally.
+
+**Updates:** when a new version is out, the **↻** button at the top turns into
+"Update to …". Click it: VibeSpace downloads the update, restarts, and your
+agents carry on. No need to download anything yourself again.
 
 ## 3. Open your project
 
