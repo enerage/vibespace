@@ -551,11 +551,20 @@ function endpointSettingsFor(wsId, termId) {
   return path.join(U.dataRoot(), 'instances', wsId || '_none', 'accounts', `${termId}.settings.json`);
 }
 
-function writeEndpointSettings(termId, wsId, baseSettingsPath, env) {
+// On top of base + env: the endpoint's /model picker rows, slot names and the
+// Fable slot (accounts.endpointTabSettings, derived from the env at every
+// write), and opts.hooks (claudefeed.modelSwitchHooks: endpoint tabs only).
+function writeEndpointSettings(termId, wsId, baseSettingsPath, env, opts = {}) {
   const file = endpointSettingsFor((metas.get(termId) || {}).wsId || wsId, termId);
   let base = {};
   try { if (baseSettingsPath) base = JSON.parse(fs.readFileSync(baseSettingsPath, 'utf8')) || {}; } catch {}
-  const settings = { ...base, env: { ...(base.env || {}), ...env } };
+  const extra = accounts.endpointTabSettings(env);
+  const settings = { ...base, env: { ...(base.env || {}), ...extra.env, ...env } };
+  if (extra.modelPicker) settings.modelPicker = extra.modelPicker;
+  if (opts.hooks && typeof opts.hooks === 'object') {
+    settings.hooks = { ...(settings.hooks || {}) };
+    for (const [ev, list] of Object.entries(opts.hooks)) settings.hooks[ev] = [...(settings.hooks[ev] || []), ...list];
+  }
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const tmp = `${file}.${process.pid}.tmp`;
   fs.writeFileSync(tmp, JSON.stringify(settings, null, 2));

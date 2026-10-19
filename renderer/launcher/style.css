@@ -160,4 +160,8 @@ input[type="text"]:focus { outline: none; border-color: var(--accent); }
 }
 .toast.ok { border-left-color: var(--ok); }
 .toast.err { border-left-color: var(--danger); }
+.toast .toast-action { margin-left: 10px; vertical-align: baseline; }
+/* a newer VibeSpace release (../workspace/ui/appupdate.js) */
+#btn-app-update { border-color: var(--accent); color: #b9cfff; background: color-mix(in srgb, var(--accent) 16%, transparent); }
+#btn-app-update:disabled { opacity: 0.6; cursor: default; }
 @keyframes slide-in { from { transform: translateY(8px); opacity: 0; } to { transform: none; opacity: 1; } }

@@ -646,6 +646,10 @@ async function runSmoke(hooks = {}) {
     let ignoredFired = false;
     tw.onData((wsId) => { if (wsId === 'tw-ws') fired++; if (wsId === 'tw-bad') ignoredFired = true; });
     tw.start('tw-ws', path.join(U.dataRoot(), 'treewatch-smoke'));
+    // macOS: an FSEvents stream starts asynchronously and misses writes made in
+    // its first moments (arm64 runner: fired=0). The app reads the tree from disk
+    // after starting the watch, so only later writes matter: let it settle.
+    if (process.platform === 'darwin') await new Promise(r => setTimeout(r, 1000));
     fs.writeFileSync(path.join(dir, 'new-file.ts'), 'x');
     const deadline = Date.now() + 4000;
     while (!fired && Date.now() < deadline) await new Promise(r => setTimeout(r, 150));
@@ -1624,6 +1628,87 @@ async function runSmoke(hooks = {}) {
     const kept = s.effort === 'high';
     const r = { fromSl, subIgnored, fromHook, kept, junk: feed.readEffort('<b>') === null };
     check('feed keeps the reasoning effort level (strip: "Opus 5 · high")', Object.values(r).every(Boolean), JSON.stringify(r));
+  }
+
+  // 22f. API endpoint tabs' /model (z.ai GLM): the picker rows, slot names and
+  //      Fable slot derived from the account env at settings-write time (the
+  //      account's own keys win), the PostModelSwitch hook for endpoint tabs
+  //      only, and the model guard's pure parts: who caused a change of the
+  //      global `model`, and a patch that touches only that member
+  {
+    const acc = require('./accounts.cjs');
+    const feed = require('./claudefeed.cjs');
+    const mg = require('./modelguard.cjs');
+    const zenv = { ANTHROPIC_BASE_URL: 'https://api.z.ai/api/anthropic', ANTHROPIC_AUTH_TOKEN: 'k', ANTHROPIC_DEFAULT_OPUS_MODEL: 'glm-5.3[1m]', ANTHROPIC_DEFAULT_SONNET_MODEL: 'glm-5.3-flash[1m]', ANTHROPIC_DEFAULT_HAIKU_MODEL: 'glm-5.3-flash[1m]' };
+    const z = acc.endpointTabSettings(zenv);
+    const own = acc.endpointTabSettings({ ...zenv, ANTHROPIC_DEFAULT_SONNET_MODEL_NAME: 'Mine', ANTHROPIC_DEFAULT_FABLE_MODEL: 'glm-x' });
+    const gen = acc.endpointTabSettings({ ANTHROPIC_BASE_URL: 'https://api.example.ai/anthropic', ANTHROPIC_MODEL: 'kimi-k2', ANTHROPIC_DEFAULT_HAIKU_MODEL: 'kimi-k2-turbo' });
+    const none = acc.endpointTabSettings({ ANTHROPIC_BASE_URL: 'https://x.io' });
+    const opts = (s) => (s.modelPicker ? s.modelPicker.options.map(o => `${o.model}=${o.label}`).join('|') : null);
+    const r = {
+      zaiRows: z.modelPicker && z.modelPicker.replaceBuiltInOptions === true && opts(z) === 'glm-5.3[1m]=GLM-5.3 (full)|glm-5.3-flash[1m]=GLM-5.3 Flash (fast)',
+      zaiDesc: z.modelPicker && z.modelPicker.options[0].description === 'z.ai · the full model · 1M context',
+      zaiNames: z.env.ANTHROPIC_DEFAULT_OPUS_MODEL_NAME === 'GLM-5.3 (full)' && z.env.ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME === 'GLM-5.3 Flash (fast)',
+      fable: z.env.ANTHROPIC_DEFAULT_FABLE_MODEL === 'glm-5.3[1m]' && z.env.ANTHROPIC_DEFAULT_FABLE_MODEL_NAME === 'GLM-5.3 (full)',
+      noSecretNoOverride: !('ANTHROPIC_AUTH_TOKEN' in z.env) && !('ANTHROPIC_DEFAULT_OPUS_MODEL' in z.env),
+      ownWins: !('ANTHROPIC_DEFAULT_SONNET_MODEL_NAME' in own.env) && !('ANTHROPIC_DEFAULT_FABLE_MODEL' in own.env) && opts(own).includes('glm-5.3-flash[1m]=Mine'),
+      generic: opts(gen) === 'kimi-k2=kimi-k2|kimi-k2-turbo=kimi-k2-turbo' && gen.modelPicker.options[1].description === 'api.example.ai · small model'
+        && !('ANTHROPIC_DEFAULT_OPUS_MODEL_NAME' in gen.env) && gen.env.ANTHROPIC_DEFAULT_FABLE_MODEL === 'kimi-k2',
+      noModels: none.modelPicker === null && Object.keys(none.env).length === 0,
+      hookShape: (() => { const h = feed.modelSwitchHooks(4321).PostModelSwitch; return Boolean(h && h[0].hooks[0].type === 'http' && h[0].hooks[0].url === 'http://127.0.0.1:4321/hook/PostModelSwitch' && h[0].hooks[0].headers['x-vs-term'] === '$VIBESPACE_TERM_ID'); })(),
+      noPortNoHook: Object.keys(feed.modelSwitchHooks(null)).length === 0,
+    };
+    // the real per-tab file: base hooks + extras + env, PostModelSwitch only via opts
+    const baseF = path.join(U.ensureDir(U.dataRoot()), 'smoke-ep-base.json');
+    U.writeJsonAtomic(baseF, { hooks: { Stop: [{ hooks: [{ type: 'http', url: 'x' }] }] }, statusLine: { type: 'command', command: 'c' } });
+    const tf = ptyhost.writeEndpointSettings('smokeepmodel', 'smoke-acct', baseF, zenv, { hooks: feed.modelSwitchHooks(4321) });
+    const tj = JSON.parse(fs.readFileSync(tf, 'utf8'));
+    const plain = JSON.parse(fs.readFileSync(ptyhost.writeEndpointSettings('smokeepmodel2', 'smoke-acct', baseF, zenv), 'utf8'));
+    r.tabFile = Boolean(tj.modelPicker && tj.env.ANTHROPIC_DEFAULT_FABLE_MODEL === 'glm-5.3[1m]' && tj.env.ANTHROPIC_AUTH_TOKEN === 'k'
+      && tj.hooks.Stop && tj.hooks.PostModelSwitch && tj.statusLine && !plain.hooks.PostModelSwitch);
+    ptyhost.clearEndpointSettings('smokeepmodel', 'smoke-acct');
+    ptyhost.clearEndpointSettings('smokeepmodel2', 'smoke-acct');
+    check('endpoint tab /model: GLM-only picker rows, slot names, Fable → opus model, own keys win, PostModelSwitch hook', Object.values(r).every(Boolean), JSON.stringify(r));
+
+    const M = { opus: 'glm-5.3[1m]', sonnet: 'glm-5.3-flash[1m]', haiku: 'glm-5.3-flash[1m]' };
+    const t0 = 1e9;
+    const ep = (kind, extra = {}) => ({ termId: 'z1', at: t0 + 300, endpoint: true, models: M, kind, ...extra });
+    const cl = (kind) => ({ termId: 'c1', at: t0 + 200, endpoint: false, models: null, kind });
+    const d = (prev, next, signals) => mg.decide({ prev, next, at: t0, signals });
+    const g = {
+      switchExact: d('opus[1m]', 'glm-5.3-flash[1m]', [ep('switch', { to: 'glm-5.3-flash[1m]', requested: 'glm-5.3-flash[1m]' })]).restore === true,
+      switchAlias: d('opus[1m]', 'sonnet', [ep('switch', { to: 'glm-5.3-flash[1m]', requested: null })]).restore === true,
+      switchOther: d('opus[1m]', 'sonnet', [ep('switch', { to: 'glm-5.3[1m]', requested: 'opus' })]).restore === false,
+      defaultWithSwitch: d('opus[1m]', undefined, [ep('switch', { to: 'glm-5.3[1m]' })]).restore === true,
+      idWithActivity: d('opus[1m]', 'glm-5.3[1m]', [ep('activity')]).restore === true,
+      idNoSignal: d('opus[1m]', 'glm-5.3[1m]', []).restore === false,
+      aliasActivityOnly: d('opus[1m]', 'opus', [ep('activity')]).restore === false, // a Claude tab could have saved it
+      claudeSwitched: d('opus[1m]', 'glm-5.3[1m]', [ep('activity'), cl('switch')]).restore === false,
+      tooOld: d('opus[1m]', 'glm-5.3-flash[1m]', [{ ...ep('switch', { to: 'glm-5.3-flash[1m]' }), at: t0 - mg.WINDOW_MS - 1 }]).restore === false,
+      unchanged: d('opus[1m]', 'opus[1m]', [ep('switch', { to: 'x' })]).restore === false,
+      claudeIdNeverEndpoint: d('opus[1m]', 'claude-opus-5-5', [ep('activity')]).restore === false && mg.isClaudeName('fable[1m]') && !mg.isClaudeName('glm-5.3'),
+      resolve: mg.resolveFor('fable', M) === 'glm-5.3' && mg.resolveFor('haiku[1m]', M) === 'glm-5.3-flash' && mg.resolveFor(undefined, M) === null,
+      // z.ai-only machine (no /login, no token account): a GLM pick is meant to be the default
+      noClaudeAccount: mg.decide({ prev: 'opus[1m]', next: 'glm-5.3-flash[1m]', at: t0, claudeAccount: false, signals: [ep('switch', { to: 'glm-5.3-flash[1m]' })] }).restore === false
+        && mg.decide({ prev: 'opus[1m]', next: 'glm-5.3[1m]', at: t0, claudeAccount: false, signals: [ep('activity')] }).restore === false
+        && typeof acc.hasClaudeAccount() === 'boolean',
+    };
+    check('model guard: undoes a global model saved by an endpoint tab (its switch / its GLM id), never a Claude tab\'s', Object.values(g).every(Boolean), JSON.stringify(g));
+
+    const src = '{\n  "env": { "model": "keep" },\n  "model": "glm-5.3[1m]",\n  "theme": "dark"\n}\n';
+    const crlf = '{\r\n\t"a": 1,\r\n\t"model": "sonnet"\r\n}\r\n';
+    const p = {
+      replace: mg.patchModel(src, 'opus[1m]') === src.replace('"glm-5.3[1m]"', '"opus[1m]"'),
+      removeMiddle: mg.patchModel(src, undefined) === '{\n  "env": { "model": "keep" },\n  "theme": "dark"\n}\n',
+      removeLast: mg.patchModel(crlf, undefined) === '{\r\n\t"a": 1\r\n}\r\n',
+      removeOnly: JSON.stringify(JSON.parse(mg.patchModel('{"model":"x"}', undefined))) === '{}',
+      insert: mg.patchModel('{\n    "theme": "dark"\n}', 'opus[1m]') === '{\n    "model": "opus[1m]",\n    "theme": "dark"\n}',
+      insertEmpty: JSON.parse(mg.patchModel('{}', 'opus')).model === 'opus',
+      nestedUntouched: JSON.parse(mg.patchModel(src, 'opus')).env.model === 'keep',
+      bom: JSON.parse(mg.patchModel('﻿{"model":"a","b":[1,{"model":2}]}', 'c').slice(1)).b[1].model === 2,
+      quotes: JSON.parse(mg.patchModel('{"x":"a\\"model\\":1","model":"y"}', 'z')).x === 'a"model":1',
+    };
+    check('model guard: rewrites only the top-level "model" member (formatting, line ends, other keys kept)', Object.values(p).every(Boolean), JSON.stringify(p));
   }
 
   // 22e. Send to cloud (0.6.58): the typed line runs the REAL claude through
@@ -2919,6 +3004,14 @@ async function runSmoke(hooks = {}) {
       && cm.isInstalled() === false && cm.install({ targetPath: process.execPath, rootDir: U.BIN_ROOT }) === false && cm.uninstall() === true,
       JSON.stringify({ sc, lsc, quiet }));
     workspaces.remove(wsMac.id);
+  }
+
+  // packaged self-update (main/appupdate.cjs): pure parts everywhere, a local
+  // feed + download everywhere, an end-to-end bundle swap on darwin
+  try {
+    await require('./smoke-appupdate.cjs')(check);
+  } catch (e) {
+    check('app update: smoke block ran', false, 'threw: ' + (e && e.stack ? e.stack : e));
   }
 
   // macOS: a REAL workspace window (renderer + preload + one plain terminal),

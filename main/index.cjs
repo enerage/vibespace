@@ -42,6 +42,8 @@ const bgagents = require('./bgagents.cjs');
 const presence = require('./presence.cjs');
 const accounts = require('./accounts.cjs');
 const netwatch = require('./netwatch.cjs');
+const modelguard = require('./modelguard.cjs');
+const appupdate = require('./appupdate.cjs'); // packaged self-update (GitHub Releases)
 
 // ---------- CLI args ----------
 function parseArgv() {
@@ -230,10 +232,23 @@ const attnTerms = new Map(); // termId -> attention.cjs arbitration state (file 
 // every pty create, never deleted (an old pty's late exit must not clear it).
 const feedPtys = new Map();
 
+// what the model guard needs to know about a tab: is it on an API endpoint
+// account, and that account's slot models
+function modelGuardTermInfo(termId) {
+  const fam = termFamily.get(termId) || '';
+  const endpoint = fam.startsWith('endpoint');
+  return { endpoint, models: endpoint ? accounts.endpointModels(termAccount.get(termId)) : null };
+}
+
 // What the tab's `claude` wrapper reads at its next launch: the account file
 // and, for an API endpoint, the tab's own claude settings (hooks + env).
 function applyTermAccount(termId, wsId, id, env) {
-  if (env) ptyhost.writeEndpointSettings(termId, wsId || null, wsId ? ensureHookSettings(wsId) : null, env);
+  if (env) {
+    // endpoint tabs also carry PostModelSwitch: a /model pick there must not
+    // change the user's global default (modelguard.cjs undoes claude's save)
+    ptyhost.writeEndpointSettings(termId, wsId || null, wsId ? ensureHookSettings(wsId) : null, env, { hooks: claudefeed.modelSwitchHooks() });
+    modelguard.start({ termInfo: modelGuardTermInfo, hasClaude: accounts.hasClaudeAccount });
+  }
   else ptyhost.clearEndpointSettings(termId, wsId || null);
   ptyhost.setAccount(termId, id, wsId || null);
   if (termAccount.get(termId) !== id) {
@@ -1348,6 +1363,7 @@ function initIpc() {
     termAccount.delete(termId); // ptyhost.create clears the account file too
     netForget(termId);
     claudefeed.forget(termId);
+    modelguard.forget(termId);
     for (const win of BrowserWindow.getAllWindows()) {
       if (!win.isDestroyed()) win.webContents.send('pty:exit', termId);
     }
@@ -1391,6 +1407,7 @@ function initIpc() {
   claudefeed.onHook((wsId, termId, event, body) => {
     noteTurnForAccount(termId, event, body);
     noteTurnForNet(termId, event, body);
+    if (event === 'PostModelSwitch') modelguard.noteSwitch(termId, body);
     if (event === 'PreCompact' || event === 'PostCompact') {
       const ctx = claudefeed.stateOf ? claudefeed.stateOf(termId) : null;
       logger.info(`compact: ${event} ws=${wsId} term=${termId} trigger=${(body && body.trigger) || '-'}${ctx && ctx.context ? ` context=${ctx.context.used}` : ''}`);
@@ -1406,7 +1423,9 @@ function initIpc() {
     if (!file) return;
     try { fs.appendFileSync(file, st + '\n'); } catch (e) { logger.warn('status write failed: ' + e.message); }
   });
+  claudefeed.onActivity((termId) => modelguard.noteActivity(termId));
   claudefeed.onData((wsId, termId, feed) => {
+    modelguard.noteFeedModel(termId, feed && feed.model && feed.model.id);
     for (const win of workspaceWindowsFor(wsId)) {
       if (!win.isDestroyed()) win.webContents.send('term:feed', { termId, feed });
     }
@@ -1862,6 +1881,8 @@ app.whenReady().then(async () => {
   if (!gotLock) return;
   initProtocol();
   initIpc();
+  // self-update IPC (every mode: a smoke window asks too); checks only start below
+  appupdate.init({ app, BrowserWindow, ipcMain, shell, logger, wsId: workspaceId, quit: () => app.quit() });
   initStateFlush();
   ensureOverlayIcons(); // fire-and-forget: taskbar badge icons for agent status
 
@@ -2008,9 +2029,14 @@ app.whenReady().then(async () => {
     // away mode: workspace processes only (not the launcher, smoke or screenshot
     // runs) — each one tracks lock/idle and keeps the shared marker in sync
     try { presence.start(); } catch (e) { logger.warn('presence start failed: ' + e.message); }
+    appupdate.start();
     createWorkspaceWindow(ws);
   } else {
-    createLauncherWindow();
+    appupdate.start();
+    // first start after a self-update: reopen the workspaces that were open
+    // (their agents resume as after ↻ Restart); no launcher window unless it was open
+    if (appupdate.reopenAfterUpdate((id) => { if (workspaces.get(id)) launchWorkspaceProcess(id); }) === 'quit') setTimeout(() => app.quit(), 1500);
+    else createLauncherWindow();
   }
 
   // macOS Dock click with no window open: only the launcher comes back. A

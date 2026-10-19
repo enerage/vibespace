@@ -827,6 +827,67 @@ Key facts encoded in `main/sessions.cjs`:
   allow `vsfile:` only; there is no `connect-src`, so page `fetch()` of it is
   blocked (the viewer doesn't fetch). An SVG opens as an image with a
   Source/Image toggle to Monaco.
+- **Self-update of the installed app** (0.7.1, `main/appupdate.cjs` +
+  `ui/appupdate.js`):
+  - **Packaged builds only.** `VIBESPACE_UPDATE_FEED` + `VIBESPACE_UPDATE_FORCE=1`
+    let an unpackaged run test it, with the install as a dry run.
+  - **Check:** reads the WHOLE releases list (v0.7.0 was published
+    `latest=false` so the Windows guide's "latest" still finds an .exe). Picks
+    the highest semver with an asset for this platform/arch: Mac zip first,
+    then dmg, then the NSIS exe.
+  - **Once per machine:** a lock file, 30 s after start, then every 6 h, with
+    ETag. The result goes to `<dataRoot>/app-update.json`, which every window
+    reads.
+  - **Verify:** against the API's `digest` (`sha256:…`); size only, logged,
+    when there is none.
+  - **Mac install:** a detached `/bin/sh` script waits for the bundle's
+    processes (exact path match, never `pgrep -f`: it reads paths as
+    patterns), moves the old bundle aside, `ditto`s the new one in, removes
+    quarantine, restores the old one on failure, relaunches.
+  - **Windows install:** a `-File` PowerShell script (never
+    `-EncodedCommand`: Defender) runs the installer `/S /currentuser
+    /D=<dir>`, falling back to a normal run.
+  - **Quit and reopen:** the clicking window records the open workspaces; the
+    other processes see the request within 3 s and quit normally; the new
+    launcher reopens them.
+  - **CI:** smoke runs an END-TO-END swap of a fake signed `.app` (feed → zip →
+    verify → script → new version, no `.old-*` left) on the Mac runners.
+  - **Not verified on a real install yet:** the 160 MB swap in /Applications;
+    whether TCC re-asks for Documents/Desktop access after each ad-hoc update
+    (likely); the Windows per-machine/UAC case.
+  - **Releases:** only when Valentin says "release"; upload the CI zips as well
+    as the dmgs (the updater prefers zips).
+  - Testing tip (2026-10-19): `--remote-debugging-port` opened no port under
+    Electron 44.4.5; drive test windows through each process's main-process
+    inspector (`--inspect=<port>`, `webContents.debugger`), which still sends real
+    CDP input events.
+- **z.ai tabs and claude's `/model`** (0.7.1, verified on claude 2.1.303 with a
+  throwaway `CLAUDE_CONFIG_DIR`):
+  - **Every `/model` pick saves `model` to the GLOBAL
+    `~/.claude/settings.json`.** "Your pick becomes the default for new
+    sessions"; only pressing `s` in the picker means this session only.
+  - **Nothing in claude prevents it:** `--model`, `ANTHROPIC_MODEL` and a
+    `model` key in the `--settings` file don't. The `model` key is worse:
+    picking "Default" then DELETES the global value.
+  - **So `main/modelguard.cjs` undoes a global change caused by an endpoint
+    tab:** that tab's switch (a PostModelSwitch hook, endpoint tabs only, or
+    its feed model), or a saved value equal to that tab's exact GLM id (picker
+    rows use exact ids, which no Claude tab ever saves).
+  - **The guard stays out** if a Claude tab switched at the same moment, and on
+    machines with no Claude account (a z.ai-only PC keeps its pick as the
+    default). It rewrites only the `model` member and logs `model guard:`.
+    Known gap: "Default" picked while already on that model deletes the key
+    with no switch signal.
+  - **Clean picker:** claude's `modelPicker` setting (`replaceBuiltInOptions`)
+    works from a `--settings` file, plus `ANTHROPIC_DEFAULT_*_MODEL_NAME` /
+    `_DESCRIPTION`, built at tab-settings-write time, so existing accounts get
+    it. `availableModels` wasn't needed. `ANTHROPIC_DEFAULT_FABLE_MODEL` = the
+    endpoint's opus model.
+  - **Effort:** GLM-5.3 and Flash always think and know only low/high/max.
+    z.ai maps whatever claude sends (thinking off → low, medium → high, xhigh
+    → max, unknown → max; docs.z.ai). claude's `_SUPPORTED_CAPABILITIES` is
+    read only for Bedrock/Vertex/Foundry/Mantle, so the /effort slider keeps
+    all five levels. Harmless.
 - **`/sync-docs` skill** (`.claude/skills/sync-docs`): the "update all docs" ritual —
   CHANGELOG/DECISIONS/CLAUDE/TODO/README + agent memory, docs only. Copy the skill
   folder into any repo that should join the ritual. (A 📨 broadcast button existed

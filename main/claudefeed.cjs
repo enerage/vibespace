@@ -26,6 +26,7 @@ let resolveTerm = () => null; // termId -> wsId (ptyhost owns the mapping)
 let listener = () => {};
 let limitsListener = () => {};
 let hookListener = () => {}; // raw hook events (index.cjs derives status words from them)
+let activityListener = () => {}; // every accepted request (sl tick or hook), state change or not
 let accountOf = () => 'login'; // termId -> account id (index.cjs owns the mapping)
 
 const terms = new Map(); // termId -> { wsId, state, timer, lastEmit }
@@ -402,6 +403,7 @@ function ingest(termId, kind, event, body) {
   let t = terms.get(termId);
   if (!t) { t = { wsId, state: emptyState(), timer: null, lastEmit: 0 }; terms.set(termId, t); }
   t.wsId = wsId;
+  try { activityListener(termId, kind, event); } catch (e) { logger.warn('activity listener: ' + e.message); }
   if (kind === 'hook') {
     try { hookListener(wsId, termId, event, body); } catch (e) { logger.warn('hook listener: ' + e.message); }
     // the rate-limit StopFailure body is unverified live: record its shape (keys +
@@ -611,6 +613,14 @@ function statusLineCommand(p, userCmd) {
   return `vs_user=${quoted}; vs_json=$(cat); printf '%s' "$vs_json" | ${post}; printf '%s' "$vs_json" | eval "$vs_user"`;
 }
 
+const httpHook = (p, ev) => ({
+  type: 'http',
+  url: `http://127.0.0.1:${p}/hook/${ev}`,
+  headers: { 'x-vs-term': '$VIBESPACE_TERM_ID' },
+  allowedEnvVars: ['VIBESPACE_TERM_ID'],
+  timeout: 3, // the server answers at once; this only bounds a wedged main
+});
+
 function addSettings(settings, opts = {}) {
   const p = opts.port !== undefined ? opts.port : port;
   if (!p) return settings;
@@ -618,16 +628,18 @@ function addSettings(settings, opts = {}) {
   settings.statusLine = { type: 'command', command: statusLineCommand(p, userCmd) };
   settings.hooks = settings.hooks || {};
   for (const ev of HOOK_EVENTS) {
-    const hook = {
-      type: 'http',
-      url: `http://127.0.0.1:${p}/hook/${ev}`,
-      headers: { 'x-vs-term': '$VIBESPACE_TERM_ID' },
-      allowedEnvVars: ['VIBESPACE_TERM_ID'],
-      timeout: 3, // the server answers at once; this only bounds a wedged main
-    };
-    settings.hooks[ev] = [...(settings.hooks[ev] || []), { hooks: [hook] }];
+    settings.hooks[ev] = [...(settings.hooks[ev] || []), { hooks: [httpHook(p, ev)] }];
   }
   return settings;
+}
+
+// API endpoint tabs only (ptyhost.writeEndpointSettings): PostModelSwitch says
+// which tab switched model and to what ({ from_model, to_model,
+// requested_model, source: 'picker'|'command'|… }, verified as an HTTP hook on
+// 2.1.303). It fires only when the model really changes. main's model guard
+// uses it to undo the global default claude saves on a /model pick there.
+function modelSwitchHooks(p = port) {
+  return p ? { PostModelSwitch: [{ hooks: [httpHook(p, 'PostModelSwitch')] }] } : {};
 }
 
 // a pty exited: its agent is gone, so is its feed
@@ -685,11 +697,13 @@ module.exports = {
   isTaskNotification,
   attentionText,
   addSettings,
+  modelSwitchHooks,
   stateOf: (termId) => (terms.get(termId) || {}).state || null,
   port: () => port,
   limits: () => limits,
   onData: (fn) => { listener = fn; },
   onLimits: (fn) => { limitsListener = fn; },
   onHook: (fn) => { hookListener = fn; },
+  onActivity: (fn) => { activityListener = fn; },
   setAccountResolver: (fn) => { accountOf = typeof fn === 'function' ? fn : () => 'login'; },
 };

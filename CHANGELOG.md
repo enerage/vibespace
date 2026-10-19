@@ -2,6 +2,40 @@
 
 Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 
+## [0.7.1] — 2026-10-19
+
+### Added
+- **One-click updates for the installed app** (macOS and Windows):
+  - **When:** an installed VibeSpace checks GitHub Releases every 6 hours (all
+    releases, not only "latest"). When a newer one exists, ↻ turns into
+    "↻ Update to <version>" and each window shows one notice.
+  - **What a click does:** it downloads the new version, checks its SHA-256 and
+    closes every VibeSpace window (state saved; busy agents get the usual
+    confirm). Then it swaps the app and reopens the same workspaces, with their
+    agents resumed.
+  - **macOS:** the bundle is replaced in place. VibeSpace downloads it itself,
+    so there's no quarantine and no second "Open Anyway". If the app can't be
+    replaced (read-only, or run from the dmg), the download opens in Finder
+    instead.
+  - **Windows:** the installer runs silently into the same folder.
+  - Squirrel/electron-updater can't do this for an ad-hoc-signed Mac app, so
+    VibeSpace has its own updater (`main/appupdate.cjs`).
+  - Versions reach installed apps only when they are released.
+- **z.ai tabs: a clean `/model` list.** Instead of "Custom Opus/Sonnet/Haiku
+  model" plus Fable, a z.ai tab offers "GLM-5.3 (full)" and "GLM-5.3 Flash
+  (fast)". Existing z.ai accounts get it too. The Fable slot also points at
+  GLM, so a Claude model name never reaches z.ai.
+
+### Fixed
+- **Picking a model in a z.ai tab changed the default of every Claude tab.**
+  Claude's `/model` saves the pick as the global default in
+  `~/.claude/settings.json`, so testing Flash in a z.ai tab made new Claude
+  tabs start on "sonnet". VibeSpace now puts the previous default back within
+  about a second, and the z.ai tab keeps its own pick (also across restarts).
+  On a PC with only z.ai accounts the pick is kept as the default.
+- On macOS, the file tree watcher's smoke test no longer races the start of
+  FSEvents (the app was fine; the test wrote before the watch was live).
+
 ## [0.7.0] — 2026-10-18
 
 ### Added
