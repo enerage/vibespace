@@ -91,11 +91,13 @@ function capEntries(entries, now) {
   return kept.length > MAX_ENTRIES ? kept.slice(kept.length - MAX_ENTRIES) : kept;
 }
 
-function closeOpen(entries, termId) {
+// an answered / gone dialog is no longer news: its id goes to `into` (read)
+function closeOpen(entries, termId, into = null) {
   let closed = false;
   const next = entries.map((e) => {
     if (!e.open || e.termId !== termId) return e;
     closed = true;
+    if (into) into.push(e.id);
     return { ...e, open: false };
   });
   return closed ? next : entries;
@@ -110,6 +112,7 @@ function reduce(state, ev) {
   const s = state || newState();
   const body = ev.body && typeof ev.body === 'object' ? ev.body : null;
   const same = { state: s, read: [], changed: false };
+  const gone = []; // dialogs closed by this event → read
   // a subagent's events are never the tab's: its "final reply" goes to the
   // main agent, not to you
   if (!body || body.agent_id) return same;
@@ -125,7 +128,7 @@ function reduce(state, ev) {
       prompt: p ? p.text : null, origin: p ? p.origin : 'you', from: p ? p.from : null,
       open: false, ...extra,
     };
-    return capEntries([...closeOpen(s.entries, termId), entry], now);
+    return capEntries([...closeOpen(s.entries, termId, gone), entry], now);
   };
   switch (ev.event) {
     case 'UserPromptSubmit': {
@@ -141,31 +144,31 @@ function reduce(state, ev) {
     case 'Stop': {
       const text = str(body.last_assistant_message).trim();
       if (!text) {
-        const entries = closeOpen(s.entries, termId);
-        return { state: { ...s, entries }, read: [], changed: entries !== s.entries };
+        const entries = closeOpen(s.entries, termId, gone);
+        return { state: { ...s, entries }, read: gone, changed: entries !== s.entries };
       }
-      return { state: { ...s, entries: add('reply', clip(text, TEXT_MAX)) }, read: [], changed: true };
+      return { state: { ...s, entries: add('reply', clip(text, TEXT_MAX)) }, read: gone, changed: true };
     }
     case 'StopFailure':
-      return { state: { ...s, entries: add('failed', failureText(body)) }, read: [], changed: true };
+      return { state: { ...s, entries: add('failed', failureText(body)) }, read: gone, changed: true };
     case 'PreToolUse': {
       if (body.tool_name === 'AskUserQuestion') {
-        return { state: { ...s, entries: add('question', questionText(body.tool_input), { open: true }) }, read: [], changed: true };
+        return { state: { ...s, entries: add('question', questionText(body.tool_input), { open: true }) }, read: gone, changed: true };
       }
       // a new tool call means the previous dialog is gone (a denied permission
       // fires no PostToolUse)
-      const entries = closeOpen(s.entries, termId);
-      return { state: { ...s, entries }, read: [], changed: entries !== s.entries };
+      const entries = closeOpen(s.entries, termId, gone);
+      return { state: { ...s, entries }, read: gone, changed: entries !== s.entries };
     }
     case 'PermissionRequest': {
       // AskUserQuestion can ask for permission too: its question entry says it all
       if (body.tool_name === 'AskUserQuestion') return same;
-      return { state: { ...s, entries: add('permission', permissionText(body), { open: true }) }, read: [], changed: true };
+      return { state: { ...s, entries: add('permission', permissionText(body), { open: true }) }, read: gone, changed: true };
     }
     case 'PostToolUse':
     case 'PostToolUseFailure': {
-      const entries = closeOpen(s.entries, termId);
-      return { state: { ...s, entries }, read: [], changed: entries !== s.entries };
+      const entries = closeOpen(s.entries, termId, gone);
+      return { state: { ...s, entries }, read: gone, changed: entries !== s.entries };
     }
     default:
       return same;
@@ -230,10 +233,11 @@ function storeOf(wsId) {
   const j = U.readJson(fileFor(wsId), null);
   const entries = j && Array.isArray(j.entries) ? j.entries.filter(e => e && typeof e.id === 'string' && typeof e.at === 'number') : [];
   // a question or permission dialog can't outlive the process that showed it
-  const reopened = entries.some(e => e.open);
+  // (and nobody can answer it any more: read, so the badge doesn't count it)
+  const reopened = entries.filter(e => e.open).map(e => e.id);
   st = { wsName: (j && j.wsName) || wsId, state: { entries: entries.map(e => (e.open ? { ...e, open: false } : e)), prompts: {} }, timer: null, lastAt: 0 };
   stores.set(wsId, st);
-  if (reopened) touch(wsId);
+  if (reopened.length) { touch(wsId); commitRead(reopened); }
   return st;
 }
 
@@ -290,9 +294,11 @@ function closeWorkspace(wsId) {
   const st = stores.get(wsId);
   if (!st) return;
   let entries = st.state.entries;
-  for (const t of new Set(entries.filter(e => e.open).map(e => e.termId))) entries = closeOpen(entries, t);
+  const gone = [];
+  for (const t of new Set(entries.filter(e => e.open).map(e => e.termId))) entries = closeOpen(entries, t, gone);
   st.state = { ...st.state, entries };
   writeNow(wsId);
+  if (gone.length) commitRead(gone);
   stores.delete(wsId);
 }
 

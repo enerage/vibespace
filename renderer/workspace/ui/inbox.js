@@ -38,8 +38,10 @@ const KIND = {
 
 // ---------- pure helpers ----------
 // the first non-empty line, without markdown markers
+// (a heading like "## Summary" says nothing: the first line that isn't one)
 export function firstLine(s) {
-  const line = String(s || '').split(/\r?\n/).map(l => l.trim()).find(l => l && !/^(```|~~~)/.test(l)) || '';
+  const lines = String(s || '').split(/\r?\n/).map(l => l.trim()).filter(l => l && !/^(```|~~~|[-*_]{3,}$|\|?[\s:-]+\|)/.test(l));
+  const line = lines.find(l => !/^#{1,6}\s/.test(l)) || lines[0] || '';
   return line.replace(/^(#{1,6}\s+|>\s*|[-*+]\s+|\d+[.)]\s+)/, '').replace(/\*\*|__|`/g, '');
 }
 
@@ -131,6 +133,13 @@ async function renderReader() {
   head.append(k, el('span', 'ib-where', where(e)), time);
   const tag = originTag(e);
   if (tag) head.append(el('span', 'ib-tag', tag));
+  // actions in the header: a long reply would push them out of sight
+  const go = el('button', 'btn small primary', e.wsId === wsId ? 'Open tab' : `Open ${e.wsName || 'workspace'}`);
+  go.title = 'Enter';
+  go.onclick = () => openEntry(e);
+  const un = el('button', 'btn small ghost', 'Mark unread');
+  un.onclick = () => markUnread(e);
+  head.append(el('span', 'spacer'), go, un);
   readerEl.append(head);
   if (e.origin === 'you' && e.prompt) {
     const asked = el('div', 'ib-asked');
@@ -143,14 +152,6 @@ async function renderReader() {
   // renderMarkdown escapes every piece of the text before adding its own tags
   text.innerHTML = renderMarkdown(full.get(e.id) ?? e.preview ?? '');
   readerEl.append(text);
-  const actions = el('div', 'ib-actions');
-  const go = el('button', 'btn small primary', e.wsId === wsId ? 'Open tab' : `Open ${e.wsName || 'workspace'}`);
-  go.title = 'Enter';
-  go.onclick = () => openEntry(e);
-  const un = el('button', 'btn small ghost', 'Mark unread');
-  un.onclick = () => markUnread(e);
-  actions.append(go, un);
-  readerEl.append(actions);
   readerEl.scrollTop = 0;
   if (e.long && !full.has(e.id)) {
     const got = await vs.inboxGet(e.id).catch(() => null);
@@ -161,15 +162,23 @@ async function renderReader() {
 }
 
 // ---------- actions ----------
-function select(id) {
+// a click reads at once; arrowing past a row reads it only if you stay on it
+let dwellTimer = null;
+function markReadNow(e) {
+  if (e.read) return;
+  e.read = true;
+  setBadge(unread - 1);
+  vs.inboxMarkRead([e.id]).catch(() => {});
+  if (open) renderList();
+}
+
+function select(id, { dwell = false } = {}) {
   const e = entries.find(x => x.id === id);
   if (!e) return;
   selId = id;
-  if (!e.read) {
-    e.read = true;
-    setBadge(unread - 1);
-    vs.inboxMarkRead([id]).catch(() => {});
-  }
+  clearTimeout(dwellTimer);
+  if (!dwell) markReadNow(e);
+  else if (!e.read) dwellTimer = setTimeout(() => { if (selId === id) markReadNow(e); }, 1500);
   renderList();
   renderReader();
   listEl.querySelector('.ib-row.sel')?.scrollIntoView({ block: 'nearest' });
@@ -211,7 +220,7 @@ function step(d) {
   if (!list.length) return;
   const i = list.findIndex(e => e.id === selId);
   const next = i < 0 ? (d > 0 ? 0 : list.length - 1) : Math.max(0, Math.min(list.length - 1, i + d));
-  select(list[next].id);
+  select(list[next].id, { dwell: true });
 }
 
 // ---------- polling ----------
@@ -256,7 +265,9 @@ function show() {
   root.classList.remove('hidden');
   $('#btn-inbox')?.classList.add('active');
   listKey = '';
-  readerKey = '';
+  readerKey = null; // never equal to a real key: the empty-reader hint renders too
+  // the whole window below the top bar, not just the terminal pane
+  root.style.top = Math.round($('#topbar').getBoundingClientRect().bottom) + 'px';
   renderList();
   renderReader();
   root.focus(); // keys work only while focus is in the inbox
@@ -313,7 +324,10 @@ export function init(opts) {
   document.addEventListener('keydown', (e) => {
     // capture + stopPropagation: xterm must not also see the key
     if (modKey(e) && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'm') { e.preventDefault(); e.stopPropagation(); toggle(); }
+    // the board opens underneath the inbox: make way for it
+    else if (open && modKey(e) && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'b') close();
   }, true);
+  $('#btn-board')?.addEventListener('click', () => close(), true);
   vs.onInboxChanged(() => { if (!document.hidden) pull(); });
   document.addEventListener('visibilitychange', () => { if (!document.hidden) pull(); });
   setBadge(0);

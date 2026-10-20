@@ -1958,6 +1958,7 @@ async function runSmoke(hooks = {}) {
     const qOpen = find(r.state, 'q1');
     r = inbox.reduce(r.state, ev('PostToolUse', { tool_name: 'AskUserQuestion' }, 6));
     const qClosed = find(r.state, 'q1');
+    const qRead = r.read.includes('q1'); // answered = no longer unread
     r = inbox.reduce(r.state, ev('PermissionRequest', { tool_name: 'Bash', tool_input: { command: 'npm   test' } }, 7, { id: 'p1' }));
     const perm = find(r.state, 'p1');
     r = inbox.reduce(r.state, ev('StopFailure', { error: 'rate_limit', last_assistant_message: "You've hit your weekly limit" }, 8, { id: 'f1' }));
@@ -1974,7 +1975,7 @@ async function runSmoke(hooks = {}) {
     const rules = {
       reply: Boolean(e1) && e1.kind === 'reply' && e1.text === 'Done. **Fixed**' && e1.prompt === 'Fix the bug please' && e1.origin === 'you' && e1.sessionId === 'S1' && e1.tabName === 'agent-1',
       subagentIgnored: !sub.changed && sub.state.entries.length === 1,
-      question: Boolean(qOpen) && qOpen.open === true && qOpen.text === 'Which?\n- A\n- B' && qOpen.origin === 'background' && bgRead === 0 && qClosed.open === false,
+      question: Boolean(qOpen) && qOpen.open === true && qOpen.text === 'Which?\n- A\n- B' && qOpen.origin === 'background' && bgRead === 0 && qClosed.open === false && qRead,
       permission: Boolean(perm) && perm.kind === 'permission' && perm.text === 'Bash: npm test',
       failure: Boolean(fail) && fail.kind === 'failed' && /rate limit/.test(fail.text) && /weekly limit/.test(fail.text) && find(r.state, 'p1').open === false,
       peer: find(r.state, 'e2').origin === 'peer' && find(r.state, 'e2').from === 'vibespace-e2',
