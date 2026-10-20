@@ -22,6 +22,7 @@
       <div id="net-chip" class="hidden" title=""></div>
       <div class="spacer"></div>
       <button id="btn-app-restart" class="btn small hidden" title="Restart this workspace onto the new code / Claude version (every agent conversation resumes)">↻ Restart VibeSpace</button>
+      <button id="btn-inbox" class="btn small ghost" title="Inbox — final replies, failures and open questions of every workspace (Ctrl+Shift+M)">📥 Inbox<span id="inbox-badge" class="hidden">0</span></button>
       <button id="btn-away" class="btn small ghost" title="Away: agents that need you push to the Claude phone app. Auto-switches when the screen locks or after 10 min idle; back when you return.">📱 At PC</button>
       <button id="btn-prefs" class="btn small ghost" title="Preferences — layout, auto-resume, logs, theme">⚙</button>
     </header>
@@ -92,7 +93,7 @@
               <button id="btn-board" class="btn small ghost" title="Agent board — every agent at a glance, quick replies (Ctrl+Shift+B)">▦ Board</button>
             </div>
           </div>
-          <div id="term-hosts"><div id="board" class="hidden"></div></div>
+          <div id="term-hosts"><div id="board" class="hidden"></div><div id="inbox" class="hidden"></div></div>
           <div id="term-strip" class="hidden"></div>
         </div>
       </section>
