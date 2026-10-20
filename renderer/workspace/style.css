@@ -1127,7 +1127,8 @@ body.dragging #split-v, body.dragging #split-h { background: color-mix(in srgb, 
 .ib-first { color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ib-row.unread .ib-first { color: var(--text); }
 .ib-empty { padding: 14px 10px; color: var(--dim); font-size: 12px; }
-.ib-rhead { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; font-size: 12px; padding-bottom: 6px; border-bottom: 1px solid var(--border-soft); }
+.ib-rhead { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; font-size: 12px; padding-bottom: 6px; border-bottom: 1px solid var(--border-soft);
+  position: sticky; top: -10px; margin-top: -10px; padding-top: 10px; z-index: 1; background: inherit; } /* Open tab stays in reach on a long reply */
 .ib-rhead .ib-where { color: var(--text); font-weight: 600; white-space: normal; }
 .ib-rhead .ib-time { margin-left: 0; }
 .ib-asked { margin-top: 8px; font-size: 12px; color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

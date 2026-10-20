@@ -327,7 +327,6 @@ export function init(opts) {
     // the board opens underneath the inbox: make way for it
     else if (open && modKey(e) && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'b') close();
   }, true);
-  $('#btn-board')?.addEventListener('click', () => close(), true);
   vs.onInboxChanged(() => { if (!document.hidden) pull(); });
   document.addEventListener('visibilitychange', () => { if (!document.hidden) pull(); });
   setBadge(0);

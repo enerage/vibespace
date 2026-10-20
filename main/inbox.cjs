@@ -289,6 +289,12 @@ function noteHook(wsId, termId, event, body, ctx = {}) {
   else if (r.changed) changed();
 }
 
+// the window opened: load its store now, so dialogs left open by a crash are
+// closed (and read) at once, not at this workspace's first hook
+function openWorkspace(wsId) {
+  if (wsId) storeOf(wsId);
+}
+
 // the window closed: its dialogs are gone with it; write now
 function closeWorkspace(wsId) {
   const st = stores.get(wsId);
@@ -368,7 +374,7 @@ function markAllRead() {
 
 module.exports = {
   reduce, newState, mergeRead, originOf, peerName, capEntries, // pure (smoke)
-  noteHook, closeWorkspace, flushAll,
+  noteHook, openWorkspace, closeWorkspace, flushAll,
   list, unreadCount, get, markRead, markUnread, markAllRead, commitRead,
   onChange: (fn) => { listeners.push(fn); },
   MAX_ENTRIES, MAX_AGE,

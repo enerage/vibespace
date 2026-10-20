@@ -699,6 +699,7 @@ function createWorkspaceWindow(ws, { shot = false } = {}) {
   // (state.gitFetch, default on) is read at each round
   if (!shot) gitfetch.start(ws.id, ws.repoPath, { enabled: () => (rendererState.get(ws.id) || loadState(ws.id)).gitFetch !== false });
   board.start(ws.id, () => boardSummary(ws.id)); // other windows' boards read this
+  inbox.openWorkspace(ws.id); // closes dialogs a crash left "open"
   baselineClaudeFor(ws.id); // update-button baseline: the version these agents run
 
   // focusing the window answers the attention signal — clear the taskbar badge
