@@ -87,6 +87,8 @@ must check these before merging (details in the branch summary / CLAUDE.md):
       Needs Valentin's manual check (a real Explorer drag can't be scripted).
 
 ## Claude-data UI (RESEARCH-CLAUDE-DATA.md; decided 2026-09-29)
+
+- [ ] Inbox of agents' final replies across workspaces (decided 2026-10-20; builder running). Then: check Claude's focus view inside VibeSpace tabs.
 Build in this order. Verify the statusLine and HTTP hooks live in a pty before relying on them.
 - [x] **Data feed:** statusLine and HTTP hooks in claude-hook-settings.json, a local
       server in main, and events pushed to the renderer per term. Hand off to the
