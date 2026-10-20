@@ -75,7 +75,7 @@ VibeSpace is that place, built for people who live in agents all day.
 | 🔗 **Clickable file:line** | `src/app.js:42` in an agent's output opens that file at that line |
 | 🔎 **Search** (Ctrl+Shift+F) | Files \| Git \| Search on the left: full-text search with match case / whole word / regex; click a hit to open it at that line |
 | ☁ **Send to cloud** | + ▾ → *Send to cloud…* starts a Claude Code cloud session on the account you pick (sign in once per account in ⚙ Preferences → Accounts), lists it, and *Bring back* teleports it into a tab. Agents can hand work off themselves with `assets/ps/cloud-send.ps1` |
-| 🌿 **Git sidebar** | Files \| Git tabs on the left, like VS Code. **Changes**: side-by-side diff of uncommitted work. **History**: searchable commit list with unpushed ↑, `agent` badges and "new since you looked" dots; click a commit for its files. Top-bar branch chip shows ahead/behind, kept fresh by a quiet background `git fetch`. Read-only on purpose |
+| 🌿 **Git sidebar** | Files \| Git tabs on the left, like VS Code. **Changes**: side-by-side diff of uncommitted work. **History**: searchable commit list with unpushed ↑, `agent` badges and "new since you looked" dots; click a commit for its files. Top-bar branch chip shows ahead/behind, kept fresh by a quiet background `git fetch`. When the remote has new commits, **⬇ Update (N)** fast-forwards them in one click (anything trickier goes to an agent). Otherwise read-only on purpose |
 | 🔍 **Ctrl+P** | fuzzy file finder over the whole repo |
 
 ### Terminal

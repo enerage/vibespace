@@ -168,7 +168,7 @@ Key facts encoded in `main/sessions.cjs`:
 
 ## Developing VibeSpace
 
-- `npm run smoke` — 149 self-tests on Windows, 156 on macOS (as of 0.7.0) incl. pty echo and live session discovery. Run it after
+- `npm run smoke` — 168 self-tests on Windows, 176 on macOS (as of 0.7.3) incl. pty echo and live session discovery. Run it after
   touching main-process code, **from a normal shell**: inside a Claude pty the stripped
   PATH and nested ConPTY break the pty test (`powershell.exe` "File not found" /
   AttachConsole) — prepend System32 to PATH and give it its own console, or just use a
@@ -562,6 +562,13 @@ Key facts encoded in `main/sessions.cjs`:
     claude's stderr of any non-0 run in `~/.vibespace/cloud/logs/`. It uses
     `ProcessStartInfo.ArgumentList` (pwsh 7), so a long task with quotes is one
     argument.
+  - **An agent that needs a headless `claude -p` on a TOKEN account WITH the
+    claude.ai connectors** (Google Sheets…) can borrow that account's cloud
+    dir: `CLAUDE_CONFIG_DIR=<dataRoot>/cloud/<accountId>` with
+    `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` and
+    `ANTHROPIC_BASE_URL` unset for that call (answered for the FlexFunnels
+    agent, 2026-10-20). Decrypting the `.dpapi` token instead gives a child
+    with no connectors. That dir has its own settings/MCPs/transcripts.
 - **Keyboard selection in claude's prompt** (0.6.39, `renderer/workspace/ui/inputsel.js`,
   RESEARCH-INPUT-SELECTION.md). Claude has no keyboard-started selection, so
   Shift(+Ctrl)+←/→ and Shift+Home/End are turned into: a synthetic two-cell SGR
@@ -869,6 +876,15 @@ Key facts encoded in `main/sessions.cjs`:
     (likely); the Windows per-machine/UAC case.
   - **Releases:** only when Valentin says "release"; upload the CI zips as well
     as the dmgs (the updater prefers zips).
+  - Running smoke from an agent's Bash: there is no `node_modules\.bin\electron.cmd`
+    here; start `node_modules\electron\dist\electron.exe . --smoke` through
+    `Start-Process cmd /c` with System32 first on PATH and output redirected
+    to a file. The Mac workflow only runs on pushes to `main`/`mac-port`; for a
+    branch, `gh workflow run mac.yml --ref <branch>`. Patch scripts: don't put
+    backslash escapes (NUL, CR, LF) inside a Python heredoc: they landed as
+    real NUL bytes and CRLFs in smoke.cjs (and once in this file), turning the
+    diff into a whole-file rewrite;
+    write such scripts with the Write tool, and diff `--stat` before committing.
   - Testing tip (2026-10-19): `--remote-debugging-port` opened no port under
     Electron 44.4.5; drive test windows through each process's main-process
     inspector (`--inspect=<port>`, `webContents.debugger`), which still sends real

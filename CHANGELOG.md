@@ -18,7 +18,9 @@ Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
   - Asks first only when an agent is working (files change under it).
   - When the background fetch can't sign in (a private repo cloned with GitHub
     Desktop, for example), the pill says **⚠ Can't check for updates**, and a
-    click asks an agent to set up the sign-in, instead of staying silent.
+    click asks an agent to set up the sign-in, instead of staying silent. A
+    successful update click also clears that warning at once (it used to wait
+    for the next background round, up to 30 min).
 
 ## [0.7.2] — 2026-10-19
 
