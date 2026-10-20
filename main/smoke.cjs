@@ -1941,6 +1941,97 @@ async function runSmoke(hooks = {}) {
       JSON.stringify({ shapeOk, written: Boolean(written), seen, selfHidden, deleted }));
   }
 
+  // 23b. inbox (main/inbox.cjs): the pure reducer (replies, origins, questions,
+  //      permissions, read-on-your-prompt, cap/prune), the machine-wide read
+  //      marks merged across writers, and the store → list round trip
+  {
+    const inbox = require('./inbox.cjs');
+    const ev = (event, body, now, extra = {}) => ({ wsId: 'w1', wsName: 'WS', termId: 't1', tabName: 'agent-1', event, body, now, ...extra });
+    const find = (st, id) => st.entries.find(e => e.id === id);
+    let r = inbox.reduce(inbox.newState(), ev('UserPromptSubmit', { prompt: 'Fix the bug please' }, 1));
+    r = inbox.reduce(r.state, ev('Stop', { last_assistant_message: 'Done. **Fixed**', session_id: 'S1' }, 2, { id: 'e1' }));
+    const e1 = find(r.state, 'e1');
+    const sub = inbox.reduce(r.state, ev('Stop', { last_assistant_message: 'mine', agent_id: 'a1' }, 3));
+    r = inbox.reduce(r.state, ev('UserPromptSubmit', { prompt: '<task-notification>\n<task-id>x</task-id>' }, 4));
+    const bgRead = r.read.length;
+    r = inbox.reduce(r.state, ev('PreToolUse', { tool_name: 'AskUserQuestion', tool_input: { questions: [{ question: 'Which?', options: [{ label: 'A' }, { label: 'B' }] }] } }, 5, { id: 'q1' }));
+    const qOpen = find(r.state, 'q1');
+    r = inbox.reduce(r.state, ev('PostToolUse', { tool_name: 'AskUserQuestion' }, 6));
+    const qClosed = find(r.state, 'q1');
+    const qRead = r.read.includes('q1'); // answered = no longer unread
+    r = inbox.reduce(r.state, ev('PermissionRequest', { tool_name: 'Bash', tool_input: { command: 'npm   test' } }, 7, { id: 'p1' }));
+    const perm = find(r.state, 'p1');
+    r = inbox.reduce(r.state, ev('StopFailure', { error: 'rate_limit', last_assistant_message: "You've hit your weekly limit" }, 8, { id: 'f1' }));
+    const fail = find(r.state, 'f1');
+    r = inbox.reduce(r.state, ev('UserPromptSubmit', { prompt: '<cross-session-message from="uds:x" from-name="vibespace-e2">hi' }, 9));
+    r = inbox.reduce(r.state, ev('Stop', { last_assistant_message: 'ok' }, 10, { id: 'e2' }));
+    r = inbox.reduce(r.state, ev('Stop', { last_assistant_message: 'other tab' }, 11, { termId: 't2', id: 'o1' }));
+    r = inbox.reduce(r.state, ev('PermissionRequest', { tool_name: 'Edit', tool_input: { file_path: 'a.js' } }, 12, { id: 'p2' }));
+    const you = inbox.reduce(r.state, ev('UserPromptSubmit', { prompt: 'next' }, 13));
+    const DAY = 24 * 3600 * 1000;
+    const many = [{ id: 'old', termId: 't', at: 0 }];
+    for (let i = 0; i < 305; i++) many.push({ id: 'n' + i, termId: 't', at: 40 * DAY - 1000 + i });
+    const capped = inbox.capEntries(many, 40 * DAY);
+    const rules = {
+      reply: Boolean(e1) && e1.kind === 'reply' && e1.text === 'Done. **Fixed**' && e1.prompt === 'Fix the bug please' && e1.origin === 'you' && e1.sessionId === 'S1' && e1.tabName === 'agent-1',
+      subagentIgnored: !sub.changed && sub.state.entries.length === 1,
+      question: Boolean(qOpen) && qOpen.open === true && qOpen.text === 'Which?\n- A\n- B' && qOpen.origin === 'background' && bgRead === 0 && qClosed.open === false && qRead,
+      permission: Boolean(perm) && perm.kind === 'permission' && perm.text === 'Bash: npm test',
+      failure: Boolean(fail) && fail.kind === 'failed' && /rate limit/.test(fail.text) && /weekly limit/.test(fail.text) && find(r.state, 'p1').open === false,
+      peer: find(r.state, 'e2').origin === 'peer' && find(r.state, 'e2').from === 'vibespace-e2',
+      youMarksRead: you.read.includes('e1') && you.read.includes('p2') && !you.read.includes('o1') && find(you.state, 'p2').open === false,
+      capPrune: capped.length === inbox.MAX_ENTRIES && !capped.some(e => e.id === 'old') && capped[capped.length - 1].id === 'n304',
+    };
+    check('inbox reducer (reply + prompt/origin, subagents skipped, question/permission open → closed, your prompt reads, cap/prune)', Object.values(rules).every(Boolean), JSON.stringify(rules));
+
+    // two processes writing the read marks: each write re-reads and merges
+    const rfile = inbox._readFile();
+    inbox.commitRead(['smoke-x1']);
+    const other = U.readJson(rfile, { read: {} });
+    U.writeJsonAtomic(rfile, { read: { ...other.read, 'smoke-y1': Date.now(), 'smoke-stale': Date.now() - 31 * DAY } }); // another process
+    inbox.commitRead(['smoke-x2'], ['smoke-x1']);
+    const merged = U.readJson(rfile, { read: {} }).read;
+    const pure = inbox.mergeRead({ a: 1, gone: 1 }, ['b'], ['a'], 31 * DAY);
+    check('inbox read marks merge across writers (+ 30-day prune)',
+      Boolean(merged['smoke-y1'] && merged['smoke-x2']) && !merged['smoke-x1'] && !merged['smoke-stale'] && pure.b === 31 * DAY && !('a' in pure) && !('gone' in pure),
+      JSON.stringify(Object.keys(merged)));
+
+    // store → list across workspaces (own store + another process's file)
+    inbox.noteHook('smoke-inbox', 'tA', 'UserPromptSubmit', { prompt: 'hello' }, { wsName: 'Smoke', tabName: 'agent-1' });
+    inbox.noteHook('smoke-inbox', 'tA', 'Stop', { last_assistant_message: 'y'.repeat(500) }, { wsName: 'Smoke', tabName: 'agent-1' });
+    U.ensureDir(path.dirname(inbox._file('smoke-inbox-b')));
+    U.writeJsonAtomic(inbox._file('smoke-inbox-b'), { wsId: 'smoke-inbox-b', wsName: 'B', entries: [{ id: 'smoke-b1', wsId: 'smoke-inbox-b', termId: 'tb', at: Date.now() - 5, kind: 'reply', text: 'from B', open: false }] });
+    const l1 = inbox.list();
+    const mine = l1.entries.find(e => e.wsId === 'smoke-inbox');
+    inbox.markRead(['smoke-b1']);
+    const l2 = inbox.list();
+    const full = mine ? inbox.get(mine.id) : null;
+    inbox.closeWorkspace('smoke-inbox');
+    const onDisk = U.readJson(inbox._file('smoke-inbox'), null);
+    for (const f of [inbox._file('smoke-inbox'), inbox._file('smoke-inbox-b')]) { try { fs.rmSync(f, { force: true }); fs.rmSync(f + '.bak', { force: true }); } catch {} }
+    check('inbox store → list (all workspaces, previews + get, read flags, kept on close)',
+      Boolean(mine) && mine.long === true && mine.text === undefined && mine.preview.length <= 300 && l1.entries.some(e => e.id === 'smoke-b1' && !e.read)
+        && l2.unread === l1.unread - 1 && Boolean(full) && full.text.length === 500 && Boolean(onDisk) && onDisk.entries.length === 1,
+      JSON.stringify({ n: l1.entries.length, unread: [l1.unread, l2.unread], onDisk: Boolean(onDisk) }));
+  }
+
+  // 23c. inbox reader markdown (renderer/workspace/ui/minimd.js): escapes
+  //      everything, code fences stay verbatim, lists nest, links are text
+  {
+    const md = await import(require('node:url').pathToFileURL(path.join(U.ROOT, 'renderer', 'workspace', 'ui', 'minimd.js')).href);
+    const html = md.renderMarkdown('<script>alert(1)</script> **b** `<i>`\n\n```\n<b>**raw**</b>\n```\n- a\n  - nested\n1. one\n\n> q\n\n[x](https://e.com/?a=1&b=2) snake_case');
+    const rules = {
+      escaped: !/<script|<i>|<b>/.test(html) && html.includes('&lt;script&gt;alert(1)&lt;/script&gt;') && html.includes('<code>&lt;i&gt;</code>'),
+      bold: html.includes('<strong>b</strong>'),
+      fence: html.includes('<pre class="md-code"><code>&lt;b&gt;**raw**&lt;/b&gt;</code></pre>'),
+      lists: html.includes('<ul><li>a<ul><li>nested</li></ul></li></ul><ol><li>one</li></ol>'),
+      quote: html.includes('<blockquote><p>q</p></blockquote>'),
+      link: html.includes('x <span class="md-url">(https://e.com/?a=1&amp;b=2)</span>') && !html.includes('href'),
+      snake: html.includes('snake_case'),
+    };
+    check('inbox markdown (escapes HTML, fences verbatim, nested lists, links as text)', Object.values(rules).every(Boolean), JSON.stringify(rules));
+  }
+
   // 23. away mode (presence.cjs): pure transitions + marker path + pty env. Never
   //     start()/set() here — that would touch the shared presence state
   {

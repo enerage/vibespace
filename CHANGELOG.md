@@ -2,6 +2,23 @@
 
 Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 
+## [0.7.4] — 2026-10-20
+
+### Added
+- **📥 Inbox: what your agents said, without the noise** (Ctrl/Cmd+Shift+M).
+  One list across every workspace with each agent's final reply in full,
+  failed turns, and questions or permission prompts that wait for you
+  (pinned under "Needs you").
+  - Unread marks and a count on the button. A reply counts as read when you
+    open it, or when you next type into that agent's tab.
+  - Each reply shows what you asked. Turns an agent started by itself
+    (a background task finished) or that another session started are
+    tagged, so you can tell them apart.
+  - Filters: All, Unread, This workspace. **Open tab** jumps to the agent.
+  - Kept for 30 days, also after a window closes.
+  - Why: with many agents the final reply got buried under tool lines,
+    background notices and turns other sessions started.
+
 ## [0.7.3] — 2026-10-19
 
 ### Added

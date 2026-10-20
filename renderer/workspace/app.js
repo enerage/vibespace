@@ -13,6 +13,7 @@ import * as netchip from './ui/netchip.js';
 import { pickLogo } from './ui/logopick.js';
 import * as appupdate from './ui/appupdate.js';
 import * as gitupdate from './ui/gitupdate.js';
+import * as inbox from './ui/inbox.js';
 
 const wsId = new URLSearchParams(location.search).get('id');
 let ws = null;
@@ -468,6 +469,7 @@ async function main() {
     persist,
     quiet: Boolean(shot),
   });
+  inbox.init({ wsId }); // 📥 replies, failures and questions of every workspace (Ctrl+Shift+M)
   wirePresence();
   if (shot) viewer.open(ws.repoPath + (isMac() ? '/README.md' : '\\README.md'), 'README.md'); // docs mode: show code in the preview
 

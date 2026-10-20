@@ -38,6 +38,7 @@ const treewatch = require('./treewatch.cjs');
 const updater = require('./updater.cjs');
 const claudefeed = require('./claudefeed.cjs');
 const board = require('./board.cjs');
+const inbox = require('./inbox.cjs');
 const attention = require('./attention.cjs');
 const bgagents = require('./bgagents.cjs');
 const presence = require('./presence.cjs');
@@ -698,6 +699,7 @@ function createWorkspaceWindow(ws, { shot = false } = {}) {
   // (state.gitFetch, default on) is read at each round
   if (!shot) gitfetch.start(ws.id, ws.repoPath, { enabled: () => (rendererState.get(ws.id) || loadState(ws.id)).gitFetch !== false });
   board.start(ws.id, () => boardSummary(ws.id)); // other windows' boards read this
+  inbox.openWorkspace(ws.id); // closes dialogs a crash left "open"
   baselineClaudeFor(ws.id); // update-button baseline: the version these agents run
 
   // focusing the window answers the attention signal — clear the taskbar badge
@@ -722,6 +724,7 @@ function createWorkspaceWindow(ws, { shot = false } = {}) {
     treewatch.stop(ws.id);
     gitfetch.stop(ws.id);
     board.stop(ws.id); // deletes <dataRoot>/board/<wsId>.json
+    inbox.closeWorkspace(ws.id); // its open questions are gone with its agents; the file stays
     claudeBaselines.delete(ws.id);
     if (!workspaceWindowsFor(ws.id).length) {
       persistState(ws.id);
@@ -1249,6 +1252,15 @@ function initIpc() {
     launchWorkspaceProcess(wsId);
     return { ok: true };
   });
+  // inbox (main/inbox.cjs): final replies / failures / questions of EVERY
+  // workspace, read from the per-workspace files; read marks are machine-wide.
+  // Other processes' changes reach a window by its own polling (ui/inbox.js).
+  ipcMain.handle('inbox:list', () => inbox.list());
+  ipcMain.handle('inbox:count', () => ({ unread: inbox.unreadCount() }));
+  ipcMain.handle('inbox:get', (e, id) => inbox.get(String(id || '')));
+  ipcMain.handle('inbox:markRead', (e, ids) => inbox.markRead(ids));
+  ipcMain.handle('inbox:markUnread', (e, id) => inbox.markUnread(String(id || '')));
+  ipcMain.handle('inbox:markAllRead', () => inbox.markAllRead());
   ipcMain.handle('sessions:check', (e, wsId, sessionId, cwd) => sessions.sessionExists(wsId, sessionId, typeof cwd === 'string' ? cwd : null));
   // parking an agent with no feed: its last reply from the transcript tail
   ipcMain.handle('sessions:lastReply', (e, wsId, sessionId, cwd) => sessions.lastReply(wsId, String(sessionId || ''), typeof cwd === 'string' ? cwd : null));
@@ -1440,6 +1452,13 @@ function initIpc() {
   claudefeed.onHook((wsId, termId, event, body) => {
     noteTurnForAccount(termId, event, body);
     noteTurnForNet(termId, event, body);
+    // inbox: final replies / failures / questions (never in the way of the status word below)
+    try {
+      inbox.noteHook(wsId, termId, event, body, () => {
+        const ws = workspaces.get(wsId);
+        return { wsName: ws && ws.name, tabName: termName(wsId, termId) };
+      });
+    } catch (e) { logger.warn('inbox hook failed: ' + e.message); }
     if (event === 'PostModelSwitch') modelguard.noteSwitch(termId, body);
     if (event === 'PreCompact' || event === 'PostCompact') {
       const ctx = claudefeed.stateOf ? claudefeed.stateOf(termId) : null;
@@ -1497,6 +1516,13 @@ function initIpc() {
     board.touch(wsId);
   });
   netwatch.onChange(onNetChange);
+  // this process's inbox or the read marks changed → its workspace windows
+  inbox.onChange(() => {
+    for (const [id] of winInfo) {
+      const win = BrowserWindow.fromId(id);
+      if (win && !win.isDestroyed()) win.webContents.send('inbox:changed');
+    }
+  });
   // accounts.json changed (here or in another workspace process) → every window
   accounts.onChange((st) => {
     for (const win of BrowserWindow.getAllWindows()) {
@@ -2094,6 +2120,7 @@ app.on('window-all-closed', () => {
 function finalStateSave() {
   for (const w of BrowserWindow.getAllWindows()) { try { saveWindowState(w); } catch {} }
   for (const wsId of new Set([...winInfo.values()].map(v => v.wsId))) persistState(wsId);
+  inbox.flushAll();
   stateFrozen = true;
 }
 
@@ -2112,6 +2139,7 @@ app.on('before-quit', () => {
   for (const wsId of new Set([...winInfo.values()].map(v => v.wsId))) persistState(wsId);
   stateFrozen = true; // killAll below makes every pty "exit" — never save that churn
   board.stopAll();
+  inbox.flushAll();
   presence.stop();
   accounts.unwatch();
   ptyhost.killAll();
