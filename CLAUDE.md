@@ -299,6 +299,27 @@ Key facts encoded in `main/sessions.cjs`:
   decides). A network one sets `feed.net` with `kind: 'subagent'`; a
   `<task-notification>` wake keeps it; when the API is back the renderer sends
   ONE nudge to the idle main agent, or skips if it is working / in a dialog.
+- **Inbox** (0.7.4, `main/inbox.cjs` + `ui/inbox.js` + `ui/minimd.js`, 📥 or
+  Ctrl/Cmd+Shift+M): the final reply of every turn (Stop
+  `last_assistant_message`, full text), failed turns, and open questions /
+  permission prompts, from ALL workspaces. Why: with 10-20 agents the final
+  reply drowns under tool lines, background wake-ups and peer-started turns
+  (Valentin, 2026-10-20).
+  - Each process writes `<dataRoot>/inbox/<wsId>.json` for its own
+    workspaces (≤1 write/s, 300 entries / 30 days). These files PERSIST after
+    the window closes, unlike board files. Read marks are machine-wide in
+    `<dataRoot>/inbox-read.json`, re-read and merged before every write.
+  - Subagent events (`agent_id`) never make entries. The turn's prompt decides
+    `origin`: `<task-notification>` = background, `<cross-session-message` =
+    peer (with `from-name`), else you. A prompt YOU typed into a tab marks that
+    tab's earlier entries read and closes its open dialogs. Open entries also
+    close on the next tool call, the end of the turn, a window close and a
+    restart (a denied permission fires no PostToolUse).
+  - `inbox:list` sends 300-char previews; `inbox:get` gives one full text.
+    Other processes' entries arrive by polling (5 s open, 10 s badge).
+  - minimd escapes ALL text before adding its own tags, and links show as text
+    + URL with no href. Keep it that way: replies are untrusted text going
+    into innerHTML.
 - **Agent board** (0.6.19, `renderer/workspace/ui/board.js`, ▦ or Ctrl+Shift+B):
   - It is an overlay inside `#term-hosts`, so xterms are never disposed or refit
     when it opens or closes.
