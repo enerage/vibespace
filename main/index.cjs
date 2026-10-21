@@ -1252,15 +1252,19 @@ function initIpc() {
     launchWorkspaceProcess(wsId);
     return { ok: true };
   });
-  // inbox (main/inbox.cjs): final replies / failures / questions of EVERY
-  // workspace, read from the per-workspace files; read marks are machine-wide.
-  // Other processes' changes reach a window by its own polling (ui/inbox.js).
-  ipcMain.handle('inbox:list', () => inbox.list());
-  ipcMain.handle('inbox:count', () => ({ unread: inbox.unreadCount() }));
-  ipcMain.handle('inbox:get', (e, id) => inbox.get(String(id || '')));
+  // inbox (main/inbox.cjs): final replies / failures / questions of the
+  // SENDER's workspace only (never a workspace id from the renderer); read
+  // marks are machine-wide.
+  const inboxWs = (e) => {
+    const win = BrowserWindow.fromWebContents(e.sender);
+    return (win && winInfo.get(win.id)?.wsId) || null;
+  };
+  ipcMain.handle('inbox:list', (e) => inbox.list(inboxWs(e)));
+  ipcMain.handle('inbox:count', (e) => ({ unread: inbox.unreadCount(inboxWs(e)) }));
+  ipcMain.handle('inbox:get', (e, id) => inbox.get(inboxWs(e), String(id || '')));
   ipcMain.handle('inbox:markRead', (e, ids) => inbox.markRead(ids));
   ipcMain.handle('inbox:markUnread', (e, id) => inbox.markUnread(String(id || '')));
-  ipcMain.handle('inbox:markAllRead', () => inbox.markAllRead());
+  ipcMain.handle('inbox:markAllRead', (e) => inbox.markAllRead(inboxWs(e)));
   ipcMain.handle('sessions:check', (e, wsId, sessionId, cwd) => sessions.sessionExists(wsId, sessionId, typeof cwd === 'string' ? cwd : null));
   // parking an agent with no feed: its last reply from the transcript tail
   ipcMain.handle('sessions:lastReply', (e, wsId, sessionId, cwd) => sessions.lastReply(wsId, String(sessionId || ''), typeof cwd === 'string' ? cwd : null));

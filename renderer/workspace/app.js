@@ -469,7 +469,7 @@ async function main() {
     persist,
     quiet: Boolean(shot),
   });
-  inbox.init({ wsId }); // 📥 replies, failures and questions of every workspace (Ctrl+Shift+M)
+  inbox.init(); // 📥 replies, failures and questions of this workspace's agents (Ctrl+Shift+M)
   wirePresence();
   if (shot) viewer.open(ws.repoPath + (isMac() ? '/README.md' : '\\README.md'), 'README.md'); // docs mode: show code in the preview
 

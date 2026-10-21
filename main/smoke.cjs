@@ -1996,23 +1996,25 @@ async function runSmoke(hooks = {}) {
       Boolean(merged['smoke-y1'] && merged['smoke-x2']) && !merged['smoke-x1'] && !merged['smoke-stale'] && pure.b === 31 * DAY && !('a' in pure) && !('gone' in pure),
       JSON.stringify(Object.keys(merged)));
 
-    // store → list across workspaces (own store + another process's file)
+    // store → list of ONE workspace (another workspace's file never shows)
     inbox.noteHook('smoke-inbox', 'tA', 'UserPromptSubmit', { prompt: 'hello' }, { wsName: 'Smoke', tabName: 'agent-1' });
     inbox.noteHook('smoke-inbox', 'tA', 'Stop', { last_assistant_message: 'y'.repeat(500) }, { wsName: 'Smoke', tabName: 'agent-1' });
     U.ensureDir(path.dirname(inbox._file('smoke-inbox-b')));
     U.writeJsonAtomic(inbox._file('smoke-inbox-b'), { wsId: 'smoke-inbox-b', wsName: 'B', entries: [{ id: 'smoke-b1', wsId: 'smoke-inbox-b', termId: 'tb', at: Date.now() - 5, kind: 'reply', text: 'from B', open: false }] });
-    const l1 = inbox.list();
+    const l1 = inbox.list('smoke-inbox');
     const mine = l1.entries.find(e => e.wsId === 'smoke-inbox');
-    inbox.markRead(['smoke-b1']);
-    const l2 = inbox.list();
-    const full = mine ? inbox.get(mine.id) : null;
+    const c1 = inbox.unreadCount('smoke-inbox');
+    inbox.markRead(mine ? [mine.id] : []);
+    const l2 = inbox.list('smoke-inbox');
+    const full = mine ? inbox.get('smoke-inbox', mine.id) : null;
+    const noCross = inbox.get('smoke-inbox', 'smoke-b1') === null && inbox.list(null).entries.length === 0;
     inbox.closeWorkspace('smoke-inbox');
     const onDisk = U.readJson(inbox._file('smoke-inbox'), null);
     for (const f of [inbox._file('smoke-inbox'), inbox._file('smoke-inbox-b')]) { try { fs.rmSync(f, { force: true }); fs.rmSync(f + '.bak', { force: true }); } catch {} }
-    check('inbox store → list (all workspaces, previews + get, read flags, kept on close)',
-      Boolean(mine) && mine.long === true && mine.text === undefined && mine.preview.length <= 300 && l1.entries.some(e => e.id === 'smoke-b1' && !e.read)
-        && l2.unread === l1.unread - 1 && Boolean(full) && full.text.length === 500 && Boolean(onDisk) && onDisk.entries.length === 1,
-      JSON.stringify({ n: l1.entries.length, unread: [l1.unread, l2.unread], onDisk: Boolean(onDisk) }));
+    check('inbox store → list (this workspace only, previews + get, read flags, kept on close)',
+      Boolean(mine) && mine.long === true && mine.text === undefined && mine.preview.length <= 300 && l1.entries.length === 1 && !l1.entries.some(e => e.id === 'smoke-b1')
+        && c1 === 1 && l1.unread === 1 && l2.unread === 0 && noCross && Boolean(full) && full.text.length === 500 && Boolean(onDisk) && onDisk.entries.length === 1,
+      JSON.stringify({ n: l1.entries.length, unread: [c1, l1.unread, l2.unread], noCross, onDisk: Boolean(onDisk) }));
   }
 
   // 23c. inbox reader markdown (renderer/workspace/ui/minimd.js): escapes

@@ -1,5 +1,5 @@
 'use strict';
-// Inbox: the text that matters from every agent, across ALL workspaces — final
+// Inbox: the text that matters from every agent of a workspace — final
 // replies, failed turns, open questions and permission prompts. A final reply
 // otherwise gets buried in the terminal under tool lines, background wake-ups
 // and turns another session started. Fed from the claude data feed's hooks
@@ -312,32 +312,12 @@ function flushAll() {
   for (const [wsId, st] of stores) if (st.timer) writeNow(wsId);
 }
 
-// ---------- reader (every workspace's file) ----------
-const fileCache = new Map(); // file name -> { key, entries }
-
-function allEntries() {
-  const out = [];
-  let names = [];
-  try { names = fs.readdirSync(dir()); } catch {}
-  const own = new Set([...stores.keys()].map(id => `${id}.json`));
-  for (const n of names) {
-    if (!n.endsWith('.json') || own.has(n)) continue;
-    const file = path.join(dir(), n);
-    const key = statKey(file);
-    let c = fileCache.get(n);
-    if (!c || c.key !== key) {
-      // never U.readJson here: it renames a file it can't parse, and this one
-      // belongs to another process
-      let j = null;
-      try { j = JSON.parse(fs.readFileSync(file, 'utf8')); } catch {}
-      c = { key, entries: j && Array.isArray(j.entries) ? j.entries.filter(e => e && typeof e.id === 'string' && typeof e.at === 'number') : [] };
-      fileCache.set(n, c);
-    }
-    out.push(...c.entries);
-  }
-  for (const st of stores.values()) out.push(...st.state.entries); // fresher than our own files
-  return out;
-}
+// ---------- reader (one workspace: the asking window's own) ----------
+// Each window shows only its own workspace (Valentin, 2026-10-21: every
+// window showing the same all-workspace list and badge was noise; the
+// taskbar badges already say which window needs you). That workspace's
+// window lives in this process, so its store is always loaded here.
+const entriesOf = (wsId) => (wsId ? storeOf(wsId).state.entries : []);
 
 const listItem = (e, read) => {
   const text = str(e.text);
@@ -346,30 +326,30 @@ const listItem = (e, read) => {
 
 // newest first, capped; open questions/permissions are always included.
 // Texts are previews: inbox:get returns one entry in full.
-function list(now = Date.now()) {
+function list(wsId, now = Date.now()) {
   const marks = readMarks();
-  const all = allEntries().filter(e => now - e.at <= MAX_AGE).sort((a, b) => b.at - a.at);
+  const all = entriesOf(wsId).filter(e => now - e.at <= MAX_AGE).sort((a, b) => b.at - a.at);
   const unread = all.filter(e => !marks[e.id]).length;
   const top = all.slice(0, LIST_MAX);
   for (const e of all.slice(LIST_MAX)) if (e.open) top.push(e);
   return { entries: top.map(e => listItem(e, Boolean(marks[e.id]))), unread };
 }
 
-function unreadCount(now = Date.now()) {
+function unreadCount(wsId, now = Date.now()) {
   const marks = readMarks();
-  return allEntries().filter(e => now - e.at <= MAX_AGE && !marks[e.id]).length;
+  return entriesOf(wsId).filter(e => now - e.at <= MAX_AGE && !marks[e.id]).length;
 }
 
-function get(id) {
-  const e = allEntries().find(x => x.id === id);
+function get(wsId, id) {
+  const e = entriesOf(wsId).find(x => x.id === id);
   return e ? { ...e, read: Boolean(readMarks()[e.id]) } : null;
 }
 
 const markRead = (ids) => commitRead((Array.isArray(ids) ? ids : []).filter(x => typeof x === 'string').slice(0, 5000));
 const markUnread = (id) => commitRead([], typeof id === 'string' ? [id] : []);
-function markAllRead() {
+function markAllRead(wsId) {
   const marks = readMarks();
-  return commitRead(allEntries().map(e => e.id).filter(id => !marks[id]));
+  return commitRead(entriesOf(wsId).map(e => e.id).filter(id => !marks[id]));
 }
 
 module.exports = {

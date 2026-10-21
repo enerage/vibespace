@@ -3,21 +3,20 @@ import { ago } from './history.js';
 import * as terms from './terms.js';
 import { renderMarkdown } from './minimd.js';
 
-// Inbox (📥 / Ctrl+Shift+M): only the text that matters, from EVERY workspace —
-// final replies, failed turns, open questions and permission prompts
+// Inbox (📥 / Ctrl+Shift+M): only the text that matters, from THIS workspace's
+// agents — final replies, failed turns, open questions and permission prompts
 // (main/inbox.cjs, fed by the claude data feed). An overlay INSIDE #term-hosts
 // like the agent board: the terminals keep running and keep their size below.
 // List on the left (open questions pinned under "Needs you"), reader on the right.
-// Other workspaces' processes write their own files, so this window polls:
-// the list every 5 s while open, the unread count every 10 s otherwise.
+// Main pushes inbox:changed; the poll (5 s open, 10 s badge) is the safety net
+// and keeps the "2m ago" times fresh.
 
-let wsId = null;
 let root = null;
 let open = false;
 let listEl = null;
 let readerEl = null;
 let filtersEl = null;
-let filter = 'all'; // all | unread | here
+let filter = 'all'; // all | unread
 let entries = [];
 let unread = 0;
 let selId = null;
@@ -54,14 +53,14 @@ export function originTag(e) {
 
 // open questions/permissions first, then everything else newest first. The
 // selected entry stays listed under Unread after it was read.
-export function arrange(list, { filter: f = 'all', wsId: here = null, selId: sel = null } = {}) {
-  const shown = list.filter(e => (f !== 'unread' || !e.read || e.id === sel) && (f !== 'here' || e.wsId === here));
+export function arrange(list, { filter: f = 'all', selId: sel = null } = {}) {
+  const shown = list.filter(e => f !== 'unread' || !e.read || e.id === sel);
   const byTime = (a, b) => b.at - a.at;
   return { needs: shown.filter(e => e.open).sort(byTime), rest: shown.filter(e => !e.open).sort(byTime) };
 }
 
-const ordered = () => { const a = arrange(entries, { filter, wsId, selId }); return [...a.needs, ...a.rest]; };
-const where = (e) => `${e.wsName || e.wsId} · ${e.tabName || e.termId}`;
+const ordered = () => { const a = arrange(entries, { filter, selId }); return [...a.needs, ...a.rest]; };
+const where = (e) => e.tabName || e.termId;
 
 // ---------- badge ----------
 function setBadge(n) {
@@ -70,7 +69,7 @@ function setBadge(n) {
   if (!b) return;
   b.textContent = unread > 99 ? '99+' : String(unread);
   b.classList.toggle('hidden', unread === 0);
-  $('#btn-inbox').title = osText(`Inbox — final replies, failures and open questions of every workspace${unread ? ` · ${unread} unread` : ''} (Ctrl+Shift+M)`);
+  $('#btn-inbox').title = osText(`Inbox — final replies, failures and open questions of this workspace's agents${unread ? ` · ${unread} unread` : ''} (Ctrl+Shift+M)`);
 }
 
 // ---------- list ----------
@@ -97,7 +96,7 @@ function row(e) {
 
 function renderList() {
   listAt = Date.now();
-  const { needs, rest } = arrange(entries, { filter, wsId, selId });
+  const { needs, rest } = arrange(entries, { filter, selId });
   listKey = keyOf();
   const top = listEl.scrollTop;
   listEl.innerHTML = '';
@@ -108,7 +107,7 @@ function renderList() {
   }
   for (const e of rest) listEl.append(row(e));
   if (!needs.length && !rest.length) {
-    listEl.append(el('div', 'ib-empty', filter === 'unread' ? 'Nothing unread.' : filter === 'here' ? 'Nothing from this workspace yet.' : 'No replies yet. Agents’ final replies land here.'));
+    listEl.append(el('div', 'ib-empty', filter === 'unread' ? 'Nothing unread.' : 'No replies yet. This workspace’s agents’ final replies land here.'));
   }
   listEl.scrollTop = top;
   for (const b of filtersEl.querySelectorAll('button')) b.classList.toggle('active', b.dataset.f === filter);
@@ -134,7 +133,7 @@ async function renderReader() {
   const tag = originTag(e);
   if (tag) head.append(el('span', 'ib-tag', tag));
   // actions in the header: a long reply would push them out of sight
-  const go = el('button', 'btn small primary', e.wsId === wsId ? 'Open tab' : `Open ${e.wsName || 'workspace'}`);
+  const go = el('button', 'btn small primary', 'Open tab');
   go.title = 'Enter';
   go.onclick = () => openEntry(e);
   const un = el('button', 'btn small ghost', 'Mark unread');
@@ -201,18 +200,9 @@ async function markAll() {
 }
 
 function openEntry(e) {
-  if (e.wsId === wsId) {
-    if (!terms.agents().some(a => a.id === e.termId)) { toast(`${e.tabName || 'That tab'} is closed`, ''); return; }
-    close();
-    terms.activate(e.termId);
-    return;
-  }
-  // another workspace: focus (or start) its window, the board's path
-  vs.boardFocus(e.wsId).then((r) => {
-    if (r && r.ok) toast(`Switching to ${e.wsName || e.wsId}…`, 'ok');
-    else toast('That workspace no longer exists', 'err');
-  }).catch(() => {});
+  if (!terms.agents().some(a => a.id === e.termId)) { toast(`${e.tabName || 'That tab'} is closed`, ''); return; }
   close();
+  terms.activate(e.termId);
 }
 
 function step(d) {
@@ -285,14 +275,13 @@ function close() {
   if (id) terms.activate(id); // focus back to the terminal
 }
 
-export function init(opts) {
-  wsId = opts.wsId;
+export function init() {
   root = $('#inbox');
   root.tabIndex = -1;
   const head = el('div', 'board-head');
   head.append(el('span', 'board-title', 'Inbox'));
   filtersEl = el('span', 'ib-filters');
-  for (const [f, label] of [['all', 'All'], ['unread', 'Unread'], ['here', 'This workspace']]) {
+  for (const [f, label] of [['all', 'All'], ['unread', 'Unread']]) {
     const b = el('button', 'btn small ghost', label);
     b.dataset.f = f;
     b.onclick = () => { filter = f; renderList(); root.focus(); };

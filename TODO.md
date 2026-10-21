@@ -88,9 +88,8 @@ must check these before merging (details in the branch summary / CLAUDE.md):
 
 ## Claude-data UI (RESEARCH-CLAUDE-DATA.md; decided 2026-09-29)
 
-- [x] Inbox of agents' final replies across workspaces (0.7.4, decided 2026-10-20).
+- [x] Inbox of agents' final replies (0.7.4, decided 2026-10-20; per workspace window since 2026-10-21).
 - [ ] Check Claude's focus view (`viewMode: "focus"`, on since 2026-10-20) inside VibeSpace tabs.
-- [ ] Inbox: "Open tab" on another workspace's entry only brings that window forward; make it select the tab too (pass the termId through board:focus).
 Build in this order. Verify the statusLine and HTTP hooks live in a pty before relying on them.
 - [x] **Data feed:** statusLine and HTTP hooks in claude-hook-settings.json, a local
       server in main, and events pushed to the renderer per term. Hand off to the

@@ -302,9 +302,12 @@ Key facts encoded in `main/sessions.cjs`:
 - **Inbox** (0.7.4, `main/inbox.cjs` + `ui/inbox.js` + `ui/minimd.js`, 📥 or
   Ctrl/Cmd+Shift+M): the final reply of every turn (Stop
   `last_assistant_message`, full text), failed turns, and open questions /
-  permission prompts, from ALL workspaces. Why: with 10-20 agents the final
-  reply drowns under tool lines, background wake-ups and peer-started turns
-  (Valentin, 2026-10-20).
+  permission prompts, of the window's OWN workspace only. Why: with 10-20
+  agents the final reply drowns under tool lines, background wake-ups and
+  peer-started turns (Valentin, 2026-10-20). It first listed every workspace
+  in every window; same list + same count everywhere was noise, so since
+  2026-10-21 main answers `inbox:*` for the sender's workspace only (from
+  its in-process store, never a ws id from the renderer).
   - Each process writes `<dataRoot>/inbox/<wsId>.json` for its own
     workspaces (≤1 write/s, 300 entries / 30 days). These files PERSIST after
     the window closes, unlike board files. Read marks are machine-wide in
@@ -316,7 +319,8 @@ Key facts encoded in `main/sessions.cjs`:
     close on the next tool call, the end of the turn, a window close and a
     restart (a denied permission fires no PostToolUse).
   - `inbox:list` sends 300-char previews; `inbox:get` gives one full text.
-    Other processes' entries arrive by polling (5 s open, 10 s badge).
+    `inbox:changed` pushes updates; the poll (5 s open, 10 s badge) is a
+    safety net and refreshes the "ago" times.
   - minimd escapes ALL text before adding its own tags, and links show as text
     + URL with no href. Keep it that way: replies are untrusted text going
     into innerHTML.
