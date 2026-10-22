@@ -71,12 +71,15 @@ function ptyBufferTest() {
       const listed = ptyhost.list().some(p => p.termId === termId);
       const busyNow = ptyhost.busyNow(); // echo just arrived — must read as busy
       const busyFuture = ptyhost.busyNow({ now: Date.now() + 6000 }); // far future — idle
+      // the echo answers our own write: it is output, but not the tab's own work
+      // (the restart confirm's "busy" for status-less tabs, ownOutputAge)
+      const reacted = ptyhost.ownOutputAge(termId) > ptyhost.outputAge(termId) || Date.now() - wroteAt > 1500;
       ptyhost.kill(termId);
       const goneAfterKill = !ptyhost.list().some(p => p.termId === termId);
       const busyAfterKill = ptyhost.busyNow(); // activity map cleaned with the pty
       done(hasMarker && listed && goneAfterKill,
         `buffer ${hasMarker ? 'captured marker' : 'MISSING marker'}; listed=${listed}; gone-after-kill=${goneAfterKill}`,
-        { busyNow, busyFuture, busyAfterKill });
+        { busyNow, busyFuture, busyAfterKill, reacted });
     });
     try {
       ptyhost.create(termId, U.BIN_ROOT, 120, 30);
@@ -84,7 +87,8 @@ function ptyBufferTest() {
       done(false, 'spawn threw: ' + (e && e.message ? e.message : e));
       return;
     }
-    setTimeout(() => ptyhost.write(termId, `echo ${marker}\r`), 700);
+    let wroteAt = Infinity;
+    setTimeout(() => { wroteAt = Date.now(); ptyhost.write(termId, `echo ${marker}\r`); }, 700);
   });
 }
 
@@ -3129,6 +3133,7 @@ async function runSmoke(hooks = {}) {
   check('pty ring buffer + list lifecycle', ring.ok, ring.detail);
   check('pty busyNow guard signal (Layer 3)', ring.busyNow === true && ring.busyFuture === false && ring.busyAfterKill === false,
     `now=${ring.busyNow} future=${ring.busyFuture} afterKill=${ring.busyAfterKill}`);
+  check('pty output that answers input is not own work (mouse-move redraws, echoes)', ring.reacted === true, `reacted=${ring.reacted}`);
 
   // 9b. tab close kills hidden grandchildren (orphaned MCP servers) + id reuse
   if (process.platform === 'win32') {

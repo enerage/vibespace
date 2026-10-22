@@ -34,6 +34,13 @@ Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
   per account while it shows "—". The /login always works; a token account
   needs its "Send to cloud" sign-in, since a setup-token may not read usage.
 
+### Fixed
+- **↻ Restart no longer says an idle agent is working.** Moving the mouse
+  over a Claude tab makes Claude redraw, and that redraw counted as "working"
+  for an agent that hadn't started a turn since the last restart ("Candidate
+  BUG is working", 2026-10-22). Output caused by your own mouse or keys no
+  longer counts.
+
 ### Changed
 - **The limit chip's hover explains a "—".** An account with no recent reading
   now says when its weekly limit last reset, that no agent has run on it

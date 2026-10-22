@@ -932,6 +932,9 @@ function initIpc() {
   // (an interrupted turn can leave 'working' behind with no Stop hook). Plain
   // shells: recent OUTPUT only. Input never counts — with claude's mouse tracking
   // on, just moving the mouse toward the button sends input (the false alarm).
+  // Nor does the output that input causes: claude REDRAWS on a mere mouse move,
+  // so a resumed, idle claude tab (no status until its first hook) read as busy
+  // ("Candidate BUG is working", 2026-10-22). Status-less tabs use ownOutputAge.
   ipcMain.handle('pty:busy', (e, wsId) => {
     const terms = rendererState.get(wsId)?.terminals || [];
     const names = [];
@@ -940,7 +943,7 @@ function initIpc() {
       // any tab with a hook-reported status is judged by it (also covers claude
       // typed by hand in a plain terminal tab); status-less tabs by output alone
       const st = termStatus.get(t.termId);
-      const busy = st ? st === 'working' && age < 15000 : age < 5000;
+      const busy = st ? st === 'working' && age < 15000 : ptyhost.ownOutputAge(t.termId) < 5000;
       if (busy) names.push(t.name || t.termId);
     }
     return { busy: names.length > 0, names };

@@ -168,7 +168,7 @@ Key facts encoded in `main/sessions.cjs`:
 
 ## Developing VibeSpace
 
-- `npm run smoke` — 174 self-tests on Windows, 182 on macOS (as of 0.7.4) incl. pty echo and live session discovery. Run it after
+- `npm run smoke` — 175 self-tests on Windows, 183 on macOS (as of 0.7.4) incl. pty echo and live session discovery. Run it after
   touching main-process code, **from a normal shell**: inside a Claude pty the stripped
   PATH and nested ConPTY break the pty test (`powershell.exe` "File not found" /
   AttachConsole) — prepend System32 to PATH and give it its own console, or just use a
@@ -982,7 +982,13 @@ Key facts encoded in `main/sessions.cjs`:
   window's baseline (`main/index.cjs` claudeBaselines), `updater:state` lights
   ↻ with "Restart · Claude <v>", and the app restart starts every agent on the
   new binary. Restart (both entry points, `restartWorkspace` in app.js) skips
-  the confirm when `pty:busy` names nobody.
+  the confirm when `pty:busy` names nobody. **Claude redraws when the mouse
+  merely moves over it** (fullscreen TUI, any-motion tracking `?1003`, ~1 ms
+  after the move; measured 2026-10-22). A resumed idle claude has no status
+  until its first hook, so the old "output in the last 5 s" rule named it
+  busy on the way to the button. Status-less tabs now use
+  `ptyhost.ownOutputAge` (output within 1.5 s of an input is a reaction, not
+  work); 'working' tabs still use any output, so a real turn always counts.
 - **↻ Restart VibeSpace button is conditional too** (0.5.2): main/srcstate.cjs
   fingerprints main/preload/renderer at window OPEN (the code that window runs)
   and re-probes every 30 s; a mismatch shows the button. Baseline must be captured

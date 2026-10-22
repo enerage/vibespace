@@ -13,6 +13,13 @@ const sessions = new Map(); // termId -> IPty
 const lastActivity = new Map(); // termId -> ms of last data in or out (reload guard)
 const lastOutput = new Map(); // termId -> ms of last OUTPUT only (input excluded: with
 // mouse tracking on, merely moving the mouse over claude's terminal sends input)
+const lastInput = new Map(); // termId -> ms of the last write TO the pty
+const lastOwnOutput = new Map(); // termId -> ms of the last output that wasn't a reaction to input
+// Claude (fullscreen TUI, any-motion mouse tracking ?1003) redraws when the
+// mouse merely moves over it, ~1 ms after the move (measured 2026-10-22). An
+// idle tab then "produced output" on the way to the ↻ Restart button and read
+// as busy. Output within REACT_MS of an input is that tab reacting, not working.
+const REACT_MS = 1500;
 const metas = new Map(); // termId -> { cwd, statusFile, wsId } — bookkeeping for list()
 const buffers = new Map(); // termId -> { chunks: [], len } — output ring for re-attach
 const BUFFER_CAP = 256 * 1024; // per-terminal bytes kept so a reload can restore scrollback
@@ -511,6 +518,7 @@ function create(termId, cwd, cols = 120, rows = 30, wsId = null, { settingsPath 
     const t = Date.now();
     lastActivity.set(termId, t);
     lastOutput.set(termId, t);
+    if (t - (lastInput.get(termId) || 0) > REACT_MS) lastOwnOutput.set(termId, t);
     pushBuffer(termId, chunk);
     if (process.platform === 'darwin') notePrompt(termId, chunk);
     feedWaiters(termId, chunk);
@@ -530,6 +538,8 @@ function create(termId, cwd, cols = 120, rows = 30, wsId = null, { settingsPath 
     buffers.delete(termId);
     lastActivity.delete(termId);
     lastOutput.delete(termId);
+    lastInput.delete(termId);
+    lastOwnOutput.delete(termId);
     promptState.delete(termId);
     for (const w of [...(waiters.get(termId) || [])]) w.exit();
     logger.info(`pty exit: ${termId} code=${exitCode}`);
@@ -879,6 +889,7 @@ function write(termId, data) {
   const s = sessions.get(termId);
   if (s) {
     lastActivity.set(termId, Date.now()); // input counts as activity too (reload guard)
+    lastInput.set(termId, Date.now());
     // macOS: Enter submits a command line, so the shell no longer sits at its prompt
     if (process.platform === 'darwin' && String(data).includes('\r')) { const p = promptState.get(termId); if (p) p.at = false; }
     s.write(data);
@@ -932,6 +943,8 @@ function kill(termId, { tree = true } = {}) {
     buffers.delete(termId);
     lastActivity.delete(termId);
     lastOutput.delete(termId);
+    lastInput.delete(termId);
+    lastOwnOutput.delete(termId);
     promptState.delete(termId);
     if (tree) killTreeThenPty(s);
     else { try { s.kill(); } catch {} }
@@ -984,6 +997,13 @@ function busyNow({ idleMs = 5000, now = Date.now() } = {}) {
   return false;
 }
 
+// ms since this terminal last produced output that was NOT a reaction to
+// input (a mouse-move redraw, an echo): Infinity if never / dead
+function ownOutputAge(termId, now = Date.now()) {
+  const ts = lastOwnOutput.get(termId);
+  return ts ? now - ts : Infinity;
+}
+
 // ms since this terminal last produced output (Infinity if never / dead)
 function outputAge(termId, now = Date.now()) {
   const ts = lastOutput.get(termId);
@@ -1018,6 +1038,8 @@ module.exports = {
   list,
   busyNow,
   outputAge,
+
+  ownOutputAge,
   // the file the claude status hooks append to (main writes it too when the
   // feed's HTTP hooks stand in for the Git Bash ones)
   statusFileOf: (termId) => (metas.get(termId) || {}).statusFile || null,
