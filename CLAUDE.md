@@ -168,7 +168,7 @@ Key facts encoded in `main/sessions.cjs`:
 
 ## Developing VibeSpace
 
-- `npm run smoke` — 168 self-tests on Windows, 176 on macOS (as of 0.7.3) incl. pty echo and live session discovery. Run it after
+- `npm run smoke` — 173 self-tests on Windows, 181 on macOS (as of 0.7.4) incl. pty echo and live session discovery. Run it after
   touching main-process code, **from a normal shell**: inside a Claude pty the stripped
   PATH and nested ConPTY break the pty test (`powershell.exe` "File not found" /
   AttachConsole) — prepend System32 to PATH and give it its own console, or just use a
