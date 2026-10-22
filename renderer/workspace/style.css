@@ -1134,6 +1134,8 @@ body.dragging #split-v, body.dragging #split-h { background: color-mix(in srgb, 
 .ib-asked { margin-top: 8px; font-size: 12px; color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ib-asked-label { color: var(--accent-text); }
 .ib-wait { margin-top: 8px; font-size: 12px; color: var(--danger); font-weight: 600; }
+.ib-before-label { margin-top: 12px; font-size: 12px; color: var(--accent-text); }
+.ib-before .ib-text { border-bottom: 1px solid var(--border-soft); padding-bottom: 10px; }
 .ib-actions { display: flex; gap: 6px; margin-top: 12px; padding-top: 8px; border-top: 1px solid var(--border-soft); }
 /* minimd output (ui/minimd.js) */
 .md { font-size: 13px; line-height: 1.55; word-break: break-word; margin-top: 8px; }

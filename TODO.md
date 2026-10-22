@@ -89,7 +89,7 @@ must check these before merging (details in the branch summary / CLAUDE.md):
 ## Claude-data UI (RESEARCH-CLAUDE-DATA.md; decided 2026-09-29)
 
 - [x] Inbox of agents' final replies (0.7.4, decided 2026-10-20; per workspace window since 2026-10-21).
-- [ ] Check Claude's focus view (`viewMode: "focus"`, on since 2026-10-20) inside VibeSpace tabs.
+- [x] Check Claude's focus view inside VibeSpace tabs: works, but it hides text written before a question in the same turn (2026-10-22). Fixed by a global CLAUDE.md rule + the Inbox showing that text.
 Build in this order. Verify the statusLine and HTTP hooks live in a pty before relying on them.
 - [x] **Data feed:** statusLine and HTTP hooks in claude-hook-settings.json, a local
       server in main, and events pushed to the renderer per term. Hand off to the

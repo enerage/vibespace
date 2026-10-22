@@ -70,6 +70,56 @@ function questionText(input) {
   return clip(out.join('\n\n') || 'Asks you a question', TEXT_MAX);
 }
 
+// What the agent wrote right before it asked, from the transcript's .jsonl
+// lines (pure). Focus view shows only a turn's final message and a turn that
+// ends in a question has none, so this text is otherwise invisible (Valentin,
+// 2026-10-22: an explanation he had asked for, then the same question again).
+// From the line holding the tool_use (by id, else the last AskUserQuestion)
+// back to the previous user line / tool result: the step's own text blocks.
+function textBeforeTool(lines, toolUseId = '') {
+  const parsed = [];
+  for (const l of lines) { try { const o = JSON.parse(l); if (o && typeof o === 'object') parsed.push(o); } catch {} }
+  const blocks = (o) => (o.message && Array.isArray(o.message.content) ? o.message.content : []);
+  const isAsk = (b) => b && b.type === 'tool_use' && (toolUseId ? b.id === toolUseId : b.name === 'AskUserQuestion');
+  let at = -1;
+  for (let i = parsed.length - 1; i >= 0; i--) if (parsed[i].type === 'assistant' && !parsed[i].isSidechain && blocks(parsed[i]).some(isAsk)) { at = i; break; }
+  if (at < 0) return null; // not in this part of the file
+  const texts = [];
+  const own = blocks(parsed[at]);
+  for (const b of own.slice(0, own.findIndex(isAsk))) if (b.type === 'text' && str(b.text).trim()) texts.push(str(b.text).trim());
+  for (let i = at - 1; i >= 0 && at - i <= 200; i--) {
+    const o = parsed[i];
+    if (o.isSidechain) continue;
+    const bs = blocks(o);
+    if (o.type === 'user' || bs.some(b => b && b.type === 'tool_result')) break;
+    if (o.type !== 'assistant') continue;
+    const t = bs.filter(b => b && b.type === 'text' && str(b.text).trim()).map(b => str(b.text).trim());
+    texts.unshift(...t);
+  }
+  return clip(texts.join('\n\n'), TEXT_MAX);
+}
+
+// the transcript's tail (a .jsonl can be 40 MB+): 1 MB, then 8 MB
+async function readBefore(file, toolUseId) {
+  if (!file || !file.endsWith('.jsonl')) return '';
+  let fh = null;
+  try {
+    fh = await fs.promises.open(file, 'r');
+    const size = (await fh.stat()).size;
+    for (const n of [1 << 20, 8 << 20]) {
+      const len = Math.min(size, n);
+      const buf = Buffer.alloc(len);
+      await fh.read(buf, 0, len, size - len);
+      const lines = buf.toString('utf8').split('\n');
+      if (len < size) lines.shift(); // a cut line
+      const t = textBeforeTool(lines, toolUseId);
+      if (t !== null) return t;
+      if (len === size) break;
+    }
+  } catch {} finally { if (fh) await fh.close().catch(() => {}); }
+  return '';
+}
+
 // a permission prompt in one short line: the tool + its most telling input
 function permissionText(body) {
   const input = body.tool_input && typeof body.tool_input === 'object' ? body.tool_input : {};
@@ -153,7 +203,9 @@ function reduce(state, ev) {
       return { state: { ...s, entries: add('failed', failureText(body)) }, read: gone, changed: true };
     case 'PreToolUse': {
       if (body.tool_name === 'AskUserQuestion') {
-        return { state: { ...s, entries: add('question', questionText(body.tool_input), { open: true }) }, read: gone, changed: true };
+        // where to find the text written before it (inbox:get reads it once)
+        const extra = { open: true, toolUseId: str(body.tool_use_id) || null, transcript: str(body.transcript_path) || null };
+        return { state: { ...s, entries: add('question', questionText(body.tool_input), extra) }, read: gone, changed: true };
       }
       // a new tool call means the previous dialog is gone (a denied permission
       // fires no PostToolUse)
@@ -321,7 +373,7 @@ const entriesOf = (wsId) => (wsId ? storeOf(wsId).state.entries : []);
 
 const listItem = (e, read) => {
   const text = str(e.text);
-  return { ...e, text: undefined, preview: clip(text, PREVIEW_MAX), long: text.length > PREVIEW_MAX, read };
+  return { ...e, text: undefined, before: undefined, transcript: undefined, preview: clip(text, PREVIEW_MAX), long: text.length > PREVIEW_MAX, read };
 };
 
 // newest first, capped; open questions/permissions are always included.
@@ -340,9 +392,21 @@ function unreadCount(wsId, now = Date.now()) {
   return entriesOf(wsId).filter(e => now - e.at <= MAX_AGE && !marks[e.id]).length;
 }
 
-function get(wsId, id) {
-  const e = entriesOf(wsId).find(x => x.id === id);
-  return e ? { ...e, read: Boolean(readMarks()[e.id]) } : null;
+// one entry in full; a question's "before" text is read from the transcript
+// the first time and then kept in the entry (the .jsonl may be gone later)
+async function get(wsId, id) {
+  let e = entriesOf(wsId).find(x => x.id === id);
+  if (!e) return null;
+  if (e.kind === 'question' && typeof e.before !== 'string' && e.transcript) {
+    const before = await readBefore(e.transcript, e.toolUseId || '');
+    const st = stores.get(wsId);
+    if (st) {
+      st.state = { ...st.state, entries: st.state.entries.map(x => (x.id === id ? { ...x, before } : x)) };
+      touch(wsId);
+    }
+    e = { ...e, before };
+  }
+  return { ...e, transcript: undefined, read: Boolean(readMarks()[e.id]) };
 }
 
 const markRead = (ids) => commitRead((Array.isArray(ids) ? ids : []).filter(x => typeof x === 'string').slice(0, 5000));
@@ -353,7 +417,8 @@ function markAllRead(wsId) {
 }
 
 module.exports = {
-  reduce, newState, mergeRead, originOf, peerName, capEntries, // pure (smoke)
+  reduce, newState, mergeRead, originOf, peerName, capEntries, textBeforeTool, // pure (smoke)
+  readBefore,
   noteHook, openWorkspace, closeWorkspace, flushAll,
   list, unreadCount, get, markRead, markUnread, markAllRead, commitRead,
   onChange: (fn) => { listeners.push(fn); },

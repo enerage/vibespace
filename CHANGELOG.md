@@ -18,6 +18,10 @@ Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
     (a background task finished) or that another session started are
     tagged, so you can tell them apart.
   - Filters: All, Unread. **Open tab** jumps to the agent.
+  - A question also shows what the agent wrote right before asking. With
+    Claude's focus view on, that text never shows in the terminal (a turn
+    that ends in a question has no final message), so an explanation you
+    asked for could vanish behind the next question (2026-10-22).
   - Kept for 30 days, also after a window closes.
   - Why: with many agents the final reply got buried under tool lines,
     background notices and turns other sessions started.

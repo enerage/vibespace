@@ -318,6 +318,14 @@ Key facts encoded in `main/sessions.cjs`:
     tab's earlier entries read and closes its open dialogs. Open entries also
     close on the next tool call, the end of the turn, a window close and a
     restart (a denied permission fires no PostToolUse).
+  - **Focus view (`viewMode: "focus"`) hides text written before a tool
+    call in the same turn**: claude shows only each turn's final message, and
+    a turn that ends in AskUserQuestion has none (claude 2.1.308's own
+    description: "the user sees only its final message per turn"). So a
+    question entry keeps `toolUseId` + `transcript`, and the first
+    `inbox:get` reads that step's text blocks from the .jsonl tail
+    (`textBeforeTool`: back to the previous user line / tool_result,
+    sidechains skipped; 1 MB then 8 MB) and stores it as `before`.
   - `inbox:list` sends 300-char previews; `inbox:get` gives one full text.
     `inbox:changed` pushes updates; the poll (5 s open, 10 s badge) is a
     safety net and refreshes the "ago" times.

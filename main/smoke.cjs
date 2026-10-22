@@ -943,7 +943,7 @@ async function runSmoke(hooks = {}) {
           const p1 = await gp.fastForward(a);
           check('gitpull fast-forward keeps unrelated local work', p1.ok && p1.count === 1 && fs.existsSync(path.join(a, 'two.txt'))
             && fs.readFileSync(path.join(a, 'one.txt'), 'utf8') === '1 local' && fs.existsSync(path.join(a, 'mine.txt'))
-            && (await gh.branch(a)).behind === 0, JSON.stringify(p1));
+            && (await gh.branch(a))?.behind === 0, JSON.stringify(p1));
           // the click's fetch clears a failing schedule ("Can't check" must not outlive a sign-in fix)
           const sched = gf.start('smoke-pull', a, { firstMs: 3600000 });
           sched.failures = 3; sched.error = 'could not read Username';
@@ -2006,8 +2006,8 @@ async function runSmoke(hooks = {}) {
     const c1 = inbox.unreadCount('smoke-inbox');
     inbox.markRead(mine ? [mine.id] : []);
     const l2 = inbox.list('smoke-inbox');
-    const full = mine ? inbox.get('smoke-inbox', mine.id) : null;
-    const noCross = inbox.get('smoke-inbox', 'smoke-b1') === null && inbox.list(null).entries.length === 0;
+    const full = mine ? await inbox.get('smoke-inbox', mine.id) : null;
+    const noCross = (await inbox.get('smoke-inbox', 'smoke-b1')) === null && inbox.list(null).entries.length === 0;
     inbox.closeWorkspace('smoke-inbox');
     const onDisk = U.readJson(inbox._file('smoke-inbox'), null);
     for (const f of [inbox._file('smoke-inbox'), inbox._file('smoke-inbox-b')]) { try { fs.rmSync(f, { force: true }); fs.rmSync(f + '.bak', { force: true }); } catch {} }
@@ -2015,6 +2015,33 @@ async function runSmoke(hooks = {}) {
       Boolean(mine) && mine.long === true && mine.text === undefined && mine.preview.length <= 300 && l1.entries.length === 1 && !l1.entries.some(e => e.id === 'smoke-b1')
         && c1 === 1 && l1.unread === 1 && l2.unread === 0 && noCross && Boolean(full) && full.text.length === 500 && Boolean(onDisk) && onDisk.entries.length === 1,
       JSON.stringify({ n: l1.entries.length, unread: [c1, l1.unread, l2.unread], noCross, onDisk: Boolean(onDisk) }));
+
+    // the text an agent wrote right before its question (hidden by focus view):
+    // that step's text blocks only, not earlier steps', not subagents'
+    const J = (o) => JSON.stringify(o);
+    const tl = [
+      J({ type: 'assistant', message: { content: [{ type: 'text', text: 'Checking the logs.' }] } }),
+      J({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 't0', content: 'ok' }] } }),
+      J({ type: 'attachment', attachment: {} }),
+      J({ type: 'assistant', message: { content: [{ type: 'thinking', thinking: 'hm' }] } }),
+      J({ type: 'assistant', isSidechain: true, message: { content: [{ type: 'text', text: 'subagent words' }] } }),
+      J({ type: 'assistant', message: { content: [{ type: 'text', text: "Here's the plain version." }] } }),
+      J({ type: 'assistant', message: { content: [{ type: 'text', text: 'Same line.' }, { type: 'tool_use', id: 'tq', name: 'AskUserQuestion', input: {} }] } }),
+      '{broken',
+    ];
+    const tb = inbox.textBeforeTool(tl, 'tq');
+    const tbNoId = inbox.textBeforeTool(tl, '');
+    const tbMissing = inbox.textBeforeTool(tl, 'other');
+    const tfile = path.join(require('node:os').tmpdir(), `vs-smoke-before-${process.pid}.jsonl`);
+    fs.writeFileSync(tfile, tl.join('\n') + '\n');
+    const tbFile = await inbox.readBefore(tfile, 'tq');
+    const tbNone = await inbox.readBefore(tfile + '.missing.jsonl', 'tq');
+    try { fs.rmSync(tfile, { force: true }); } catch {}
+    const qe = inbox.reduce(null, { wsId: 'w', termId: 't', event: 'PreToolUse', now: 1, body: { tool_name: 'AskUserQuestion', tool_input: { questions: [] }, tool_use_id: 'tq', transcript_path: tfile } }).state.entries[0];
+    check('inbox: a question keeps the text written right before it (focus view hides it)',
+      tb === "Here's the plain version.\n\nSame line." && tbNoId === tb && tbMissing === null && tbFile === tb && tbNone === ''
+        && qe.toolUseId === 'tq' && qe.transcript === tfile,
+      J({ tb, tbNoId, tbMissing, tbFile, tbNone }));
   }
 
   // 23c. inbox reader markdown (renderer/workspace/ui/minimd.js): escapes

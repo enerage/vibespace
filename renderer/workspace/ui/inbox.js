@@ -27,6 +27,7 @@ let pollTimer = null;
 let pulling = false;
 let again = false;
 const full = new Map(); // id -> full text (list items carry previews)
+const before = new Map(); // question id -> text the agent wrote before asking ('' = none)
 
 const KIND = {
   reply: ['✓', 'Reply'],
@@ -147,16 +148,32 @@ async function renderReader() {
     readerEl.append(asked);
   }
   if (e.open) readerEl.append(el('div', 'ib-wait', e.kind === 'permission' ? 'Waiting for your approval in the terminal' : 'Waiting for your answer in the terminal'));
+  // a question: what the agent wrote just before asking. Focus view hides it
+  // in the terminal (a turn that ends in a question has no final message).
+  const beforeEl = el('div', 'ib-before');
+  const paintBefore = (t) => {
+    beforeEl.innerHTML = '';
+    if (!t) return;
+    const body = el('div', 'ib-text md');
+    body.innerHTML = renderMarkdown(t);
+    beforeEl.append(el('div', 'ib-before-label', 'It wrote before asking:'), body, el('div', 'ib-before-label', 'The question:'));
+  };
+  paintBefore(before.get(e.id));
   const text = el('div', 'ib-text md');
   // renderMarkdown escapes every piece of the text before adding its own tags
   text.innerHTML = renderMarkdown(full.get(e.id) ?? e.preview ?? '');
-  readerEl.append(text);
+  readerEl.append(beforeEl, text);
   readerEl.scrollTop = 0;
-  if (e.long && !full.has(e.id)) {
+  const wantBefore = e.kind === 'question' && !before.has(e.id);
+  if ((e.long && !full.has(e.id)) || wantBefore) {
     const got = await vs.inboxGet(e.id).catch(() => null);
     if (!got || typeof got.text !== 'string') return;
     full.set(e.id, got.text);
-    if (selId === e.id && text.isConnected) text.innerHTML = renderMarkdown(got.text);
+    if (e.kind === 'question') before.set(e.id, typeof got.before === 'string' ? got.before : '');
+    if (selId === e.id && text.isConnected) {
+      text.innerHTML = renderMarkdown(got.text);
+      paintBefore(before.get(e.id));
+    }
   }
 }
 
