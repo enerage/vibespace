@@ -77,12 +77,15 @@ function rows() {
   const out = [];
   for (const a of list) {
     const isLogin = a.kind === 'login';
-    const lim = isLogin ? (live || fromRaw(a.limits)) : fromRaw(a.limits);
+    // the /login: this window's live push, unless limits.json is newer (another
+    // process's agent, or the usage probe filled a "—": main/usageprobe.cjs)
+    const useLive = isLogin && live && liveAt >= (a.limitsAt || 0);
+    const lim = useLive ? live : (fromRaw(a.limits) || (isLogin ? live : null));
     // a PC without a Claude login (endpoint/token only) has nothing to show for it
     if (isLogin && a.note === 'not logged in' && !lim) continue;
     out.push({
       id: a.id, label: a.label || a.id, kind: a.kind, lim,
-      at: isLogin && live ? liveAt : (a.limitsAt || 0),
+      at: useLive ? liveAt : (a.limitsAt || (isLogin && live ? liveAt : 0)),
       outUntil: a.exhaustedUntil && a.exhaustedUntil > Date.now() ? a.exhaustedUntil : null,
       reason: a.reason || null,
     });

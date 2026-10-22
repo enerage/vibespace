@@ -26,6 +26,14 @@ Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
   - Why: with many agents the final reply got buried under tool lines,
     background notices and turns other sessions started.
 
+### Added
+- **An account showing "—" in the limit chip fetches its own usage** (Windows).
+  With no agent on an account, claude never reports its usage, so the chip
+  had nothing to show. VibeSpace now asks Claude once (the same source as
+  claude's `/usage`; no model request, nothing billed), at most every 30 min
+  per account while it shows "—". The /login always works; a token account
+  needs its "Send to cloud" sign-in, since a setup-token may not read usage.
+
 ### Changed
 - **The limit chip's hover explains a "—".** An account with no recent reading
   now says when its weekly limit last reset, that no agent has run on it

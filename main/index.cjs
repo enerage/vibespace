@@ -43,6 +43,7 @@ const attention = require('./attention.cjs');
 const bgagents = require('./bgagents.cjs');
 const presence = require('./presence.cjs');
 const accounts = require('./accounts.cjs');
+const usageprobe = require('./usageprobe.cjs');
 const netwatch = require('./netwatch.cjs');
 const modelguard = require('./modelguard.cjs');
 const appupdate = require('./appupdate.cjs'); // packaged self-update (GitHub Releases)
@@ -1532,7 +1533,9 @@ function initIpc() {
     for (const win of BrowserWindow.getAllWindows()) {
       if (!win.isDestroyed()) win.webContents.send('accounts:changed', st);
     }
+    if (!smoke) usageprobe.maybe(st); // an account showing "—" gets one usage request
   });
+  if (!smoke) usageprobe.start();
   claudefeed.onLimits((limits) => {
     for (const [id] of winInfo) {
       const win = BrowserWindow.fromId(id);

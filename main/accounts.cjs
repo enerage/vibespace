@@ -1233,7 +1233,9 @@ const listeners = [];
 let watching = false;
 let lastKey = null;
 let rankTimer = null;
-const watchKey = () => `${statKey()}|${fileKey(switchFile())}|${fileKey(autoFile())}`;
+// limits.json = the /login's reading (claudefeed, or the usage probe filling a "—")
+const limitsFile = () => path.join(U.dataRoot(), 'limits.json');
+const watchKey = () => `${statKey()}|${fileKey(switchFile())}|${fileKey(autoFile())}|${fileKey(limitsFile())}`;
 function emit() {
   const s = state();
   for (const fn of listeners) { try { fn(s); } catch (e) { logger.warn('accounts listener: ' + e.message); } }
@@ -1265,6 +1267,7 @@ function onChange(fn) {
   fs.watchFile(endpointsFile(), { interval: 1000 }, onFileChange); // an endpoint rename touches only this one
   fs.watchFile(switchFile(), { interval: 1000 }, onFileChange);
   fs.watchFile(autoFile(), { interval: 1000 }, onFileChange);
+  fs.watchFile(limitsFile(), { interval: 1000 }, onFileChange);
   try { armRankTimer(state()); } catch (e) { logger.warn('accounts rank timer: ' + e.message); }
 }
 
@@ -1277,6 +1280,7 @@ function unwatch() {
   try { fs.unwatchFile(endpointsFile(), onFileChange); } catch {}
   try { fs.unwatchFile(switchFile(), onFileChange); } catch {}
   try { fs.unwatchFile(autoFile(), onFileChange); } catch {}
+  try { fs.unwatchFile(limitsFile(), onFileChange); } catch {}
 }
 
 // ---------- limit detection ----------

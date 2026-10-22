@@ -168,7 +168,7 @@ Key facts encoded in `main/sessions.cjs`:
 
 ## Developing VibeSpace
 
-- `npm run smoke` — 173 self-tests on Windows, 181 on macOS (as of 0.7.4) incl. pty echo and live session discovery. Run it after
+- `npm run smoke` — 174 self-tests on Windows, 182 on macOS (as of 0.7.4) incl. pty echo and live session discovery. Run it after
   touching main-process code, **from a normal shell**: inside a Claude pty the stripped
   PATH and nested ConPTY break the pty test (`powershell.exe` "File not found" /
   AttachConsole) — prepend System32 to PATH and give it its own console, or just use a
@@ -503,13 +503,22 @@ Key facts encoded in `main/sessions.cjs`:
     `account:limits` push for the login account. One Claude account = the old
     unlabelled chip. The red border means NO Claude account has room left.
     **A "—" = no agent ran on that account lately**: its usage only arrives
-    in claude's status line, for the account that process uses. Claude's own
-    `/api/oauth/usage` (what `/usage` calls) is NOT a way around it (tested
-    2026-10-22): a setup-token gets 403 "scope requirement user:profile",
-    and the /login access token in `.credentials.json` expires within hours
-    unless a claude on the login refreshes it (401 "expired"). Refreshing it
-    ourselves would rotate the refresh token under VS Code / claude windows
-    sharing that login. Not built.
+    in claude's status line, for the account that process uses. So
+    `main/usageprobe.cjs` (2026-10-22, Windows) fills a "—" with ONE GET of
+    claude's own `/api/oauth/usage` (what `/usage` reads; no model request;
+    `utilization` is a percent, `resets_at` ISO), at most every 30 min per
+    account machine-wide (`<dataRoot>/usage-probe.json`). Facts, tested live:
+    a setup-token gets 403 "scope requirement user:profile", so a token
+    account needs its cloud dir's login (`cloud.configOf`); the access token
+    in `.credentials.json` expires within hours when no claude on that login
+    runs (401 "expired"). NEVER refresh it ourselves (refresh tokens rotate:
+    a race with VS Code / claude windows on that login could sign it out):
+    `claude -p /usage --no-session-persistence` (real claude, token env
+    cleared, `CLAUDE_CONFIG_DIR` = the cloud dir) renews it as a side effect,
+    no model call, ~5-16 s. Results go to limits.json (/login, which accounts
+    now watches) or `accounts.setLimits`. From Git Bash, `claude -p "/usage"`
+    needs `MSYS_NO_PATHCONV=1` or the slash becomes a path and it becomes a
+    real (billed) prompt. macOS: not yet (the login is a Keychain item).
   - **Automatic order** (0.6.53, `accounts.rankRows` pure + `ui/automove.js`
     pure): Claude accounts ranked by has-room, then soonest WEEKLY reset
     (a passed reset is projected forward by 7 d and its % reads 0), unknown

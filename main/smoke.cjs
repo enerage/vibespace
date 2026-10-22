@@ -2038,6 +2038,22 @@ async function runSmoke(hooks = {}) {
     const tbNone = await inbox.readBefore(tfile + '.missing.jsonl', 'tq');
     try { fs.rmSync(tfile, { force: true }); } catch {}
     const qe = inbox.reduce(null, { wsId: 'w', termId: 't', event: 'PreToolUse', now: 1, body: { tool_name: 'AskUserQuestion', tool_input: { questions: [] }, tool_use_id: 'tq', transcript_path: tfile } }).state.entries[0];
+    // usage probe (main/usageprobe.cjs): /api/oauth/usage JSON → status-line
+    // shape; which chip rows show "—" (no reading, or every reset passed)
+    {
+      const up = require('./usageprobe.cjs');
+      const raw = up.fromUsageJson({ five_hour: { utilization: 29.0, resets_at: '2026-10-22T14:00:00.226690+00:00' }, seven_day: { utilization: 0, resets_at: '2026-10-28T23:59:59.764011+00:00' }, seven_day_opus: null });
+      const nowS = Date.parse('2026-10-22T12:00:00Z') / 1000;
+      const rules = {
+        parsed: raw && raw.five_hour.used_percentage === 29 && raw.five_hour.resets_at === Math.round(Date.parse('2026-10-22T14:00:00.226Z') / 1000) && raw.seven_day.used_percentage === 0,
+        junk: up.fromUsageJson({ error: 'x' }) === null && up.fromUsageJson(null) === null,
+        blankNone: up.isBlank({ limits: null }) === true,
+        blankStale: up.isBlank({ limits: { seven_day: { used_percentage: 100, resets_at: nowS - 60 } } }, nowS * 1000) === true,
+        notBlank: up.isBlank({ limits: { seven_day: { used_percentage: 48, resets_at: nowS + 3600 } } }, nowS * 1000) === false,
+      };
+      check('usage probe: usage JSON → status-line shape; blank rows = no reading or every reset passed', Object.values(rules).every(Boolean), JSON.stringify({ rules, raw }));
+    }
+
     check('inbox: a question keeps the text written right before it (focus view hides it)',
       tb === "Here's the plain version.\n\nSame line." && tbNoId === tb && tbMissing === null && tbFile === tb && tbNone === ''
         && qe.toolUseId === 'tq' && qe.transcript === tfile,
