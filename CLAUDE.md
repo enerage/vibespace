@@ -502,6 +502,14 @@ Key facts encoded in `main/sessions.cjs`:
     `accounts:changed`), login + token kinds only, plus the live
     `account:limits` push for the login account. One Claude account = the old
     unlabelled chip. The red border means NO Claude account has room left.
+    **A "—" = no agent ran on that account lately**: its usage only arrives
+    in claude's status line, for the account that process uses. Claude's own
+    `/api/oauth/usage` (what `/usage` calls) is NOT a way around it (tested
+    2026-10-22): a setup-token gets 403 "scope requirement user:profile",
+    and the /login access token in `.credentials.json` expires within hours
+    unless a claude on the login refreshes it (401 "expired"). Refreshing it
+    ourselves would rotate the refresh token under VS Code / claude windows
+    sharing that login. Not built.
   - **Automatic order** (0.6.53, `accounts.rankRows` pure + `ui/automove.js`
     pure): Claude accounts ranked by has-room, then soonest WEEKLY reset
     (a passed reset is projected forward by 7 d and its % reads 0), unknown

@@ -26,6 +26,13 @@ Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
   - Why: with many agents the final reply got buried under tool lines,
     background notices and turns other sessions started.
 
+### Changed
+- **The limit chip's hover explains a "—".** An account with no recent reading
+  now says when its weekly limit last reset, that no agent has run on it
+  since, and which account new agents use first and why (its week resets
+  sooner). "the /login account" now reads "signed in with /login". A "—"
+  looked like a bug (2026-10-22).
+
 ## [0.7.3] — 2026-10-19
 
 ### Added

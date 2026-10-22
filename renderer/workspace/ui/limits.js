@@ -110,14 +110,39 @@ const windowLine = (name, w) => (stale(w)
   ? `${name}: reset since the last update — no newer data`
   : `${name}: ${Math.round(w.pct)}% used — ${resetText(w.resetsAt)}`);
 
+const WEEK = 7 * 86400 * 1000;
+const acctOf = (id) => (accts && Array.isArray(accts.accounts) ? accts.accounts.find(a => a.id === id) : null) || null;
+
+// why this account isn't where new agents start (automatic order only)
+function orderLine(r) {
+  const topId = topAccount();
+  if (!topId || topId === r.id) return null;
+  const top = acctOf(topId), me = acctOf(r.id);
+  if (!top) return null;
+  if (me && me.room !== false && top.weeklyResetAt && me.weeklyResetAt && top.weeklyResetAt < me.weeklyResetAt) {
+    return `New agents use ${top.label || topId} first: its week resets sooner (${clock(top.weeklyResetAt * 1000)}), so its usage isn't wasted`;
+  }
+  return `New agents use ${top.label || topId} first`;
+}
+
 function tooltip(r) {
-  const tip = [`${r.label} — ${r.kind === 'login' ? 'the /login account' : 'setup-token account'}`];
+  const tip = [`${r.label} — ${r.kind === 'login' ? 'signed in with /login' : 'setup-token account'}`];
   if (r.outUntil) tip.push(`Out of usage — resets ${clock(r.outUntil)}${r.reason ? ` (${r.reason})` : ''}`);
   const five = r.lim && r.lim.fiveHour, seven = r.lim && r.lim.sevenDay;
   if (five) tip.push(windowLine('5-hour window', five));
   if (seven) tip.push(windowLine('7-day window', seven));
-  if (!five && !seven) tip.push('No reading yet — it appears once one of this account’s agents runs');
-  else if (r.at) tip.push(`updated ${ago(r.at)}` + (r.kind === 'token' ? ' (refreshes only while one of this account’s agents runs)' : ''));
+  if (!five && !seven) {
+    // the % only comes from claude's status line, i.e. from an agent running
+    // on THIS account; the order's projected weekly reset dates the last reset
+    const me = acctOf(r.id);
+    const last = me && me.weeklyResetAt ? me.weeklyResetAt * 1000 - WEEK : 0;
+    tip.push(last && last < Date.now() && last > Date.now() - WEEK
+      ? `Weekly limit reset ${clock(last)}; no agent has run on it lately, so no new % yet`
+      : 'No % yet: no agent has run on it lately');
+    tip.push('The % shows once one of its agents runs (claude reports an account’s usage only to its own agents)');
+  } else if (r.at) tip.push(`updated ${ago(r.at)}` + (r.kind === 'token' ? ' (refreshes only while one of this account’s agents runs)' : ''));
+  const order = orderLine(r);
+  if (order) tip.push(order);
   tip.push('Claude plan usage, from claude’s status line');
   return tip.join('\n');
 }
