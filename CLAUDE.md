@@ -921,6 +921,9 @@ Key facts encoded in `main/sessions.cjs`:
     launcher reopens them.
   - **CI:** smoke runs an END-TO-END swap of a fake signed `.app` (feed → zip →
     verify → script → new version, no `.old-*` left) on the Mac runners.
+    Its dmg step can flake on the Intel runner ("hdiutil: attach failed -
+    Resource temporarily unavailable", 2026-10-22): `gh run rerun <id>
+    --failed` passed; a real dmg bug fails on both arches.
   - **Not verified on a real install yet:** the 160 MB swap in /Applications;
     whether TCC re-asks for Documents/Desktop access after each ad-hoc update
     (likely); the Windows per-machine/UAC case.
