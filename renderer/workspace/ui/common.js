@@ -5,6 +5,16 @@ export const isMac = () => Boolean(globalThis.vs && globalThis.vs.platform === '
 // App shortcuts: Cmd on a Mac, where Ctrl+P/F/B/U/D are readline and claude
 // keys inside a terminal; Ctrl (or the Windows key, as always) elsewhere.
 export const modKey = (e) => (isMac() ? e.metaKey : (e.ctrlKey || e.metaKey));
+// The letter a shortcut means. On a non-Latin layout (Bulgarian, Russian,
+// Greek…) e.key is that layout's own letter ("м" for the V key), so
+// Ctrl+V / Ctrl+C / Ctrl+Shift+M… never matched; fall back to the physical key.
+// A Latin layout keeps e.key (AZERTY's A stays "a").
+export function keyLetter(e) {
+  const k = String(e.key || '');
+  if (/^[a-z]$/i.test(k)) return k.toLowerCase();
+  const m = /^Key([A-Z])$/.exec(String(e.code || ''));
+  return m ? m[1].toLowerCase() : k.toLowerCase();
+}
 // A UI string as this platform says it: on a Mac Ctrl+Shift+B → ⌘⇧B,
 // Ctrl+S → ⌘S and (File) Explorer → Finder. Unchanged anywhere else.
 export function osText(s) {

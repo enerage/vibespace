@@ -1,4 +1,4 @@
-import { $, toast, debounce, confirmBox, isMac, modKey, osLabels, installEditMenu } from './ui/common.js';
+import { $, toast, debounce, confirmBox, isMac, modKey, osLabels, installEditMenu, keyLetter } from './ui/common.js';
 import * as tree from './ui/tree.js';
 import * as viewer from './ui/viewer.js';
 import * as terms from './ui/terms.js';
@@ -182,12 +182,12 @@ function wireLayoutToggle() {
     paintRestart();
   });
   document.addEventListener('keydown', (e) => {
-    if (modKey(e) && e.shiftKey && e.key.toLowerCase() === 'd') {
+    if (modKey(e) && e.shiftKey && keyLetter(e) === 'd') {
       e.preventDefault();
       vs.copyDiagnostics(wsId).then(() =>
         toast('Diagnostics copied — paste it to your agent when reporting an issue', 'ok'));
     }
-    if (modKey(e) && e.shiftKey && e.key.toLowerCase() === 'u') {
+    if (modKey(e) && e.shiftKey && keyLetter(e) === 'u') {
       e.preventDefault();
       if (!terms.jumpToAttention()) toast('No agent needs attention right now', '');
     }

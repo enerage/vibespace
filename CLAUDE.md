@@ -684,6 +684,11 @@ Key facts encoded in `main/sessions.cjs`:
   terminals: turn it on to test anything about restored conversations.
 - Keys: Ctrl+P file finder · Ctrl+F terminal search (active tab) · Ctrl+Shift+U
   jump-to-attention · Ctrl+Shift+B agent board · Ctrl+Shift+D diagnostics.
+  **Match letter shortcuts with `common.js` `keyLetter(e)`, never
+  `e.key.toLowerCase()`**: on a Bulgarian/Russian/Greek layout `e.key` is the
+  layout's own letter (the V key gives "м"), so Ctrl+V/C and every shortcut
+  silently fell through to the pty (Valentin, 2026-10-26: "Ctrl+V doesn't
+  work on BG"). `keyLetter` keeps a Latin `e.key`, else uses `e.code`.
 - **Git** (0.6.14, sidebar since 0.6.15): `main/githistory.cjs` (log/commit/fileAt/branch,
   read-only) + `renderer/workspace/ui/history.js`. The lists live in the LEFT
   pane (`#side-tabs` Files|Git → `#git-side`); `diff.js` drives both modes and
@@ -944,7 +949,13 @@ Key facts encoded in `main/sessions.cjs`:
     CDP input events. Pick inspector ports outside Windows' reserved range
     (9281–9380 here: 9341 failed; 12341 works). A test that writes the clipboard
     must restore it (it emptied Valentin's once; a native Menu.popup can't be
-    screenshotted, so wrap `Menu.prototype.popup` to record it).
+    screenshotted, so wrap `Menu.prototype.popup` to record it). Better: don't
+    touch the real clipboard at all. Stub the IPC for the test
+    (`ipcMain.removeHandler('util:readClipboard')` + a handler returning the
+    marker, original back in `finally`). A save/restore through `readText`
+    failed on 2026-10-26 ("conversion failure"; history off) and lost his
+    clipboard again. Pasted text lands in the ACTIVE tab: check
+    `ptyhost.list()` buffers, not the first `.xterm-rows`.
 - **z.ai tabs and claude's `/model`** (0.7.1, verified on claude 2.1.303 with a
   throwaway `CLAUDE_CONFIG_DIR`):
   - **Every `/model` pick saves `model` to the GLOBAL

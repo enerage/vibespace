@@ -1,4 +1,4 @@
-import { $, el, modKey, osText, toast } from './common.js';
+import { $, el, modKey, osText, toast, keyLetter } from './common.js';
 import { ago } from './history.js';
 import * as terms from './terms.js';
 import { renderMarkdown } from './minimd.js';
@@ -329,9 +329,9 @@ export function init() {
   $('#btn-inbox').onclick = toggle;
   document.addEventListener('keydown', (e) => {
     // capture + stopPropagation: xterm must not also see the key
-    if (modKey(e) && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'm') { e.preventDefault(); e.stopPropagation(); toggle(); }
+    if (modKey(e) && e.shiftKey && !e.altKey && keyLetter(e) === 'm') { e.preventDefault(); e.stopPropagation(); toggle(); }
     // the board opens underneath the inbox: make way for it
-    else if (open && modKey(e) && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'b') close();
+    else if (open && modKey(e) && e.shiftKey && !e.altKey && keyLetter(e) === 'b') close();
   }, true);
   vs.onInboxChanged(() => { if (!document.hidden) pull(); });
   document.addEventListener('visibilitychange', () => { if (!document.hidden) pull(); });

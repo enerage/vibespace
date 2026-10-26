@@ -35,6 +35,11 @@ Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
   needs its "Send to cloud" sign-in, since a setup-token may not read usage.
 
 ### Fixed
+- **Ctrl+V, Ctrl+C and every Ctrl shortcut work on a Bulgarian keyboard.**
+  With a non-Latin layout active, the V key reports "м", not "v", so paste
+  (and Ctrl+P, Ctrl+F, Ctrl+Shift+M/B/U/D, Ctrl+S) never matched and the key
+  went to the terminal instead. Shortcuts now fall back to the physical key
+  (2026-10-26).
 - **↻ Restart no longer says an idle agent is working.** Moving the mouse
   over a Claude tab makes Claude redraw, and that redraw counted as "working"
   for an agent that hadn't started a turn since the last restart ("Candidate

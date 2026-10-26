@@ -1,4 +1,4 @@
-import { $, el, modKey } from './common.js';
+import { $, el, modKey, keyLetter } from './common.js';
 
 // Ctrl+P fuzzy file finder. Index comes from main (recursive walk honoring the
 // same ignore list as the tree). Keyboard listener uses CAPTURE so it fires even
@@ -105,7 +105,7 @@ async function openPalette() {
 function wire() {
   // capture: true — must win over xterm's textarea when a terminal has focus
   document.addEventListener('keydown', (e) => {
-    if (modKey(e) && !e.shiftKey && e.key.toLowerCase() === 'p') {
+    if (modKey(e) && !e.shiftKey && keyLetter(e) === 'p') {
       e.preventDefault();
       if ($('#finder').classList.contains('hidden')) openPalette();
       else close();

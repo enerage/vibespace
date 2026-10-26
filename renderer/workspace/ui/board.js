@@ -1,4 +1,4 @@
-import { $, el, cardOnHover, hideCard, modKey, osText } from './common.js';
+import { $, el, cardOnHover, hideCard, modKey, osText, keyLetter } from './common.js';
 import { fmtElapsed, fmtAgo, taskItems, cacheChip, compactSoon, wtText, bgTasks, bgText, bgOnlyShells } from './feedui.js';
 import * as terms from './terms.js';
 import { cardFor as parkedCard, metaText as parkedMeta } from './parked.js';
@@ -369,7 +369,7 @@ export function init(opts) {
   $('#btn-board').onclick = toggle;
   document.addEventListener('keydown', (e) => {
     // capture + stopPropagation: xterm must not also see Ctrl+B (tmux-style prefix)
-    if (modKey(e) && e.shiftKey && e.key.toLowerCase() === 'b') { e.preventDefault(); e.stopPropagation(); toggle(); }
+    if (modKey(e) && e.shiftKey && keyLetter(e) === 'b') { e.preventDefault(); e.stopPropagation(); toggle(); }
   }, true);
   terms.onAgentsChanged(schedule);
   vs.onBoardChanged(() => { if (open) pullOthers(); });

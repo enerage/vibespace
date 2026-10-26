@@ -1,4 +1,4 @@
-import { $, el, toast, debounce, confirmBox, modKey, osText } from './common.js';
+import { $, el, toast, debounce, confirmBox, modKey, osText, keyLetter } from './common.js';
 import { monacoTheme, onThemeChange } from './themes.js';
 import { mediaUrl, fmtBytes, fmtDuration } from './mediaurl.js';
 
@@ -88,7 +88,7 @@ function wireControls() {
   $('#btn-view').onclick = toggleSvgView;
   $('#btn-reveal').onclick = () => { if (tabs.has(activePath)) vs.reveal(activePath); };
   document.addEventListener('keydown', (e) => {
-    if (modKey(e) && e.key.toLowerCase() === 's') {
+    if (modKey(e) && keyLetter(e) === 's') {
       e.preventDefault();
       const t = tabs.get(activePath);
       if (t && t.editable) save();

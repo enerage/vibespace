@@ -1,4 +1,4 @@
-import { $, el, toast, confirmBox, showMenu, isMac, modKey } from './common.js';
+import { $, el, toast, confirmBox, showMenu, isMac, modKey, keyLetter } from './common.js';
 import { termTheme, onThemeChange } from './themes.js';
 import { openTabMenu } from './tabmenu.js';
 import * as feedui from './feedui.js';
@@ -632,7 +632,7 @@ export function init(opts) {
     if (e.key === 'Escape') { e.preventDefault(); closeTermFind(); }
   });
   document.addEventListener('keydown', (e) => {
-    if (modKey(e) && !e.shiftKey && e.key.toLowerCase() === 'f') {
+    if (modKey(e) && !e.shiftKey && keyLetter(e) === 'f') {
       // Monaco has its own find — only handle when focus is NOT in the editor
       const ae = document.activeElement;
       if (ae && $('#monaco-host')?.contains(ae)) return;
@@ -1250,7 +1250,7 @@ function wireClipboard(term, id) {
     if (ev.type !== 'keydown') return true;
     // Shift(+Ctrl)+arrows select text in claude's prompt (ui/inputsel.js)
     if (inputsel.onKey(term, ev, (d) => vs.ptyWrite(id, d))) { ev.preventDefault(); return false; }
-    const key = ev.key.toLowerCase();
+    const key = keyLetter(ev);
     if (isMac()) {
       // Mac: Cmd+C copies a selection, Cmd+V pastes. Ctrl+C (interrupt) and
       // Ctrl+V (claude's image paste) go to the pty untouched. preventDefault
