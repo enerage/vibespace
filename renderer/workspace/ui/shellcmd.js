@@ -52,6 +52,15 @@ export function bgRefusal(text) {
   return { job: m[1] && JOB_ID.test(m[1]) ? m[1] : null };
 }
 
+// The /exit confirm claude shows when the session has scheduled tasks or
+// other background work (seen 2026-10-29, 2.1.31x): "Background work is
+// running / The following will stop when you exit: … 1. Exit and stop tasks
+// 2. Move to background and exit 3. Stay". An account move must not end it.
+export function exitBlocked(text) {
+  const t = String(text || '').replace(ANSI, '').replace(/\s+/g, ' ');
+  return /background\s*work\s*is\s*running/i.test(t) && /(will\s*stop\s*when\s*you\s*exit|exit\s*and\s*stop\s*tasks)/i.test(t);
+}
+
 // ---------- Send to cloud (0.6.58) ----------
 // Cloud sessions (`claude --cloud`, `--teleport`) run the REAL claude
 // executable, never the tab's `claude` function (it adds our hook settings,

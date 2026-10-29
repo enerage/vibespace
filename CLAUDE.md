@@ -556,6 +556,15 @@ Key facts encoded in `main/sessions.cjs`:
     `tab.exitSentAt` marks our own `/exit`: an empty shell found later with
     nothing typed since is relaunched (`launchOnAccount`), never treated as
     "the user left claude".
+  - **`/exit` on a session with scheduled tasks or background work opens a
+    confirm** ("Background work is running / The following will stop when you
+    exit: … 1. Exit and stop tasks 2. Move to background and exit 3. Stay";
+    seen 2026-10-29). A gentle move used to leave it on screen and retry every
+    30 min ("something constantly wants to close my agents"). Now `watchExit`
+    (`shellcmd.exitBlocked`) spots it in the pty output for 20 s, sends Esc
+    (= Stay), and `tab.exitBlocked.launch === tab.launchedAt` keeps that tab
+    out of every move until its claude is started again (the tasks die with
+    it anyway). The limit switch (non-gentle, kills after 15 s) is unchanged.
   - Claude repeats its last `rate_limits` reading on every statusLine tick until
     its next API response. Only a reading that just became full marks an account
     (`becameFull`), or an idle tab's stale 100 % re-marks it after a reset.

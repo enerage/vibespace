@@ -1589,8 +1589,11 @@ async function runSmoke(hooks = {}) {
       setup: got.every(Boolean) ? true : got.join(','),
       refusal: Boolean(refusal && refusal.job === '6ce06036') && sc.bgRefusal('tests are running in the background') === null,
       oneToast: lines.length === 1 && lines[0] === 'Moved 4 agents to MAIN (automatic order: cache cold): a1, a2, a3 +1',
+      // claude's /exit confirm for a session with scheduled tasks (a move must Stay)
+      exitBlocked: sc.exitBlocked('\x1b[1m Background work is running\x1b[0m\r\n   The following will stop when you exit:\r\n   scheduled task · Runs once in 1d\r\n  1. Exit and stop tasks\r\n  2. Move to background and exit\r\n❯ 3. Stay')
+        && !sc.exitBlocked('Background work is running in another tab') && !sc.exitBlocked('Goodbye!'),
     };
-    check('shell text: setup script block (# / quotes / errors still start claude), bg refusal, one toast per burst',
+    check('shell text: setup script block (# / quotes / errors still start claude), bg refusal, /exit confirm, one toast per burst',
       Object.values(r).every(v => v === true), JSON.stringify(r) + (got.every(Boolean) ? '' : ' out=' + out.slice(0, 400)));
   }
 

@@ -7,7 +7,7 @@ import * as parked from './parked.js';
 import * as cloud from './cloud.js';
 import * as inputsel from './inputsel.js';
 import * as automove from './automove.js';
-import { setupPrefix, setupLines, bgRefusal, JOB_ID, cloudSendLine, teleportLine, cloudLoginLine, cloudSession, shortTask, CLOUD_ID, shQuote } from './shellcmd.js';
+import { setupPrefix, setupLines, bgRefusal, exitBlocked, JOB_ID, cloudSendLine, teleportLine, cloudLoginLine, cloudSession, shortTask, CLOUD_ID, shQuote } from './shellcmd.js';
 
 // terminal tabs: each hosts a PowerShell pty; "claude" tabs run Claude Code and
 // get their session id tracked (main process) so they can be resumed after updates.
@@ -212,6 +212,24 @@ function watchResume(tab, chunk) {
   }, 1500);
 }
 
+// A gentle move's /exit can open claude's "Background work is running" confirm
+// (scheduled tasks, background shells). Its options are "Exit and stop tasks",
+// "Move to background and exit" and "Stay": a move must never end that work,
+// and it used to come back every 30 min (Valentin, 2026-10-29: "something
+// constantly wants to close my agents"). So: Esc (= Stay), and the tab is not
+// moved again while this claude runs.
+const EXIT_WATCH_MS = 20000;
+function watchExit(tab, chunk) {
+  const w = tab.exitWatch;
+  if (Date.now() > w.until) { tab.exitWatch = null; return; }
+  w.tail = (w.tail + chunk).slice(-6000);
+  if (!exitBlocked(w.tail)) return;
+  tab.exitWatch = null;
+  tab.exitBlocked = { at: Date.now(), launch: tab.launchedAt };
+  console.warn(`account move: ${tab.name} (${tab.id}) has scheduled tasks or background work; /exit cancelled, it stays on ${tab.account || 'login'}`);
+  setTimeout(() => { if (tabs.has(tab.id) && !tab.dead) vs.ptyWrite(tab.id, '\x1b'); }, 300);
+}
+
 // ---- per-tab model (claude --model) --------------------------------------------
 // tab.model = the model the user chose for the tab (+ ▾ → New agent with model)
 // or switched to in the session (/model, seen in the feed): an alias
@@ -274,6 +292,9 @@ function followModel(tab, f) {
 const autoOn = () => Boolean(accountsState && accountsState.auto);
 function pendingMove(tab) {
   if (!tab || !tab.isClaude || tab.dead || !tab.sessionId) return null;
+  // this claude has scheduled tasks / background work that /exit would stop:
+  // it stays where it is until it is started again (see watchExit)
+  if (tab.exitBlocked && tab.exitBlocked.launch === tab.launchedAt) return null;
   if (autoOn()) return automove.autoTarget(tab, accountsState, Date.now(), { family: tabFamily(tab), usable: accountUsable });
   const cur = tab.account || 'login';
   const to = switchTarget(tab.accountAt, tabFamily(tab));
@@ -387,6 +408,12 @@ async function moveOne(tab) {
     }
   }
   if (running === true) await relaunchOnAccount(tab, to, { prompt: null, gentle: true });
+  if (tab.exitBlocked && tab.exitBlocked.launch === tab.launchedAt) {
+    // claude asked before stopping its scheduled tasks; we said Stay. Not a failure.
+    tab.exitWatch = null;
+    if (auto) console.warn(`account auto: ${tab.name} (${id}) stays on ${from}: it has scheduled tasks or background work`);
+    return;
+  }
   if ((tab.account || 'login') !== to) {
     // couldn't tell, or claude didn't leave: one retry, then leave the tab alone
     tab.moveFails = (tab.moveFails || 0) + 1;
@@ -498,6 +525,7 @@ export function init(opts) {
     const tab = tabs.get(termId);
     if (!tab) return;
     if (tab.resumeWatch) watchResume(tab, chunk);
+    if (tab.exitWatch) watchExit(tab, chunk);
     if (tab.cloudWatch) watchCloud(tab, chunk);
     const t0 = tab.lagT0;
     if (t0 == null) { tab.term.write(chunk); return; }
@@ -1596,6 +1624,8 @@ export async function relaunchOnAccount(tab, to, { prompt = 'continue', gentle =
       vs.ptyWrite(id, '\x1b');
       await new Promise(r => setTimeout(r, 500));
     }
+    // gentle: watch for claude's "Background work is running" confirm (watchExit)
+    if (gentle) tab.exitWatch = { until: Date.now() + EXIT_WATCH_MS, tail: '' };
     sendToAgent(id, '/exit');
     const exitSentAt = Date.now();
     // gentle ("move all agents"): a claude that doesn't leave is never killed
@@ -1604,7 +1634,8 @@ export async function relaunchOnAccount(tab, to, { prompt = 'continue', gentle =
     // still running at 15 s, gone soon after, and the retry then read the empty
     // shell as "the user left claude" and never relaunched it. So wait longer
     // for the exit we asked for, unless the user typed in the meantime.
-    if (gentle && exit && exit.how === 'running' && tabs.has(id) && !tab.dead && !typedSince(tab, exitSentAt)) {
+    const blocked = () => Boolean(tab.exitBlocked && tab.exitBlocked.at >= exitSentAt);
+    if (gentle && exit && exit.how === 'running' && tabs.has(id) && !tab.dead && !typedSince(tab, exitSentAt) && !blocked()) {
       exit = await vs.waitClaudeExit(id, 60000, true);
     }
     const how = exit && exit.how;
@@ -1613,6 +1644,7 @@ export async function relaunchOnAccount(tab, to, { prompt = 'continue', gentle =
     // only type into a shell we KNOW claude left; otherwise the command would
     // become a prompt inside the still-running agent
     if (!['prompt', 'gone', 'killed'].includes(how)) {
+      if (blocked()) return; // it stays on purpose (watchExit): no error, no retry
       if (how === 'running') tab.exitSentAt = exitSentAt; // it may still leave: moveOne relaunches it then
       toast(`Couldn't move ${tab.name} to another account: claude didn't exit`, 'err');
       return;

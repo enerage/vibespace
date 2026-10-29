@@ -35,6 +35,12 @@ Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
   needs its "Send to cloud" sign-in, since a setup-token may not read usage.
 
 ### Fixed
+- **The automatic account order no longer tries to close agents that have scheduled
+  tasks.** Moving an agent to another account means /exit, and for an agent with
+  scheduled tasks or background work Claude asks "Exit and stop tasks / Move to
+  background / Stay". That box stayed on screen and came back every 30 min.
+  VibeSpace now answers Stay itself and leaves that agent on its account until
+  it is started again (2026-10-29).
 - **Ctrl+V, Ctrl+C and every Ctrl shortcut work on a Bulgarian keyboard.**
   With a non-Latin layout active, the V key reports "м", not "v", so paste
   (and Ctrl+P, Ctrl+F, Ctrl+Shift+M/B/U/D, Ctrl+S) never matched and the key
