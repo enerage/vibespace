@@ -53,6 +53,11 @@ Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
   longer counts.
 
 ### Changed
+- **The limit chip's hover says why an account is skipped.** The automatic
+  order prefers the soonest weekly reset only among accounts with room; an
+  account at 95%+ hands new agents to the next one. MAIN at 99% looked like
+  a wrong choice (2026-10-29); its hover now says "this week is 99% used
+  (agents move off at 95%), back Mon 12:31".
 - **The limit chip's hover explains a "—".** An account with no recent reading
   now says when its weekly limit last reset, that no agent has run on it
   since, and which account new agents use first and why (its week resets

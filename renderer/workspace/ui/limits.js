@@ -125,6 +125,14 @@ function orderLine(r) {
   if (me && me.room !== false && top.weeklyResetAt && me.weeklyResetAt && top.weeklyResetAt < me.weeklyResetAt) {
     return `New agents use ${top.label || topId} first: its week resets sooner (${clock(top.weeklyResetAt * 1000)}), so its usage isn't wasted`;
   }
+  // the soonest reset wins only among accounts with room: say why this one has none
+  if (me && me.room === false) {
+    const why = me.blockedBy === '7d' ? `this week is ${Math.round(me.weeklyPct ?? 0)}% used`
+      : me.blockedBy === '5h' ? `its 5-hour window is ${Math.round(me.fivePct ?? 0)}% used`
+        : me.blockedBy === 'out' ? 'it is out of usage' : 'it is unavailable';
+    const back = me.roomAt ? `, back ${clock(me.roomAt * 1000)}` : '';
+    return `New agents use ${top.label || topId} instead: ${why} (agents move off at 95%)${back}`;
+  }
   return `New agents use ${top.label || topId} first`;
 }
 
