@@ -35,6 +35,11 @@ Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
   needs its "Send to cloud" sign-in, since a setup-token may not read usage.
 
 ### Fixed
+- **A question keeps its "needs you" light while background agents work.** An
+  agent with subagents running in the background asked you something, but
+  each tool call of those subagents counted as "the question was answered",
+  so the tab went back to amber within seconds. Now only the agent that
+  asked can close its question (2026-10-31).
 - **The automatic account order no longer tries to close agents that have scheduled
   tasks.** Moving an agent to another account means /exit, and for an agent with
   scheduled tasks or background work Claude asks "Exit and stop tasks / Move to

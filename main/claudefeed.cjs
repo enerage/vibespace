@@ -79,6 +79,7 @@ function emptyState() {
     model: null, effort: null, context: null, cost: null, linesAdded: 0, linesRemoved: 0,
     sessionId: null, transcriptPath: null, sessionName: null, promptCache: null, rateLimits: null,
     nowDoing: null, attention: null, lastMessage: null, turnStartedAt: null, turnEndedAt: null,
+    askAgent: null, // who opened the dialog: a subagent's agent_id, or null = the main thread
     failure: null, subagents: 0, compacting: null, lastCompact: null, todos: null, tasks: [],
     background: [], bgNow: null, turnOpen: false,
     net: null, // waiting for the internet (index.cjs setNet; netwatch.cjs)
@@ -230,28 +231,34 @@ function reduceCore(state, kind, event, body, now) {
   }
   if (kind !== 'hook') return s;
   const lastMsg = typeof body.last_assistant_message === 'string' ? clip(body.last_assistant_message, 2000) : s.lastMessage;
+  // An open question/permission is closed only by the thread that asked: a
+  // background subagent's tool calls kept clearing the MAIN agent's question
+  // (the light left "needs you" seconds after the ask; Valentin, 2026-10-31).
+  const aid = body.agent_id ? String(body.agent_id) : null;
+  const sameAsker = (st) => (st.askAgent || null) === aid;
+  const dialogOpen = (st) => st.attention === 'permission' || st.attention === 'question';
   // A background subagent keeps calling tools after the main turn ended (its
   // events carry agent_id). That is background activity, not the tab's "now
   // doing": it goes to bgNow and never touches the turn's own state.
   if (body.agent_id && turnEnded(s) && (event === 'PreToolUse' || event === 'PostToolUse' || event === 'PostToolUseFailure')) {
     const next = { ...s, bgNow: event === 'PreToolUse' ? { tool: body.tool_name || '?', detail: toolDetail(body.tool_input) } : null };
-    if (s.attention === 'permission' || s.attention === 'question') next.attention = null; // its dialog was answered
+    if (dialogOpen(s) && sameAsker(s)) next.attention = null; // its dialog was answered
     return next;
   }
   switch (event) {
     case 'PreToolUse': {
       const next = { ...s, nowDoing: { tool: body.tool_name || '?', detail: toolDetail(body.tool_input) } };
-      if (ASK_TOOLS.has(body.tool_name)) next.attention = 'question';
-      // a new tool call means the previous dialog is gone (e.g. a denied
-      // permission, which fires no PostToolUse)
-      else if (s.attention === 'permission' || s.attention === 'question') next.attention = null;
+      if (ASK_TOOLS.has(body.tool_name)) { next.attention = 'question'; next.askAgent = aid; }
+      // a new tool call OF THE SAME THREAD means its previous dialog is gone
+      // (e.g. a denied permission, which fires no PostToolUse)
+      else if (dialogOpen(s) && sameAsker(s)) next.attention = null;
       return next;
     }
     case 'PostToolUse':
     case 'PostToolUseFailure': {
       const next = { ...s, nowDoing: null };
       // the tool ran, so its permission dialog / question has been answered
-      if (s.attention === 'permission' || s.attention === 'question') next.attention = null;
+      if (dialogOpen(s) && sameAsker(s)) next.attention = null;
       if (event !== 'PostToolUse') return next;
       const input = body.tool_input || {};
       if (body.tool_name === 'TodoWrite' && Array.isArray(input.todos)) {
@@ -281,7 +288,7 @@ function reduceCore(state, kind, event, body, now) {
     }
     case 'PermissionRequest':
       // arrives ~0.1 s after PreToolUse and carries the same tool: keep it as nowDoing
-      return { ...s, attention: 'permission', nowDoing: { tool: body.tool_name || '?', detail: toolDetail(body.tool_input) } };
+      return { ...s, attention: 'permission', askAgent: aid, nowDoing: { tool: body.tool_name || '?', detail: toolDetail(body.tool_input) } };
     case 'Notification': {
       const a = NOTIFY_ATTENTION[body.notification_type];
       return a && s.attention !== a ? { ...s, attention: a } : s;

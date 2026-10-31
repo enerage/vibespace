@@ -1286,6 +1286,25 @@ async function runSmoke(hooks = {}) {
       turnOk && tasksOk && askOk && askClearOk && idleOk && subOk && failOk && failStays && failCleared && permText && sub0 === p,
       JSON.stringify({ turnOk, tasksOk, askOk, askClearOk, idleOk, subOk, failOk, failStays, failCleared, permText, sub0: sub0 === p }));
 
+    // a dialog is closed only by the thread that opened it: a background
+    // subagent's tool calls must not clear the main agent's question
+    {
+      let a = feed.reduce(null, 'hook', 'UserPromptSubmit', { prompt: 'x' });
+      a = feed.reduce(a, 'hook', 'PreToolUse', { tool_name: 'AskUserQuestion', tool_input: { questions: [] } });
+      const q1 = a.attention;
+      a = feed.reduce(a, 'hook', 'PreToolUse', { tool_name: 'Bash', tool_input: { command: 'ls' }, agent_id: 'sub1' });
+      a = feed.reduce(a, 'hook', 'PostToolUse', { tool_name: 'Bash', tool_input: { command: 'ls' }, agent_id: 'sub1' });
+      const q2 = a.attention;
+      a = feed.reduce(a, 'hook', 'PostToolUse', { tool_name: 'AskUserQuestion', tool_input: {} });
+      const q3 = a.attention;
+      a = feed.reduce(a, 'hook', 'PermissionRequest', { tool_name: 'Bash', tool_input: {}, agent_id: 'sub2' });
+      a = feed.reduce(a, 'hook', 'PostToolUse', { tool_name: 'Read', tool_input: {} });
+      const p1 = a.attention;
+      a = feed.reduce(a, 'hook', 'PostToolUse', { tool_name: 'Bash', tool_input: {}, agent_id: 'sub2' });
+      const r = { q1: q1 === 'question', subKeeps: q2 === 'question', mainCloses: q3 === null, subPerm: p1 === 'permission', subCloses: a.attention === null };
+      check('claude feed: a question/permission is closed only by the thread that asked (subagent tools keep it open)', Object.values(r).every(Boolean), JSON.stringify(r));
+    }
+
     // round-trip: POST /sl with x-vs-term → listener fires with the parsed context %
     const { port } = await feed.start({ resolveTerm: (id) => (id === 'smoke-t1' ? 'smoke-ws' : null) });
     const post = (p, term, body) => new Promise((resolve) => {

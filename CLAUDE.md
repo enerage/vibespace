@@ -168,7 +168,7 @@ Key facts encoded in `main/sessions.cjs`:
 
 ## Developing VibeSpace
 
-- `npm run smoke` — 175 self-tests on Windows, 183 on macOS (as of 0.7.4) incl. pty echo and live session discovery. Run it after
+- `npm run smoke` — 176 self-tests on Windows, 184 on macOS (as of 0.7.4) incl. pty echo and live session discovery. Run it after
   touching main-process code, **from a normal shell**: inside a Claude pty the stripped
   PATH and nested ConPTY break the pty test (`powershell.exe` "File not found" /
   AttachConsole) — prepend System32 to PATH and give it its own console, or just use a
@@ -265,6 +265,11 @@ Key facts encoded in `main/sessions.cjs`:
     never writes the hook-owned files.
   - While that dialog is open, a late PreToolUse `working` line is ignored. The
     tool running hands back `working` unless the turn ended (Stop's `done` wins).
+  - **Only the thread that opened a dialog closes it** (`feed.askAgent`,
+    2026-10-31). Background subagents keep calling tools while the main agent
+    asks; each of their Pre/PostToolUse cleared `attention`, so the light left
+    "needs you" seconds after the ask. A dialog's `askAgent` is the asker's
+    `agent_id` (null = main); tool events of other threads leave it open.
   - Toasts fire once per waiting episode: they only fire when the status actually
     changes.
   - `prompt_cache.expires_at` is an ABSOLUTE epoch-seconds deadline (the last API
