@@ -2,7 +2,7 @@
 
 Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 
-## [0.7.4] — 2026-10-20
+## [0.7.4] — 2026-11-03
 
 ### Added
 - **📥 Inbox: what your agents said, without the noise** (Ctrl/Cmd+Shift+M).
