@@ -25,8 +25,6 @@ Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
   - Kept for 30 days, also after a window closes.
   - Why: with many agents the final reply got buried under tool lines,
     background notices and turns other sessions started.
-
-### Added
 - **An account showing "—" in the limit chip fetches its own usage** (Windows).
   With no agent on an account, claude never reports its usage, so the chip
   had nothing to show. VibeSpace now asks Claude once (the same source as
