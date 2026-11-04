@@ -204,7 +204,12 @@ Key facts encoded in `main/sessions.cjs`:
   blocked` or `main loop stalled` = VibeSpace. Only single typed keys are
   timed (pastes and escape sequences don't echo 1:1). The renderer stall
   watch skips hidden/unfocused windows (Chromium throttles their timers) and
-  main skips its first 30 s (boot blocks by design).
+  main skips its first 30 s (boot blocks by design). Seen 2026-11-04: 0.5-66 s
+  echo delays at cpu 93-100 %. Agents' whole-project tsc, guard runs, commit
+  hooks and renders were running at claude's own Normal priority, and memory was
+  overcommitted (an idle tab is paged out). The fix lives outside VibeSpace:
+  `D:\Repositories\AgentPriority` (claude + our electron AboveNormal, agent jobs
+  BelowNormal). Check that it runs before blaming the app.
 - Logs: `~/.vibespace/logs/<instance>.log` (dev-watch lines, pty spawns, session
   captures, renderer errors, term-status transitions). Renderer `console.warn/error`
   reach the log via `console-message`. Electron 35+ passes that event's `level` as a
