@@ -2,6 +2,22 @@
 
 Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 
+## [Unreleased]
+
+### Fixed
+- **An expired claude.ai login no longer attracts agents to a dead account.**
+  When the login session hit its time limit ("Login reached its time limit ·
+  Please run /login", StopFailure `error=authentication_failed`, seen live
+  2026-11-05 after MAIN 2 sat unused for hours), the failing tab only got a
+  generic ✕ — and the automatic account order kept ranking the login first
+  and moving idle tabs onto it, where they failed the same way. Now:
+  - the account is marked out for 24 h ("login expired"), so ranking and
+    auto-move skip it; the first successful turn after you run `/login`
+    clears the mark by itself;
+  - the tab light, activity strip, toast and inbox reason say what to do
+    ("turn failed: the Claude login expired — run /login in this tab")
+    instead of "authentication failed".
+
 ## [0.7.4] — 2026-11-03
 
 ### Added

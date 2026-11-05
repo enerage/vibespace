@@ -443,6 +443,16 @@ Key facts encoded in `main/sessions.cjs`:
     when a main-thread turn that STARTED after `at` ends with Stop
     (`noteTurnForAccount`). A turn already streaming when another tab hit the
     limit proves nothing.
+  - **The claude.ai login session expires** ("Login reached its time limit ·
+    Please run /login", StopFailure `error=authentication_failed`, seen live
+    2026-11-05 on MAIN 2 after it sat unused for hours — the OAuth refresh in
+    `.credentials.json` cannot beat it; only a browser /login does). `index.cjs`
+    `handleFailure` marks the account out for 24 h ("login expired") so ranking
+    and auto-move stop sending tabs onto a dead login, and
+    `claudefeed.attentionText` names the fix; the first successful turn after
+    the re-login clears the mark via `clearIfProven`. Setup-token accounts never
+    see this — and never get Remote Control either, which is why the phone
+    account must be the `/login`.
   - **"Move all here"** (0.6.47, `accounts.switchAll` + `terms.js` `drainMoves`):
     a machine-wide request `{ to, at }` in its OWN file,
     `<dataRoot>/accounts-switch.json`. A window on older main code rewrites

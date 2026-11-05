@@ -369,6 +369,9 @@ function attentionText(s) {
   if (!s) return null;
   // a turn that failed because the internet is down: not a failure to act on
   if (s.net) return 'is waiting for the internet: continues automatically when it is back';
+  // the claude.ai login session expired (seen live 2026-11-05: "Login reached
+  // its time limit · Please run /login"): say what fixes it, not a bare kind
+  if (s.failure && s.failure.type === 'authentication_failed') return 'turn failed: the Claude login expired — run /login in this tab';
   if (s.failure) return `turn failed: ${s.failure.reason}`;
   const what = s.nowDoing ? [s.nowDoing.tool, s.nowDoing.detail].filter(Boolean).join(' — ') : '';
   if (s.attention === 'permission') return what ? `needs permission: ${what}` : 'needs permission';

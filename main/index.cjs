@@ -1581,6 +1581,10 @@ const SWITCH_MIN_GAP_MS = 5 * 1000; // duplicate events only; the 3-in-10-min ca
 const SWITCH_WINDOW_MS = 10 * 60 * 1000;
 const SWITCH_MAX_IN_WINDOW = 3;
 const TRANSCRIPT_MAX_AGE_MS = 5 * 60 * 1000;
+// "Login reached its time limit · Please run /login" (StopFailure
+// error=authentication_failed, seen live 2026-11-05): only the user's hands
+// (browser /login) revive the login, so the account stays out until then.
+const LOGIN_OUT_MS = 24 * 3600 * 1000;
 
 // the tab's transcript (<projects>/<munged cwd>/<session>.jsonl), or null
 function transcriptOf(wsId, termId, feed) {
@@ -1656,6 +1660,19 @@ async function handleFailure(wsId, termId, feed) {
   if (await netFailure(wsId, termId, feed, type, tx)) return;
   if (!claudeTab) { notifyAttention(wsId, termId, 'failed'); return; }
   const acct = termAccount.get(termId) || accounts.LOGIN;
+  // The claude.ai LOGIN session expired ("Login reached its time limit · Please
+  // run /login", StopFailure error=authentication_failed, seen live 2026-11-05
+  // after the login sat unused for hours). An account switch cannot help —
+  // only a browser /login does — so mark the account out (the automatic order
+  // kept sending tabs onto the dead login); the first successful turn after
+  // the re-login clears it (noteTurnForAccount → clearIfProven).
+  if (type === 'authentication_failed' || /run\s*\/login/i.test(text || '')) {
+    const reason = /login/i.test(text || '') ? 'login expired' : 'authentication failed';
+    accounts.markExhausted(acct, Date.now() + LOGIN_OUT_MS, reason);
+    logger.warn(`term failed: term=${termId} ${acct} ${reason} — run /login in a tab`);
+    notifyAttention(wsId, termId, 'failed');
+    return;
+  }
   const c = accounts.classifyFailure({ type, message: f.message }, feed.rateLimits, text, Date.now(), quota);
   if (!c.usageLimit) { notifyAttention(wsId, termId, 'failed'); return; }
   accounts.markExhausted(acct, c.until, c.reason);

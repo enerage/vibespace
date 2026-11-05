@@ -71,6 +71,14 @@ must check these before merging (details in the branch summary / CLAUDE.md):
       shortcuts. Deliberately left for Valentin (touches his real machine state).
 
 ## Bugs
+- [ ] **Automatic account order flip-flops right at the room boundary** (seen in
+      the placementflow-8ua2 log 2026-11-05: `top account login -> main-3oam`
+      at 00:44:27 and `main-3oam -> login` 11 s later, again at 03:48, with
+      idle tabs moved onto each "new" top within seconds). MAIN sits at 94→95 %
+      7-day usage, so its 5h/7d readings flap it in and out of "room" and the
+      rank order follows, churning agents with /exit+relaunch. Idea: hysteresis
+      (an account that just gained/lost room keeps its rank for N minutes), or
+      require a clear margin (e.g. room only < 90 %).
 - [x] **Space stops typing in every agent tab** (2026-09-29, closed 2026-10-02):
       after a native `confirm()` the window never got real focus back, so keypress
       stopped firing and xterm's Space (keypress-only) died while letters (keydown)

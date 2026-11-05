@@ -1286,6 +1286,17 @@ async function runSmoke(hooks = {}) {
       turnOk && tasksOk && askOk && askClearOk && idleOk && subOk && failOk && failStays && failCleared && permText && sub0 === p,
       JSON.stringify({ turnOk, tasksOk, askOk, askClearOk, idleOk, subOk, failOk, failStays, failCleared, permText, sub0: sub0 === p }));
 
+    // an expired claude.ai login (StopFailure error=authentication_failed, seen
+    // live 2026-11-05: "Login reached its time limit · Please run /login") says
+    // the fix, not a bare kind (light tooltip, strip, toast body)
+    {
+      const q = feed.reduce(null, 'hook', 'StopFailure', { error: 'authentication_failed' }, 2000);
+      check('claude feed: a login-expiry failure says run /login',
+        Boolean(q.failure && q.failure.type === 'authentication_failed')
+        && feed.attentionText(q) === 'turn failed: the Claude login expired — run /login in this tab',
+        feed.attentionText(q) || 'no text');
+    }
+
     // a dialog is closed only by the thread that opened it: a background
     // subagent's tool calls must not clear the main agent's question
     {
