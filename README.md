@@ -2,123 +2,113 @@
 
 # VibeSpace
 
-**One taskbar app per repository. File tree, code editor, git review and named
-Claude Code agent terminals, in a single window that belongs to your repo.**
+**One window per git repository, with as many Claude Code agents in it as you
+like, and they all come back after a restart.**
 
-VibeSpace gives every git repository its own Windows app identity (its own
-taskbar icon, its own pin, its own logo), and inside that window you run, watch,
-and supervise any number of Claude Code agents. Close the window, reopen it next
-week: every conversation comes back exactly where it left off.
+VibeSpace is a desktop app (Windows first, macOS too) for people who run many
+[Claude Code](https://github.com/anthropics/claude-code) agents at once.
+Each repository gets its own window and its own taskbar app: a file tree, a
+code viewer, a read-only git view, and a row of named agent tabs. Every tab
+tells you at a glance whether its agent is working, waiting for you or done.
+Close the window, reboot the PC, update Claude Code: every conversation
+resumes where it was.
 
-![VibeSpace workspace](assets/screenshot.png)
+It runs the unmodified Claude Code CLI with your own subscriptions. There is no
+VibeSpace account, no server and no telemetry.
 
-*Three agents on one repo: amber = working, green = finished, red pulse = waiting
-for your answer. Left: git-colored file tree. Top: Monaco editor.*
+> **Status:** built by one person for their own daily use (10-20 agents
+> across several repos on Windows) and offered as-is, for free. It leans on
+> Claude Code details that are not a stable API (hooks, the status line,
+> transcript files), so a Claude Code update can break something until it is
+> fixed here. Issues are welcome; there is no support promise.
 
-## Why
+## Who it is for
 
-Running multiple Claude Code agents across repos from a pile of terminal windows
-sucks: you lose track of which agent is waiting on you, windows die with your
-shell, and there's no sense of "the place where I work on *this* project."
-VibeSpace is that place, built for people who live in agents all day.
+- You run several Claude Code agents in parallel and keep losing track of
+  which one is waiting on you.
+- You work on Windows, where most agent tools are Mac-first.
+- You want agents to survive a closed window, a crash or a reboot without
+  hunting for session ids.
 
-- **Per-repo identity**: each workspace pins to the taskbar as its own app with
-  its own logo (Windows AppUserModelID, the Chrome-profile trick).
-- **Agents never die**: a window reload or crash *re-attaches* to the running
-  claude processes (same PIDs, scrollback restored) instead of killing them.
-  Restarting VibeSpace, a Claude Code update or a PC reboot resumes every
-  conversation automatically.
-- **Supervision, not staring**: every agent tab tells you its state at a glance
-  (working, needs you, finished, or finished with background work still
-  running), with toasts, a taskbar badge, an agent board and your phone.
-- **Agents do the work, you review**: the git views are read-only on purpose,
-  and nothing in the UI competes with what you'd ask an agent to do.
-- **Deliberately plain**: no bundler, no framework, no VibeSpace account, no
-  cloud. Electron + xterm.js + node-pty + Monaco, about 12k lines of readable
-  JavaScript.
+If you run one agent at a time in one terminal, you don't need this.
+
+## Screenshots
+
+<!-- TODO: workspace window with several agent tabs (lights: working / needs you / done) -->
+<!-- TODO: agent board (Ctrl+Shift+B) -->
+<!-- TODO: Inbox of final replies -->
+<!-- TODO: git sidebar with a side-by-side diff -->
+
+*Screenshots coming soon.*
 
 ## Features
 
-### Agents
+- **One window per repo.** Its own taskbar button, pin and logo (Windows
+  AppUserModelID; on macOS its own Dock tile), and a launcher that lists every
+  workspace.
+- **Agents that survive restarts.** A reloaded or crashed window re-attaches to
+  the running agents (same processes, scrollback restored). Restarting the app
+  or the PC resumes each tab's conversation with `claude --resume <id>`, and
+  the id comes straight from Claude Code, so `/clear` and `/resume` are
+  followed exactly.
+- **Status lights on every tab.** Amber = working, red = needs you (a
+  permission or a question, with the reason on hover), red ✕ = the turn
+  failed, green = done, blue ring = done but its background work still runs.
+  Toasts and a taskbar badge when an agent needs you; Ctrl+Shift+U jumps to
+  the next one.
+- **Inbox** (📥, Ctrl+Shift+M). The final reply of every turn, failed turns and
+  open questions of the window's agents, with unread marks, so a report
+  doesn't drown under tool output.
+- **Agent board** (▦, Ctrl+Shift+B). Every agent as a card in Needs you /
+  Working / Done, with context, cost and tasks, and a quick reply box.
+- **On each tab:** context meter, task progress, model and effort, prompt
+  cache countdown, and a peek card with the start of the last reply.
+- **Worktree tabs.** An agent in its own git worktree, so parallel agents never
+  edit the same files; closing the tab removes the worktree only when nothing
+  would be lost.
+- **Parked agents.** Stop an agent but keep its conversation on a shelf, and
+  resume it days later.
+- **Git view, review only.** Changes with a side-by-side diff, searchable
+  history, ahead/behind, and a one-click fast-forward when the remote has new
+  commits. Everything else in git is left to your agents.
+- **Files.** Live git-coloured file tree, Monaco editor tabs, Ctrl+P file
+  finder, full-text search, `file:line` links in agent output, image/video
+  preview.
+- **Multiple accounts.** Use the subscriptions you pay for: add more Claude
+  accounts (each tab shows which one it runs on; the top bar shows each
+  account's 5-hour and weekly usage), and API endpoints such as z.ai GLM for
+  new conversations. When one of your accounts reaches its limit, its agents
+  can continue on another of your accounts.
+- **Phone control** through Claude Code's own Remote Control: your agents show
+  up in the Claude phone app, and "Away" mode decides when your phone buzzes.
+- **Internet drops** make agents wait quietly and continue by themselves when
+  the connection is back.
+- **Terminal details:** keyboard selection in Claude's prompt
+  (Shift/Ctrl+Shift + arrows), correct emoji widths, Ctrl+F search, paste and
+  file drop.
+- 20 colour themes, terminals docked right or bottom, crash-safe saved state.
 
-| | |
-|---|---|
-| 🔵 **Status lights** | amber = working · red pulse = needs you (🔒 permission, **?** question) · red ✕ = the turn failed · green = finished. Hover the light for the reason, e.g. "needs permission: Bash — npm test". Permission prompts turn the light red at once |
-| ◌ **Background state** | a tab whose turn finished while its subagents or shell commands still run shows a spinning blue ring and lists them. It is waiting on its own work, not on you; Claude continues by itself when they end |
-| ➕ **+ Claude ▾** | the tab bar's one "new" button: click = new agent; ▾ or right-click = *New agent*, *New agent with model* (Opus / Sonnet / Haiku, kept across restarts), *New agent in a worktree*, *New terminal*, *Send to cloud…*, then **Resume**: parked agents, *All conversations…* (Claude's picker), kept worktrees, cloud sessions |
-| ⎇ **Worktree tabs** | an agent in its own git worktree (`.claude/worktrees/<name>` on branch `vs/<name>`), so parallel agents never touch each other's files. Optional per-workspace setup command (e.g. `npm ci`) and `.env` copy for new worktrees (⚙ Preferences). Tab menu: *Ask agent to merge back*. Closing the tab removes the worktree only when nothing would be lost, and says why when it keeps it |
-| 🅿 **Parked agents** | tab right-click → Park stops an agent but keeps its conversation, worktree and last reply on a shelf (🅿 n chip, hover for the last reply); click to resume it later. Never auto-resumed on restart |
-| 🏷 **Tabs name themselves** | a new agent tab takes Claude's own title for the conversation after your first message; a name you type always wins. Renaming a tab renames the Claude session too (phone and resume list) |
-| 📋 **Tab menu** | right-click a tab: Rename, Agent info (model, context, cost, session ID, transcript path), Copy name / session ID / resume command, Park, Close. Tabs drag to reorder and wrap onto extra rows when there are many |
-| 📊 **On every tab** | a context meter along the bottom edge (green / amber / red), a `3/7` task pill, an account chip (with 2+ accounts), an unread marker. Hover a tab for a peek card: state, model, context, cost, tasks and the start of the last reply |
-| ▬ **Status bar** | under the active terminal, one line: what the agent is doing and for how long, or the first line of its last reply (click to read it), plus prompt-cache countdown, context, model with its effort level (`Opus 5 · high`), tasks and subagents |
-| ▦ **Agent board** (Ctrl+Shift+B) | every agent as a card in Needs you / Working / Done, with context, cost and tasks; quick-reply box on finished agents; background `claude --bg` agents with Attach; other open workspaces listed below |
-| 💬 **Session tracking** | each tab's conversation id comes straight from Claude, so `/clear`, `/resume` and the picker are followed exactly. A `claude` you type by hand in a tab is tracked too. Dead sessions reopen Claude's resume picker |
+## Requirements
 
-### Staying in the loop
-
-| | |
-|---|---|
-| 🔔 **Notifications** | Windows toast when an agent needs your answer or a turn failed, with the reason; click focuses the window *and* the exact tab. You pick which kinds in Preferences ("finished" is off by default). Taskbar badge on the workspace icon |
-| 📱 **Phone control + Away** | every agent shows up in the Claude phone app (Claude Code Remote Control, named "workspace · tab"): read, answer questions, approve, send follow-ups. The 📱 At PC / Away button decides when your phone buzzes: away = screen locked, 10 min idle or set by hand. Opt out per workspace |
-| ⌨️ **Ctrl+Shift+U** | jump to the next tab that needs you |
-| 📈 **Plan usage chip** | top bar: each Claude account's 5-hour and 7-day usage with both reset countdowns, side by side and labelled when you have several; ▸ marks the account new agents start on |
-| 🌐 **Internet drops** | an agent whose turn failed because the internet went down waits quietly (no toast storm); the top bar shows ⚠ Offline · N waiting, and each agent continues by itself when the connection is back |
-| 👥 **Several Claude accounts** | ⚙ Preferences → Accounts: add extra Max/Pro subscriptions (tokens encrypted with Windows DPAPI). When an agent hits a usage limit, the same conversation continues on the next account in the same tab. **Automatic order** (on by default) uses the account whose weekly limit resets soonest first, so no allowance expires unused, and moves idle agents only when their prompt cache is cold · **z.ai GLM / any Anthropic-compatible API**: pick z.ai and paste your API key, for new conversations (a conversation never moves between Claude and GLM) |
-
-### Files, editor and git
-
-| | |
-|---|---|
-| 🌲 **File tree** | git-colored (modified / added / untracked / deleted), refreshed live as agents write files, keeps its scroll position and open folders. Right-click: New file / folder, Rename (F2), Delete to the Recycle Bin, Git history, Open / Reveal in File Explorer. Drop files from Explorer onto a folder to copy them in |
-| 📝 **Tabbed editor** | Monaco with per-file tabs, Edit / Save, each tab remembering its cursor and scroll. Files changed on disk by agents refresh in place (your unsaved edits always win) |
-| 🔗 **Clickable file:line** | `src/app.js:42` in an agent's output opens that file at that line |
-| 🔎 **Search** (Ctrl+Shift+F) | Files \| Git \| Search on the left: full-text search with match case / whole word / regex; click a hit to open it at that line |
-| ☁ **Send to cloud** | + ▾ → *Send to cloud…* starts a Claude Code cloud session on the account you pick (sign in once per account in ⚙ Preferences → Accounts), lists it, and *Bring back* teleports it into a tab. Agents can hand work off themselves with `assets/ps/cloud-send.ps1` |
-| 🌿 **Git sidebar** | Files \| Git tabs on the left, like VS Code. **Changes**: side-by-side diff of uncommitted work. **History**: searchable commit list with unpushed ↑, `agent` badges and "new since you looked" dots; click a commit for its files. Top-bar branch chip shows ahead/behind, kept fresh by a quiet background `git fetch`. When the remote has new commits, **⬇ Update (N)** fast-forwards them in one click (anything trickier goes to an agent). Otherwise read-only on purpose |
-| 🔍 **Ctrl+P** | fuzzy file finder over the whole repo |
-
-### Terminal
-
-| | |
-|---|---|
-| ⇧ **Keyboard selection in Claude's prompt** | Shift+←/→, Ctrl+Shift+←/→ (word), Shift+Home/End; then Backspace, Ctrl+C or just type. Claude Code can't do this itself yet |
-| 📎 **Copy, paste, drop** | Ctrl+C copies a selection (and interrupts only when nothing is selected), Ctrl+V and right-click paste, dropping files onto a terminal pastes their paths |
-| 🔍 **Ctrl+F** | search inside the active terminal |
-| 😀 **Correct character widths** | emoji and wide characters take the same space Claude expects, so its redraws don't leave scrambled text behind |
-
-### The workspace
-
-| | |
-|---|---|
-| 🪟 **One app per repo** | its own taskbar button and pin, Explorer right-click → "Open with VibeSpace", a launcher that lists every workspace |
-| 🖼 **Logos** | click the logo to pick from the images found in the repo (or browse for a file, or drop an image on it). The window and taskbar icon update right away |
-| 🎨 **20 color themes** | 15 dark + 5 light, per workspace; UI, terminal colors and editor all follow |
-| ⇄ **Layout** | terminals docked right or at the bottom, resizable panes, window size and position remembered per workspace |
-| ↻ **Smart restart** | the ↻ button appears only when VibeSpace's own code changed or Claude Code auto-updated (the label says which). It restarts at once when no agent is busy and names the busy ones otherwise. "Restart this workspace" is always in ⚙ Preferences |
-| 🛟 **Crash-safe state** | saved state is flushed to disk before it replaces the old file and a backup copy is kept, so a reboot or power cut can't wipe a workspace. A Windows shutdown never saves "all tabs closed" |
-
-### Keyboard shortcuts
-
-| Keys | |
-|---|---|
-| Ctrl+P | find a file |
-| Ctrl+F | search the active terminal |
-| Ctrl+Shift+U | next tab that needs you |
-| Ctrl+Shift+B | agent board |
-| Ctrl+Shift+D | copy a diagnostics bundle |
-| F2 | rename the selected tree file |
-| Shift / Ctrl+Shift + arrows | select text in Claude's prompt |
+- **Claude Code CLI** on the PATH, and either a Claude subscription (Pro or
+  Max) or an API key for an Anthropic-compatible endpoint such as z.ai.
+- **Windows 10/11:** Git for Windows (Claude Code needs its Bash) and
+  Windows PowerShell (built in). PowerShell 7 is only needed for agents that
+  hand work to cloud sessions themselves.
+- **macOS 13 (Ventura) or newer**, Apple silicon or Intel.
 
 ## Install
 
-**Windows 10/11, and macOS 13+ (since 0.7.0; Mac guide: [GETTING-STARTED-MAC.md](GETTING-STARTED-MAC.md)).** New here on Windows? Follow **[GETTING-STARTED.md](GETTING-STARTED.md)**:
-Git for Windows, Claude Code, the installer, and a Claude login or a z.ai key, in
-about 10 minutes.
+- **Windows:** follow [GETTING-STARTED.md](GETTING-STARTED.md) (about 10
+  minutes).
+- **macOS:** follow [GETTING-STARTED-MAC.md](GETTING-STARTED-MAC.md).
+- Downloads are on the [Releases](https://github.com/enerage/vibespace/releases)
+  page.
 
-Short version: grab `VibeSpace Setup <version>.exe` from
-[Releases](../../releases), install, pin the launcher. Claude Code must be on
-PATH (`~/.local/bin/claude` is picked up automatically).
+The builds are **not code-signed**. Windows SmartScreen says "Windows protected
+your PC" (click **More info → Run anyway**); macOS says it can't check the app
+(use **System Settings → Privacy & Security → Open Anyway** once). The guides
+walk you through both. Installed copies offer new versions on the ↻ button.
 
 ### From source
 
@@ -127,48 +117,53 @@ git clone https://github.com/enerage/vibespace.git
 cd vibespace
 npm install
 npm run rebuild   # builds node-pty for Electron
-npm start         # launcher; or: npm run dev (adds opt-in hot reload)
+npm start         # launcher; npm run dev adds opt-in hot reload
 ```
 
-## How it works (short version)
+## What VibeSpace changes on your system
 
-- Each workspace is **its own Electron process** with a unique AppUserModelID
-  set before app-ready. That's what makes Windows treat it as a separate app.
-- Agent terminals are **xterm.js over node-pty (ConPTY)**. The claude processes
-  live in the main process, so a reloaded window *re-attaches* to them
-  (256 KB output ring per terminal restores scrollback).
-- Every claude is started with an injected `--settings` file. It points
-  Claude's own hooks and status line at a small **local server inside
-  VibeSpace** (127.0.0.1 only). That feed is where the lights, the reasons, the
-  context meter, tasks, background work and the exact conversation id come
-  from. Your own Claude settings and status line keep working alongside it.
-- Conversations live in `~/.claude/projects/` as usual. VibeSpace only remembers
-  which tab had which conversation and resumes it with `claude --resume <id>`.
-- Phone control is Claude Code's own Remote Control; extra accounts are
-  `claude setup-token` tokens. VibeSpace has no server of its own.
+Short version: it starts each agent with an extra `--settings` file (hooks and
+a status line that post to a local 127.0.0.1 server inside VibeSpace), defines
+a `claude` function in its own terminals, turns on Claude's Remote Control for
+your logged-in account unless you switch it off per workspace, stores extra
+account keys encrypted (DPAPI on Windows, Keychain on macOS), and reads Claude
+Code's own files to track conversations. It contacts only GitHub Releases (for
+updates) and your git remote; Claude Code talks to Anthropic and to endpoints
+you add. No telemetry.
+
+The full list is in **[PRIVACY.md](PRIVACY.md)**.
+
+## How it works
+
+- Each workspace is its own Electron process with its own app identity, which
+  is what makes Windows treat it as a separate app.
+- Terminals are xterm.js over node-pty (ConPTY on Windows). The agent
+  processes live in the main process, so a reloaded window re-attaches to them.
+- The injected `--settings` file points Claude Code's hooks and status line at
+  a local server inside VibeSpace. That feed drives the lights, reasons,
+  context meter, tasks, Inbox and the exact conversation id.
+- Conversations stay in `~/.claude/projects/` as usual. VibeSpace remembers
+  which tab had which conversation and resumes it by id.
+- Extra Claude accounts are `claude setup-token` tokens handed to that tab's
+  `claude` only; phone control is Claude Code's own Remote Control.
+- Plain stack: Electron, xterm.js, node-pty, Monaco; no bundler, no framework.
 
 ## Developing
 
 ```powershell
-npm run smoke    # 113 self-tests; run after touching main-process code
-npm run dist     # NSIS installer (electron-builder)
-```
-
-Regenerate the README screenshot (staged demo repo → captured window):
-
-```powershell
-electron . --open-repo=<demo-repo>          # once, to create the workspace
-electron . --workspace=<its-id> --screenshot=assets/screenshot.png
+npm run smoke    # self-tests (Windows and macOS); run after touching main-process code
+npm run dist     # Windows NSIS installer (electron-builder)
 ```
 
 Logs are in `~/.vibespace/logs/<workspace>.log`. Useful lines to search for:
 `tabs:` (which tab had which conversation, and when that changed) and `lag:`
-(where a slow keystroke's time went).
+(where a slow keystroke's time went). Ctrl+Shift+D in a window copies a
+diagnostics bundle.
 
 Read `CLAUDE.md` first: it encodes the decisions learned the hard way.
 `DECISIONS.md` is the one-line-per-decision log, `CHANGELOG.md` the full
-history, `TODO.md` the honest roadmap. The `RESEARCH-*.md` files document the
-bigger investigations:
+history, `TODO.md` the roadmap. The `RESEARCH-*.md` files document the bigger
+investigations:
 
 | File | About |
 |---|---|
@@ -180,7 +175,19 @@ bigger investigations:
 | `RESEARCH-MULTISUB.md` | several Claude subscriptions |
 | `RESEARCH-TERMINAL-GARBLE.md` | scrambled characters in the terminal |
 | `RESEARCH-INPUT-SELECTION.md` | keyboard selection in Claude's prompt |
+| `RESEARCH-MAC.md` | the macOS port |
+
+## Support
+
+VibeSpace is free. If it saves you time, you can support it through
+[GitHub Sponsors](https://github.com/sponsors/enerage).
 
 ## License
 
 [MIT](LICENSE)
+
+---
+
+Not affiliated with Anthropic. VibeSpace runs the unmodified Claude Code CLI
+with your own subscriptions; Claude and Claude Code are trademarks of
+Anthropic.
