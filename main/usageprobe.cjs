@@ -3,22 +3,21 @@
 // reading (claude reports usage only in ITS OWN agents' status line), so the
 // top-bar chip shows "—" for it. Valentin asked for one request instead.
 //
-// The request is claude's own `/usage` source: GET /api/oauth/usage with a
-// claude.ai login's access token (needs the user:profile scope; a setup-token
-// gets 403, so a token account needs its cloud sign-in, cloud.configOf).
-// No model request, nothing billed. Verified live 2026-10-22: utilization is
-// a percent (29.0), resets_at an ISO time.
+// VibeSpace never touches the login's token (2026-11-06): Anthropic's terms
+// let a subscription's OAuth token be used by Claude Code only, so the probe
+// runs the REAL claude's own `/usage` command and reads what it prints:
+//   `claude -p /usage --no-session-persistence`
+// It is a local command (no model request, nothing billed), and claude renews
+// its own sign-in as a side effect. Output seen on 2.1.31x:
+//   Current session: 29% used · resets Oct 22, 4pm (Europe/Berlin)
+//   Current week (all models): 49% used · resets Oct 26, 2pm (Europe/Berlin)
+// A token account needs its cloud sign-in (cloud.configOf): a setup-token
+// can't read usage. The tab variables are cleared like a cloud call's.
 //
-// The access token expires within hours when no claude on that login runs.
-// We never refresh it ourselves: refresh tokens rotate, and a race with VS
-// Code / claude windows on the same login could sign it out. Instead the
-// REAL claude refreshes it: `claude -p /usage --no-session-persistence` is a
-// local command (no model call) that renews the token as a side effect.
-//
-// Windows only for now: on macOS the login is a Keychain item (reading it
-// could prompt). At most one try per account per 30 min, machine-wide
-// (<dataRoot>/usage-probe.json). Results go where the status line puts them:
-// limits.json for the /login, accounts.json for token accounts.
+// Windows only for now (macOS untested). At most one try per account per
+// 30 min, machine-wide (<dataRoot>/usage-probe.json). Results go where the
+// status line puts them: limits.json for the /login, accounts.json for token
+// accounts.
 const fs = require('node:fs');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
@@ -30,22 +29,26 @@ const updater = require('./updater.cjs');
 
 const RETRY_MS = 30 * 60 * 1000;
 const CLAUDE_TIMEOUT_MS = 60 * 1000;
-const HTTP_TIMEOUT_MS = 15 * 1000;
-const USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
 const probeFile = () => path.join(U.dataRoot(), 'usage-probe.json');
+const ANSI = /\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g;
 
 // ---------- pure ----------
-// /api/oauth/usage JSON → the status line's raw shape, or null
-function fromUsageJson(j) {
-  if (!j || typeof j !== 'object') return null;
-  const w = (x) => {
-    if (!x || typeof x !== 'object' || typeof x.utilization !== 'number') return undefined;
-    const t = Date.parse(x.resets_at);
-    return { used_percentage: x.utilization, resets_at: Number.isFinite(t) ? Math.round(t / 1000) : null };
+// claude's /usage text → the status line's raw shape, or null
+function fromUsageText(text, now = Date.now()) {
+  const t = String(text || '').replace(ANSI, '');
+  const win = (re) => {
+    const m = re.exec(t);
+    if (!m) return undefined;
+    const at = m[2] ? accounts.parseReset(m[2], now) : null;
+    return { used_percentage: Number(m[1]), resets_at: at ? Math.round(at / 1000) : null };
   };
   const out = {};
-  if (w(j.five_hour)) out.five_hour = w(j.five_hour);
-  if (w(j.seven_day)) out.seven_day = w(j.seven_day);
+  const five = win(/Current session:\s*(\d+(?:\.\d+)?)\s*%\s*used(?:[^\n]*?(resets[^\n]*))?/i);
+  const seven = win(/Current week \(all models\):\s*(\d+(?:\.\d+)?)\s*%\s*used(?:[^\n]*?(resets[^\n]*))?/i);
+  if (five) out.five_hour = five;
+  // no 5-hour session started yet: claude prints no "Current session" line
+  else if (seven && !/Current session/i.test(t)) out.five_hour = { used_percentage: 0, resets_at: null };
+  if (seven) out.seven_day = seven;
   return Object.keys(out).length ? out : null;
 }
 
@@ -58,62 +61,39 @@ function isBlank(row, now = Date.now()) {
   return !fresh(lim.five_hour) && !fresh(lim.seven_day);
 }
 
-// ---------- helpers ----------
-function readCreds(file) {
-  try {
-    const o = JSON.parse(fs.readFileSync(file, 'utf8')).claudeAiOauth;
-    if (!o || typeof o.accessToken !== 'string') return null;
-    return { token: o.accessToken, expiresAt: Number(o.expiresAt) || 0, scopes: Array.isArray(o.scopes) ? o.scopes : [] };
-  } catch { return null; }
-}
-
-// the real claude, on that login only, renews the token (and prints /usage,
-// which we ignore). The tab variables are cleared like a cloud call's.
-function refreshViaClaude(id) {
+// ---------- the real claude's /usage ----------
+function runUsage(id) {
   return new Promise((resolve) => {
     const env = { ...process.env };
     for (const k of ['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_BASE_URL', 'CLAUDE_CODE_CHILD_SESSION']) delete env[k];
     const dir = cloud.dirFor(id);
     if (dir) env.CLAUDE_CONFIG_DIR = dir;
     let child;
+    let out = '';
     try {
       child = spawn(updater.claudeCommand().cmd, ['-p', '/usage', '--no-session-persistence'],
-        { cwd: U.dataRoot(), env, windowsHide: true, stdio: 'ignore' });
-    } catch (e) { resolve(false); return; }
+        { cwd: U.dataRoot(), env, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] });
+    } catch (e) { resolve(null); return; }
+    child.stdout.on('data', (c) => { if (out.length < 64 * 1024) out += c; });
     const timer = setTimeout(() => {
       try { spawn('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' }); } catch {}
-      resolve(false);
+      resolve(null);
     }, CLAUDE_TIMEOUT_MS);
-    child.on('error', () => { clearTimeout(timer); resolve(false); });
-    child.on('exit', (code) => { clearTimeout(timer); resolve(code === 0); });
+    child.on('error', () => { clearTimeout(timer); resolve(null); });
+    child.on('close', () => { clearTimeout(timer); resolve(out); });
   });
-}
-
-async function fetchUsage(token) {
-  const ctl = new AbortController();
-  const timer = setTimeout(() => ctl.abort(), HTTP_TIMEOUT_MS);
-  try {
-    const r = await fetch(USAGE_URL, { headers: { Authorization: 'Bearer ' + token, 'anthropic-beta': 'oauth-2025-04-20' }, signal: ctl.signal });
-    if (!r.ok) return { ok: false, why: 'HTTP ' + r.status };
-    const raw = fromUsageJson(await r.json());
-    return raw ? { ok: true, raw } : { ok: false, why: 'no windows in the answer' };
-  } catch (e) {
-    return { ok: false, why: e.name === 'AbortError' ? 'timed out' : e.message };
-  } finally { clearTimeout(timer); }
 }
 
 // one account → { ok, raw } | { ok: false, why }
 async function probe(id) {
-  const file = cloud.configOf(id).credentials;
-  let c = readCreds(file);
-  if (!c) return { ok: false, why: id === accounts.LOGIN ? 'no claude.ai login file' : 'no cloud sign-in for this account' };
-  if (!c.scopes.includes('user:profile')) return { ok: false, why: 'login lacks the user:profile scope' };
-  if (c.expiresAt < Date.now() + 2 * 60 * 1000) {
-    await refreshViaClaude(id);
-    c = readCreds(file);
-    if (!c || c.expiresAt < Date.now() + 60 * 1000) return { ok: false, why: 'claude did not renew the sign-in' };
+  // only whether a claude.ai login exists for it; the file is never read
+  if (!fs.existsSync(cloud.configOf(id).credentials)) {
+    return { ok: false, why: id === accounts.LOGIN ? 'no claude.ai login file' : 'no cloud sign-in for this account' };
   }
-  return fetchUsage(c.token);
+  const out = await runUsage(id);
+  if (out === null) return { ok: false, why: 'claude /usage did not finish' };
+  const raw = fromUsageText(out);
+  return raw ? { ok: true, raw } : { ok: false, why: 'no numbers in claude /usage output' };
 }
 
 function store(id, raw) {
@@ -162,4 +142,4 @@ function start() {
   if (timer.unref) timer.unref();
 }
 
-module.exports = { start, maybe, probe, fromUsageJson, isBlank, RETRY_MS };
+module.exports = { start, maybe, probe, fromUsageText, isBlank, RETRY_MS };

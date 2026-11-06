@@ -2075,20 +2075,25 @@ async function runSmoke(hooks = {}) {
     const tbNone = await inbox.readBefore(tfile + '.missing.jsonl', 'tq');
     try { fs.rmSync(tfile, { force: true }); } catch {}
     const qe = inbox.reduce(null, { wsId: 'w', termId: 't', event: 'PreToolUse', now: 1, body: { tool_name: 'AskUserQuestion', tool_input: { questions: [] }, tool_use_id: 'tq', transcript_path: tfile } }).state.entries[0];
-    // usage probe (main/usageprobe.cjs): /api/oauth/usage JSON → status-line
-    // shape; which chip rows show "—" (no reading, or every reset passed)
+    // usage probe (main/usageprobe.cjs): claude's own /usage text → status-line
+    // shape (VibeSpace never uses the token itself); which chip rows show "—"
     {
       const up = require('./usageprobe.cjs');
-      const raw = up.fromUsageJson({ five_hour: { utilization: 29.0, resets_at: '2026-10-22T14:00:00.226690+00:00' }, seven_day: { utilization: 0, resets_at: '2026-10-28T23:59:59.764011+00:00' }, seven_day_opus: null });
-      const nowS = Date.parse('2026-10-22T12:00:00Z') / 1000;
+      const now = new Date(2026, 9, 22, 12, 0).getTime(); // local time: parseReset reads the machine's zone
+      const txt = ['\u001b[1mYou are currently using your subscription\u001b[0m', '', 'Current session: 29% used · resets Oct 22, 4pm (Europe/Berlin)', 'Current week (all models): 49% used · resets Oct 26, 2pm (Europe/Berlin)', 'Current week (Fable): 0% used · resets Oct 26, 2pm (Europe/Berlin)'].join(String.fromCharCode(10));
+      const raw = up.fromUsageText(txt, now);
+      const noSession = up.fromUsageText('Current week (all models): 0% used · resets Nov 12, 1am (Europe/Berlin)', now);
+      const nowS = now / 1000;
       const rules = {
-        parsed: raw && raw.five_hour.used_percentage === 29 && raw.five_hour.resets_at === Math.round(Date.parse('2026-10-22T14:00:00.226Z') / 1000) && raw.seven_day.used_percentage === 0,
-        junk: up.fromUsageJson({ error: 'x' }) === null && up.fromUsageJson(null) === null,
+        parsed: Boolean(raw) && raw.five_hour.used_percentage === 29 && raw.five_hour.resets_at === new Date(2026, 9, 22, 16, 0).getTime() / 1000
+          && raw.seven_day.used_percentage === 49 && raw.seven_day.resets_at === new Date(2026, 9, 26, 14, 0).getTime() / 1000,
+        noSession: Boolean(noSession) && noSession.five_hour.used_percentage === 0 && noSession.five_hour.resets_at === null && noSession.seven_day.used_percentage === 0,
+        junk: up.fromUsageText('Login reached its time limit') === null && up.fromUsageText(null) === null,
         blankNone: up.isBlank({ limits: null }) === true,
-        blankStale: up.isBlank({ limits: { seven_day: { used_percentage: 100, resets_at: nowS - 60 } } }, nowS * 1000) === true,
-        notBlank: up.isBlank({ limits: { seven_day: { used_percentage: 48, resets_at: nowS + 3600 } } }, nowS * 1000) === false,
+        blankStale: up.isBlank({ limits: { seven_day: { used_percentage: 100, resets_at: nowS - 60 } } }, now) === true,
+        notBlank: up.isBlank({ limits: { seven_day: { used_percentage: 48, resets_at: nowS + 3600 } } }, now) === false,
       };
-      check('usage probe: usage JSON → status-line shape; blank rows = no reading or every reset passed', Object.values(rules).every(Boolean), JSON.stringify({ rules, raw }));
+      check('usage probe: claude /usage text → status-line shape; blank rows = no reading or every reset passed', Object.values(rules).every(Boolean), JSON.stringify({ rules, raw }));
     }
 
     check('inbox: a question keeps the text written right before it (focus view hides it)',

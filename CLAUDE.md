@@ -168,7 +168,7 @@ Key facts encoded in `main/sessions.cjs`:
 
 ## Developing VibeSpace
 
-- `npm run smoke` — 176 self-tests on Windows, 184 on macOS (as of 0.7.4) incl. pty echo and live session discovery. Run it after
+- `npm run smoke` — 177 self-tests on Windows, 185 on macOS (as of 0.7.4) incl. pty echo and live session discovery. Run it after
   touching main-process code, **from a normal shell**: inside a Claude pty the stripped
   PATH and nested ConPTY break the pty test (`powershell.exe` "File not found" /
   AttachConsole) — prepend System32 to PATH and give it its own console, or just use a
@@ -524,21 +524,24 @@ Key facts encoded in `main/sessions.cjs`:
     unlabelled chip. The red border means NO Claude account has room left.
     **A "—" = no agent ran on that account lately**: its usage only arrives
     in claude's status line, for the account that process uses. So
-    `main/usageprobe.cjs` (2026-10-22, Windows) fills a "—" with ONE GET of
-    claude's own `/api/oauth/usage` (what `/usage` reads; no model request;
-    `utilization` is a percent, `resets_at` ISO), at most every 30 min per
-    account machine-wide (`<dataRoot>/usage-probe.json`). Facts, tested live:
-    a setup-token gets 403 "scope requirement user:profile", so a token
-    account needs its cloud dir's login (`cloud.configOf`); the access token
-    in `.credentials.json` expires within hours when no claude on that login
-    runs (401 "expired"). NEVER refresh it ourselves (refresh tokens rotate:
-    a race with VS Code / claude windows on that login could sign it out):
-    `claude -p /usage --no-session-persistence` (real claude, token env
-    cleared, `CLAUDE_CONFIG_DIR` = the cloud dir) renews it as a side effect,
-    no model call, ~5-16 s. Results go to limits.json (/login, which accounts
-    now watches) or `accounts.setLimits`. From Git Bash, `claude -p "/usage"`
+    `main/usageprobe.cjs` (2026-10-22, Windows) fills a "—" by running the
+    REAL claude's `claude -p /usage --no-session-persistence` (token env
+    cleared, `CLAUDE_CONFIG_DIR` = the cloud dir for token accounts; local
+    command, no model call, ~3-17 s) and parsing its text
+    (`fromUsageText`: "Current session: N% used · resets …", "Current week
+    (all models): N% used · resets …", reset via `accounts.parseReset` in the
+    machine's zone; no session line = 5h 0%). At most every 30 min per
+    account machine-wide (`<dataRoot>/usage-probe.json`). **VibeSpace never
+    uses a login's token itself** (2026-11-06): Anthropic's terms allow a
+    subscription OAuth token only in Claude Code, and the first version sent
+    the `.credentials.json` access token straight to `/api/oauth/usage`. Only
+    the file's EXISTENCE is checked. Facts: a setup-token can't read usage
+    (403 "scope requirement user:profile"), so a token account needs its
+    cloud sign-in (`cloud.configOf`); claude renews its own expired access
+    token during `/usage`. Results go to limits.json (/login, which accounts
+    watches) or `accounts.setLimits`. From Git Bash, `claude -p "/usage"`
     needs `MSYS_NO_PATHCONV=1` or the slash becomes a path and it becomes a
-    real (billed) prompt. macOS: not yet (the login is a Keychain item).
+    real (billed) prompt. macOS: not yet.
   - **Automatic order** (0.6.53, `accounts.rankRows` pure + `ui/automove.js`
     pure): Claude accounts ranked by has-room, then soonest WEEKLY reset
     (a passed reset is projected forward by 7 d and its % reads 0), unknown

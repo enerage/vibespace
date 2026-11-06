@@ -4,6 +4,13 @@ Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 
 ## [Unreleased]
 
+### Changed
+- **The usage check for a "—" account asks Claude Code itself.** It used to take
+  the account's Claude sign-in token and call Anthropic's usage address with
+  it; Anthropic's terms allow that token only inside Claude Code. VibeSpace now
+  runs Claude Code's own `/usage` and reads the numbers it prints, so the token
+  never leaves Claude Code. The chip looks the same (2026-11-06).
+
 ### Fixed
 - **An expired claude.ai login no longer attracts agents to a dead account.**
   When the login session hit its time limit ("Login reached its time limit ·
