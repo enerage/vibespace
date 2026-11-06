@@ -215,7 +215,7 @@ function watchResume(tab, chunk) {
 // A gentle move's /exit can open claude's "Background work is running" confirm
 // (scheduled tasks, background shells). Its options are "Exit and stop tasks",
 // "Move to background and exit" and "Stay": a move must never end that work,
-// and it used to come back every 30 min (Valentin, 2026-10-29: "something
+// and it used to come back every 30 min (2026-10-29: "something
 // constantly wants to close my agents"). So: Esc (= Stay), and the tab is not
 // moved again while this claude runs.
 const EXIT_WATCH_MS = 20000;

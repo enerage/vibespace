@@ -40,7 +40,7 @@ building this now; findings below are meant to feed that work.
 | 6 | **Search/filter** (message, author, path; `--grep`, `--author`, `-- <path>`; optionally `-S`/`-G` pickaxe for content) | Medium-high | Low-medium | Sublime Merge's signature feature; with hundreds of agent commits/day, search by message/path matters. Pickaxe is slow on big repos — make it explicit. |
 | 7 | **Compare range** (select two commits, or "everything since sha X" as one diff) | Medium-high | Low (same diff code) | Reviewing an agent's 12 micro-commits as one change. SM Ctrl+click two commits; VS Code "incoming/outgoing" groups. |
 | 8 | **Graph lanes** | Medium | Medium | Useful when agents use branches/worktrees; nearly pointless on linear main. VS Code SCM Graph layout is ~90 LOC, O(n·lanes). |
-| — | Blame | Low-medium | Medium | Line-level "who" is less useful when every line is authored by "Valentin + Claude". Defer; file history covers most needs. If added, `git blame --porcelain -w -M` streaming. |
+| — | Blame | Low-medium | Medium | Line-level "who" is less useful when every line is authored by "the owner + Claude". Defer; file history covers most needs. If added, `git blame --porcelain -w -M` streaming. |
 | — | Stash list, tags, reflog UI | Low | Low | Reflog is a lifesaver but a terminal-level recovery tool; maybe a hidden "recover" view later. |
 
 Agent-specific extras worth considering (cheap, high leverage):

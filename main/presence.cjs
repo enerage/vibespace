@@ -1,7 +1,7 @@
 'use strict';
 // Away mode. Claude Code skips phone pushes (Remote Control) while the file named
 // by $CLAUDE_CLIENT_PRESENCE_FILE exists (2.1.181+). VibeSpace owns that marker
-// machine-wide: <dataRoot>/presence/at-pc exists iff Valentin is at the PC.
+// machine-wide: <dataRoot>/presence/at-pc exists iff the user is at the PC.
 // State lives in <dataRoot>/presence.json so a toggle or a lock seen by one
 // workspace process reaches all of them; every workspace process runs this and
 // every write is idempotent.
@@ -15,7 +15,7 @@ const logger = require('./logger.cjs');
 
 const MODES = new Set(['present', 'away', 'idle']);
 const IDLE_AFTER_S = 600; // present + this much idle → idle
-const ARM_AFTER_S = 120; // manual away + this much idle → he really left
+const ARM_AFTER_S = 120; // manual away + this much idle → they really left
 const BACK_UNDER_S = 30; // input this recent → back at the PC
 const TICK_MS = 15000;
 

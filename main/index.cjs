@@ -172,7 +172,7 @@ function ensureHookSettings(wsId) {
   // With the claude data feed listening, main writes the status words itself
   // from the feed's HTTP hooks (status.wordForHook, wired next to claudefeed.onData) — no Git Bash spawn per
   // prompt/tool. Those command hooks BLOCK claude: under load a cold bash start
-  // took >10 s and held Valentin's prompt ("hook timed out after 10s",
+  // took >10 s and held the user's prompt ("hook timed out after 10s",
   // 2026-09-29). The Git Bash hooks remain only as the no-feed fallback.
   const settings = claudefeed.port() ? { hooks: {} } : {
     hooks: {
@@ -663,7 +663,7 @@ function createWorkspaceWindow(ws, { shot = false } = {}) {
   winInfo.set(win.id, { wsId: ws.id });
   win.once('ready-to-show', () => {
     if (shot) return; // screenshot mode shows the window itself
-    // after ↻ Restart: always maximized + focused (Valentin, 2026-09-29);
+    // after ↻ Restart: always maximized + focused (2026-09-29);
     // otherwise restore the remembered maximized state
     if (restarted || (saved && saved.maximized)) win.maximize();
     if (restarted) bringToFront(win);
@@ -2155,7 +2155,7 @@ function finalStateSave() {
 // then freeze the state files: Windows may kill the terminal processes before
 // us, and the renderer would read those exits as "tabs closed" and save an
 // empty tab list over the good state. A reboot then restores the state exactly
-// as it was (2026-10-01: a reboot cost recruitica its conversation + layout).
+// as it was (2026-10-01: a reboot cost a workspace its conversation + layout).
 app.on('session-end', () => {
   logger.info('windows session ending (shutdown/restart/logoff) — final state save, then frozen');
   finalStateSave();

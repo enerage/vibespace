@@ -113,7 +113,7 @@ Date: 2026-10-02. Claude Code on this machine is 2.1.287, `"tui": "fullscreen"` 
 
 | Knob | What it does |
 |---|---|
-| `tui` setting / `/tui` (`fullscreen` vs classic) | Selects the renderer. Valentin runs fullscreen. Classic has its own fixed bugs (2.1.282) and the open #92678. |
+| `tui` setting / `/tui` (`fullscreen` vs classic) | Selects the renderer. The owner runs fullscreen. Classic has its own fixed bugs (2.1.282) and the open #92678. |
 | `CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1` (2.1.132) | Opts out of the alt-screen renderer. |
 | `CLAUDE_CODE_NO_FLICKER=1` (2.1.89) | Older opt-in to the alt-screen renderer. |
 | `CLAUDE_CODE_FORCE_SYNC_OUTPUT=1` (2.1.129) | Forces DEC 2026. Useless through the in-box ConPTY because it strips 2026. Only meaningful with `useConptyDll: true`. |

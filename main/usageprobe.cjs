@@ -1,7 +1,7 @@
 'use strict';
 // Usage probe (2026-10-22): an account with no agent running has no limits
 // reading (claude reports usage only in ITS OWN agents' status line), so the
-// top-bar chip shows "—" for it. Valentin asked for one request instead.
+// top-bar chip shows "—" for it. One request was asked for instead.
 //
 // VibeSpace never touches the login's token (2026-11-06): Anthropic's terms
 // let a subscription's OAuth token be used by Claude Code only, so the probe

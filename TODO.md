@@ -44,23 +44,23 @@ must check these before merging (details in the branch summary / CLAUDE.md):
 
 - [x] Phase 1 core port (0.7.0, 2026-10-18; 5 builders: shell/PATH/processes, accounts+Keychain, renderer, app/packaging/CI, image/video preview).
 - [x] Mac CI green: unpackaged + packaged `--smoke` on Apple Silicon and Intel runners (156/156, 2026-10-18).
-- [ ] Hands-on checklist on the sister's MacBook (z.ai preset, one workspace, preview).
+- [ ] Hands-on checklist on a tester's MacBook (z.ai preset, one workspace, preview).
 - [ ] Phase 2: per-repo Dock pins (per-workspace .app clones, spike on a real Mac first).
 - [ ] Phase 2: Send to cloud on Mac (`cloud-send.sh`, `script -q /dev/null` for the TTY).
 - [ ] Phase 2: Finder "Open with VibeSpace" (Quick Action / `open-file`).
 - [ ] Real-install checks of the updater: Mac /Applications swap + relaunch + TCC re-prompts; Windows silent install into a per-machine dir (UAC).
 - [ ] Model guard gap: "Default" picked in a z.ai tab while already on that model deletes the global `model` key (no switch signal).
 - [ ] Later: $99 Developer ID + notarization if the Mac build stays in use.
-- [x] One-click self-updater (Mac + Windows), folded into ↻ Restart; releases only on Valentin's "release" (0.7.1).
+- [x] One-click self-updater (Mac + Windows), folded into ↻ Restart; releases only on the owner's "release" (0.7.1).
 - [x] z.ai tabs: GLM-only /model list, Fable slot → GLM, effort levels GLM really has, global-default guard (0.7.1; effort can't be narrowed: claude ignores _SUPPORTED_CAPABILITIES for base-URL endpoints, z.ai maps every level).
 - [ ] Mac: `macOptionIsMeta` as a setting (non-US layouts type `@`/`{` with Option); maybe default from `navigator.keyboard.getLayoutMap()`.
 - [ ] Mac: skip the 0.3-3 s login-shell PATH probe in workspaces when the launcher already resolved it (pass it down in env).
-- [ ] Mac: confirm on ⌘Q while agents are busy? (no busy-confirm on Windows close either; decide with Valentin.)
+- [ ] Mac: confirm on ⌘Q while agents are busy? (no busy-confirm on Windows close either; the owner decides.)
 - [ ] Mac real-machine checks: ⌘C/⌘V not pasting twice with the Edit-menu roles, powerlevel10k instant prompt + our precmd, `!` in single quotes in interactive zsh, Dock tile per workspace launched from the executable, notification permission prompt.
 - [ ] `fs:read` IPC doesn't check that the path is inside the sender's repo (unlike `fs:write`); found while building preview.
 - [x] "⬇ Update (N)" pill: one-click fast-forward of new upstream commits, refusals → Ask an agent, "Can't check for updates" on a sign-in failure (0.7.3).
 - [ ] Seen in the 0.7.3 live test (throwaway home): the `--remote-control` name of new tabs lost its "·" (ws · tab), and an idle tab once counted as "working" right after a window resize. Check on a real workspace.
-- [ ] Sister's Mac: does VibeSpace's git fetch sign in to the private ad-studio repo she cloned with GitHub Desktop? (hover the branch chip; if not, the pill offers an agent to set up `gh auth setup-git`.)
+- [ ] Tester's Mac: does VibeSpace's git fetch sign in to the private repo they cloned with GitHub Desktop? (hover the branch chip; if not, the pill offers an agent to set up `gh auth setup-git`.)
 
 ## Packaging & distribution
 - [x] **electron-builder packaging** (0.5.0) — NSIS installer + unpacked build
@@ -68,11 +68,11 @@ must check these before merging (details in the branch summary / CLAUDE.md):
       stays false (winpty gyp breaks; installed prebuilds are copied).
 - [ ] **Install + migrate** — install `dist\VibeSpace Setup 0.5.0.exe`, re-point
       shortcuts + context menu at the installed binary, migrate existing workspace
-      shortcuts. Deliberately left for Valentin (touches his real machine state).
+      shortcuts. Deliberately left for the owner (touches the dev PC's real machine state).
 
 ## Bugs
 - [ ] **Automatic account order flip-flops right at the room boundary** (seen in
-      the placementflow-8ua2 log 2026-11-05: `top account login -> main-3oam`
+      a workspace's log 2026-11-05: `top account login -> main-3oam`
       at 00:44:27 and `main-3oam -> login` 11 s later, again at 03:48, with
       idle tabs moved onto each "new" top within seconds). MAIN sits at 94→95 %
       7-day usage, so its 5h/7d readings flap it in and out of "room" and the
@@ -92,7 +92,7 @@ must check these before merging (details in the branch summary / CLAUDE.md):
       claude exits by itself (parents already dead, no safe way to trace them).
 - [x] **Drop a file/photo onto a terminal did nothing** (0.6.13) — now pastes the
       quoted path(s) like Windows Terminal; Claude attaches dropped images.
-      Needs Valentin's manual check (a real Explorer drag can't be scripted).
+      Needs a manual check (a real Explorer drag can't be scripted).
 
 ## Claude-data UI (RESEARCH-CLAUDE-DATA.md; decided 2026-09-29)
 
@@ -173,7 +173,7 @@ Build in this order. Verify the statusLine and HTTP hooks live in a pty before r
       pinned one; pinning can't be scripted on Windows 11 (S).
 - [ ] Typing lag: if `lag:` lines keep showing high `cpu`, add the "priority
       guard" (lower the priority of agents' vitest/tsc/build processes, keep
-      claude + UI normal). Valentin chose "measure first" on 2026-10-02 (M).
+      claude + UI normal). The owner chose "measure first" on 2026-10-02 (M).
 - [ ] Garbled terminal characters after the Unicode 11 fix (0.6.34): next A/B is
       `useConptyDll: true` + `CLAUDE_CODE_FORCE_SYNC_OUTPUT=1`
       (RESEARCH-TERMINAL-GARBLE.md). Only if it still happens; ask for a screenshot (M).
@@ -281,8 +281,8 @@ Build in this order. Verify the statusLine and HTTP hooks live in a pty before r
       button when the view is scrolled up (CLAUDE.md, right-click bullet).
       Upstream bug (anthropics/claude-code); a VibeSpace-side fix isn't possible
       without taking selection away from Claude. Re-test after Claude updates (S).
-- [ ] Cloud handoffs of 2026-10-12 (FlexIQ ×3, PlacementFlow
-      `wip/review-filters-sim-copy`, JustLinked `wip/provider-balances`): after
+- [ ] Cloud handoffs of 2026-10-12 (5 sessions in 3 other repos, on
+      `wip/` branches): after
       they finish, each repo's local agent pulls its `wip/` branch, verifies and
       merges by that repo's rules (S each).
 - [ ] Idea: tab right-click → "Hand off to cloud" that sends the handoff prompt

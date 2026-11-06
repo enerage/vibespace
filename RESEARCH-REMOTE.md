@@ -1,7 +1,7 @@
 # Research: phone control of VibeSpace agents ("away mode")
 
-2026-09-29. The question: when Valentin is away from the PC (gym), can he get pushes only then,
-and answer questions, approve prompts and continue the SAME local agents from his phone?
+2026-09-29. The question: when the user is away from the PC (gym), can they get pushes only then,
+and answer questions, approve prompts and continue the SAME local agents from their phone?
 Three research passes (official Anthropic, third-party ecosystem, VibeSpace codebase fit)
 are appended below. This top section is the synthesis.
 
@@ -20,8 +20,8 @@ reliability on Windows, so run a hands-on test before writing any code.
   and new prompts. Pushes fire on "action required" and "Claude decided"
   (`agentPushNotifEnabled` is already true in `~/.claude/settings.json`).
 - **Away mode is a documented hook:** phone pushes are skipped while the file named by
-  `CLAUDE_CLIENT_PRESENCE_FILE` exists (v2.1.181+). VibeSpace creates it while Valentin is
-  at the PC and deletes it when he's away.
+  `CLAUDE_CLIENT_PRESENCE_FILE` exists (v2.1.181+). VibeSpace creates it while the user is
+  at the PC and deletes it when they're away.
 - The PC only makes outbound HTTPS connections: no open ports, no tunnel, no auth to build.
   After sleep or a network drop it reconnects on its own.
 
@@ -34,7 +34,7 @@ reliability on Windows, so run a hands-on test before writing any code.
   (#52084, #59855, #64797). Windows issue #55619 says a prompt ALREADY waiting when you
   leave doesn't show on mobile. There are recent Windows 403 and landing-page bugs
   (2026-09-08, 2026-09-25).
-- **The phone can't set Auto/Bypass mode.** Valentin runs bypassPermissions by default, so
+- **The phone can't set Auto/Bypass mode.** The owner runs bypassPermissions by default, so
   most asks will be questions and "done, what next", not permission prompts. That is fine
   for this use.
 - **Privacy:** while Remote Control is connected, the full transcript and tool activity are
@@ -335,7 +335,7 @@ Sources: https://support.claude.com/en/articles/13947068, https://code.claude.co
 
 # Phone control of Claude Code: third-party landscape, sentiment, and DIY building blocks
 
-Research date: 2026-09-29. Scope: a Windows Electron app (VibeSpace) that already owns ~20 interactive `claude` ConPTY sessions (5 repos x ~4 agents) and has command hooks plus a local HTTP hook/statusLine feed. Goal: when Valentin is away (gym), push only then, and let him approve permissions, answer questions and send follow-ups to the same local sessions.
+Research date: 2026-09-29. Scope: a Windows Electron app (VibeSpace) that already owns ~20 interactive `claude` ConPTY sessions (5 repos x ~4 agents) and has command hooks plus a local HTTP hook/statusLine feed. Goal: when the user is away (gym), push only then, and let them approve permissions, answer questions and send follow-ups to the same local sessions.
 
 GitHub stats pulled live with `gh api` on 2026-09-29 (stars / last push).
 
@@ -530,7 +530,7 @@ Sources:
 1. **Cheapest path:** add an opt-in "Remote Control" toggle that launches claude tabs with `--remote-control "<ws>/<tab name>"`, owns `CLAUDE_CLIENT_PRESENCE_FILE` from `powerMonitor`, and keeps the PC awake while away with agents busy.
    - Zero phone code; approvals and follow-ups go through the official app.
    - Risk: the documented approval-desync bugs, plus Windows issue #55619, where a prompt that was already pending before you left is invisible on mobile.
-   - Also needs claude.ai subscription auth, which Valentin has, and the per-user `/config` push toggles turned on.
+   - Also needs claude.ai subscription auth, which the owner has, and the per-user `/config` push toggles turned on.
 2. **DIY hook path:** VibeSpace's feed already receives HTTP hooks with the tab id. Add a blocking `PermissionRequest` HTTP hook, plus Notification/Stop, and have it forward to a Telegram bot only while away. The phone taps Approve/Deny, the hook returns allow/deny, and a timeout returns `ask`. Follow-ups and free-text answers are typed into the pty by VibeSpace only when the tab is idle.
    - No vendor dependency, and it works even when Remote Control misbehaves.
    - Content passes through Telegram, so it is not E2E.

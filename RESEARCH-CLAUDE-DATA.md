@@ -8,7 +8,7 @@ Formats marked [DOC] are from official docs but not yet tested inside a VibeSpac
 
 # Part A — Claude Code data surfaces for a wrapping app (VibeSpace)
 
-Researched 2026-09-29 against Claude Code **v2.1.284** (installed: `C:\Users\Valentin\.local\bin\claude.exe`, native build).
+Researched 2026-09-29 against Claude Code **v2.1.284** (installed: `%USERPROFILE%\.local\bin\claude.exe`, native build).
 Sources: raw markdown of the official docs (`https://code.claude.com/docs/en/<page>.md`), the `anthropics/claude-code` CHANGELOG.md, `claude --help`, and read-only inspection of `~/.claude`.
 Raw doc copies were fetched into a session scratchpad (not kept); re-fetch from the doc URLs cited below.
 
@@ -161,7 +161,7 @@ Record types seen across 24 recent transcripts (v2.1.28x) [DE-FACTO]:
 Emitted: `CSI ?1004h` (**focus reporting** — Claude uses focus-in/out to judge "user away" for notifications; xterm.js sends `CSI I`/`CSI O` on textarea focus/blur, so background tabs look "away"), `CSI ?2004h` (bracketed paste), `CSI ?2031h` (theme/color-scheme change notifications), `CSI ?1049h` (alt screen — fullscreen `tui` renderer is on for this user), `CSI ?1000h/1002h/1003h/1006h` (mouse tracking, SGR), `OSC 0;claude` then `OSC 0;✳ Claude Code` (title; idle glyph ✳; changelog: busy state uses spinner glyphs, fixed-width braille), `CSI ?9001h` is ConPTY's win32-input-mode. Not seen during idle: OSC 9 / 9;4 / 777 / 99 (expected — not a "supported" terminal and not busy). A busy-state probe was not run [UNVERIFIED which title glyphs appear when busy].
 
 ## 7. Side effects of this research
-- The pty probe launched claude.exe for ~12 s in `D:\Repositories\VibeSpace` then killed it; no message was sent (no transcript). Claude Code itself then updated its own `~/.claude.json` project entry (lastSessionId `30ed0967-...`, lastDuration 11973) and may have left a stale `~/.claude/sessions/<pid>.json` that Claude clears on next launch. No user config files were edited by me.
+- The pty probe launched claude.exe for ~12 s in `<repos>\VibeSpace` then killed it; no message was sent (no transcript). Claude Code itself then updated its own `~/.claude.json` project entry (lastSessionId `30ed0967-...`, lastDuration 11973) and may have left a stale `~/.claude/sessions/<pid>.json` that Claude clears on next launch. No user config files were edited by me.
 - Spotted in a transcript: a user-level Stop hook `powershell -ExecutionPolicy Bypass -File ...notify.ps1 stop` failed with `/usr/bin/bash: line 1: powershell: command not found` (session 33d619e8, 2026-09-26) — hooks default to Git Bash on Windows, and that bash lacked System32 on PATH (likely the Path/PATH bug fixed in e58c98d). Worth a look separately.
 
 ## 8. Unverified / to test before building
@@ -365,7 +365,7 @@ These results override Parts A–C where they disagree.
 - **PermissionRequest arrives ~0.1 s after PreToolUse** (has `tool_name`, `tool_input`,
   `permission_suggestions`; no `tool_use_id`). The `permission_prompt` Notification only
   comes ~6 s later; `idle_prompt` ~58 s after Stop.
-- Valentin's default mode is bypassPermissions, so permission prompts are rare for him.
+- The owner's default mode is bypassPermissions, so permission prompts are rare for them.
 - **Task tools are OFF by default in 2.1.284.** They appeared with
   `CLAUDE_CODE_ENABLE_TASKS=true` + `CLAUDE_CODE_ENABLE_TODO_TOOLS=true` (not isolated
   which one matters); `=1` alone didn't work. Files: `~/.claude/tasks/<sessionId>/<n>.json`
@@ -377,5 +377,5 @@ These results override Parts A–C where they disagree.
   untested. Deleted on exit.
 - **Titles:** busy shows ◐/◑ alternating ~1 s + session name, idle shows ✳. A pending
   permission prompt also shows ✳, so the title can't signal "needs approval". Claude
-  also emits OSC 99 notifications because Valentin has `preferredNotifChannel: kitty`.
+  also emits OSC 99 notifications because the owner has `preferredNotifChannel: kitty`.
 - Accepting the trust prompt programmatically: Down then Enter (plain Enter = "No, exit").

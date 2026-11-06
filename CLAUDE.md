@@ -14,7 +14,7 @@ Knowledge is tracked **as we go**, never batched for later:
 - Hard-won lesson/gotcha → the matching bullet in this file, same day.
 - New task/idea → `TODO.md`. Done task → checked off.
 - User preference or project fact → your agent memory (with Why + How-to-apply).
-- Valentin says **"update all docs"** → run the `/sync-docs` skill (the full sweep).
+- The owner says **"update all docs"** → run the `/sync-docs` skill (the full sweep).
   It's a rule, not a UI feature — there is deliberately no button for it.
 - A task is not done until the docs above are current. "I'll document it later"
   is how knowledge dies.
@@ -22,7 +22,7 @@ Knowledge is tracked **as we go**, never batched for later:
   with its docs, in one commit. Never leave verified work sitting uncommitted.
   Several agents share this working tree, and a restart, crash or lost
   conversation strands it: the `claude` wrapper sat uncommitted for hours while
-  it was the only thing tracking resumed conversations (Valentin, 2026-09-30).
+  it was the only thing tracking resumed conversations (2026-09-30).
   Stage only your own hunks, never `git add -A`. If you find verified work that
   is orphaned, commit it and say so in the message.
 
@@ -208,7 +208,7 @@ Key facts encoded in `main/sessions.cjs`:
   echo delays at cpu 93-100 %. Agents' whole-project tsc, guard runs, commit
   hooks and renders were running at claude's own Normal priority, and memory was
   overcommitted (an idle tab is paged out). The fix lives outside VibeSpace:
-  `D:\Repositories\AgentPriority` (claude + our electron AboveNormal, agent jobs
+  a separate process-priority tool on the dev PC (claude + our electron AboveNormal, agent jobs
   BelowNormal). Check that it runs before blaming the app.
 - Logs: `~/.vibespace/logs/<instance>.log` (dev-watch lines, pty spawns, session
   captures, renderer errors, term-status transitions). Renderer `console.warn/error`
@@ -314,7 +314,7 @@ Key facts encoded in `main/sessions.cjs`:
   `last_assistant_message`, full text), failed turns, and open questions /
   permission prompts, of the window's OWN workspace only. Why: with 10-20
   agents the final reply drowns under tool lines, background wake-ups and
-  peer-started turns (Valentin, 2026-10-20). It first listed every workspace
+  peer-started turns (2026-10-20). It first listed every workspace
   in every window; same list + same count everywhere was noise, so since
   2026-10-21 main answers `inbox:*` for the sender's workspace only (from
   its in-process store, never a ws id from the renderer).
@@ -510,7 +510,7 @@ Key facts encoded in `main/sessions.cjs`:
     tab's family can't tell.
   - **Adding accounts is preset-first** (0.6.50): `accounts.PRESETS` (today:
     `zai`, base URL + timeout + GLM model names + 1M auto-compact window, from
-    Valentin's working config) + `addPreset(id, label, key, { models })` share
+    the owner's working config) + `addPreset(id, label, key, { models })` share
     the endpoint store path with `addEndpoint`. Users never see env variables
     unless they pick "Other compatible API". When z.ai renames its models,
     update the preset (existing accounts keep theirs; Advanced overrides them).
@@ -638,7 +638,7 @@ Key facts encoded in `main/sessions.cjs`:
     inside an agent. The link itself isn't recorded locally; claude.ai/code lists it.
     **A hidden launch can't answer claude's folder-trust prompt**: in a repo the
     cloud config never trusted it hung forever, with no log line (found by the
-    FlexIQ agent, 2026-10-12). So the script sets
+    agent of another repo, 2026-10-12). So the script sets
     `projects["<repo with />"].hasTrustDialogAccepted = true` in the cloud dir's
     `.claude.json` first, stops claude after 120 s (`exit=timeout`), and keeps
     claude's stderr of any non-0 run in `~/.vibespace/cloud/logs/`. It uses
@@ -648,8 +648,8 @@ Key facts encoded in `main/sessions.cjs`:
     claude.ai connectors** (Google Sheets…) can borrow that account's cloud
     dir: `CLAUDE_CONFIG_DIR=<dataRoot>/cloud/<accountId>` with
     `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` and
-    `ANTHROPIC_BASE_URL` unset for that call (answered for the FlexFunnels
-    agent, 2026-10-20). Decrypting the `.dpapi` token instead gives a child
+    `ANTHROPIC_BASE_URL` unset for that call (answered for the agent of
+    another repo, 2026-10-20). Decrypting the `.dpapi` token instead gives a child
     with no connectors. That dir has its own settings/MCPs/transcripts.
 - **Keyboard selection in claude's prompt** (0.6.39, `renderer/workspace/ui/inputsel.js`,
   RESEARCH-INPUT-SELECTION.md). Claude has no keyboard-started selection, so
@@ -719,7 +719,7 @@ Key facts encoded in `main/sessions.cjs`:
   **Match letter shortcuts with `common.js` `keyLetter(e)`, never
   `e.key.toLowerCase()`**: on a Bulgarian/Russian/Greek layout `e.key` is the
   layout's own letter (the V key gives "м"), so Ctrl+V/C and every shortcut
-  silently fell through to the pty (Valentin, 2026-10-26: "Ctrl+V doesn't
+  silently fell through to the pty (2026-10-26: "Ctrl+V doesn't
   work on BG"). `keyLetter` keeps a Latin `e.key`, else uses `e.code`.
 - **Git** (0.6.14, sidebar since 0.6.15): `main/githistory.cjs` (log/commit/fileAt/branch,
   read-only) + `renderer/workspace/ui/history.js`. The lists live in the LEFT
@@ -833,7 +833,7 @@ Key facts encoded in `main/sessions.cjs`:
   budget that runs out only misses deep folders. It skips `U.IGNORED_NAMES`,
   every dot-folder except `.github`, and agent worktrees. Thumbnails are 96 px
   PNG data URLs made by sharp, 6 at a time (one by one took 3.4 s on
-  Recruitica); `.ico` goes through as-is because sharp can't read it. An image
+  a real project repo); `.ico` goes through as-is because sharp can't read it. An image
   sharp can't read is dropped: it couldn't become the icon either. To check a
   native file dialog's folder in a test, read the `Address: …` pane of the
   `#32770` child window through UI Automation, then close it with WindowPattern.
@@ -855,8 +855,8 @@ Key facts encoded in `main/sessions.cjs`:
   open snapshot, per-change lines and "untracked … would NOT resume" warnings
   (`main/tablog.cjs`, fed from `persistState`). Check it first when a restart
   "lost" a conversation. It is also the REPAIR source. If a state.json is
-  damaged and has no `.bak` (all-NUL after the 2026-10-01 reboot: recruitica,
-  flexiq, flexfunnels, justlinked), take the last `tabs:` open/+ lines for that
+  damaged and has no `.bak` (all-NUL after the 2026-10-01 reboot: four
+  workspaces), take the last `tabs:` open/+ lines for that
   workspace (read the log with `grep -a`, since the log tail can hold NULs
   too). Then, WHILE ITS WINDOW IS CLOSED (an open window overwrites the file),
   write `{terminals:[{termId,name,cwd,isClaude,claudeSessionId}],autoResume:true}`
@@ -964,7 +964,7 @@ Key facts encoded in `main/sessions.cjs`:
   - **Not verified on a real install yet:** the 160 MB swap in /Applications;
     whether TCC re-asks for Documents/Desktop access after each ad-hoc update
     (likely); the Windows per-machine/UAC case.
-  - **Releases:** only when Valentin says "release"; upload the CI zips as well
+  - **Releases:** only when the owner says "release"; upload the CI zips as well
     as the dmgs (the updater prefers zips).
   - Running smoke from an agent's Bash: there is no `node_modules\.bin\electron.cmd`
     here; start `node_modules\electron\dist\electron.exe . --smoke` through
@@ -980,13 +980,13 @@ Key facts encoded in `main/sessions.cjs`:
     inspector (`--inspect=<port>`, `webContents.debugger`), which still sends real
     CDP input events. Pick inspector ports outside Windows' reserved range
     (9281–9380 here: 9341 failed; 12341 works). A test that writes the clipboard
-    must restore it (it emptied Valentin's once; a native Menu.popup can't be
+    must restore it (it emptied the owner's once; a native Menu.popup can't be
     screenshotted, so wrap `Menu.prototype.popup` to record it). Better: don't
     touch the real clipboard at all. Stub the IPC for the test
     (`ipcMain.removeHandler('util:readClipboard')` + a handler returning the
     marker, original back in `finally`). A save/restore through `readText`
-    failed on 2026-10-26 ("conversion failure"; history off) and lost his
-    clipboard again. Pasted text lands in the ACTIVE tab: check
+    failed on 2026-10-26 ("conversion failure"; history off) and lost the
+    owner's clipboard again. Pasted text lands in the ACTIVE tab: check
     `ptyhost.list()` buffers, not the first `.xterm-rows`.
 - **z.ai tabs and claude's `/model`** (0.7.1, verified on claude 2.1.303 with a
   throwaway `CLAUDE_CONFIG_DIR`):
@@ -1018,7 +1018,7 @@ Key facts encoded in `main/sessions.cjs`:
 - **`/sync-docs` skill** (`.claude/skills/sync-docs`): the "update all docs" ritual —
   CHANGELOG/DECISIONS/CLAUDE/TODO/README + agent memory, docs only. Copy the skill
   folder into any repo that should join the ritual. (A 📨 broadcast button existed
-  briefly in 0.6.0 and was removed in 0.6.6 — Valentin wanted a rule, not a button.)
+  briefly in 0.6.0 and was removed in 0.6.6 — the owner wanted a rule, not a button.)
 - **New Claude Code version → the same ↻ Restart** (0.6.32; the separate ⟳
   "Update & Restart All" button, its modal and the `claude update` run were
   removed). Claude auto-updates on disk by itself. When the disk version ≠ the
