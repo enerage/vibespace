@@ -27,7 +27,7 @@ function ensureDir(p) {
 
 // Claude Code stores sessions in ~/.claude/projects/<munged-path>/<uuid>.jsonl
 // where every non-alphanumeric char of the project path becomes '-'
-// e.g. D:\Repositories\PlacementFlow -> D--Repositories-PlacementFlow
+// e.g. D:\Repositories\MyProject -> D--Repositories-MyProject
 function mungeClaudeDir(p) {
   return p.replace(/[^A-Za-z0-9]/g, '-');
 }
@@ -64,7 +64,7 @@ function randId(len = 4) {
 }
 
 // Crash-safe JSON files (state.json, workspaces.json, …). A PC reboot on
-// 2026-10-01 left recruitica's state.json unreadable: the tmp file was renamed
+// 2026-10-01 left one workspace's state.json unreadable: the tmp file was renamed
 // before its bytes reached the disk, so the window came back with defaults (no
 // conversation, terminal at the bottom). Now: fsync the tmp BEFORE the rename,
 // and keep the previous good copy as <file>.bak, which readJson falls back to.

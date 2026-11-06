@@ -234,7 +234,7 @@ Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 - **"auto-compacted 15:09 · 975k → 134k" after Claude compacts a
   conversation.** The status bar and the tab's hover card show it for 30
   minutes, so a context meter that drops from red to 13 % explains itself.
-  Seen on PlacementFlow's VIDEO tab: it looked like a VibeSpace restart had
+  Seen on another project's VIDEO tab: it looked like a VibeSpace restart had
   dropped context, but Claude had auto-compacted at the user's next message
   (975,307 tokens before). Restarts never shorten a conversation: they resume
   the same id with its full history. The log gets a `compact:` line too.
@@ -277,8 +277,8 @@ Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
   account's cloud login by itself (it opens its own console window, because
   `claude --cloud` needs a real terminal). It runs hidden and closes itself,
   marks the repo as trusted first (a hidden launch in a repo the cloud login
-  had never trusted hung forever on claude's trust prompt; found by the FlexIQ
-  agent), stops after 2 min, and logs every run to `~/.vibespace/cloud/sent.log`
+  had never trusted hung forever on claude's trust prompt; found by the agent of
+  another repo), stops after 2 min, and logs every run to `~/.vibespace/cloud/sent.log`
   (claude's error text of a failed run goes to `~/.vibespace/cloud/logs/`).
 
 ### Verified
@@ -372,7 +372,7 @@ Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 - **A moved agent could be left as a plain shell.** When an account move's
   `/exit` took longer than 15 s, the move gave up; claude then left anyway,
   and the retry read the empty shell as "you quit claude by hand" and never
-  restarted it (Cosiall, 2026-10-09). Now it waits up to another 60 s for the
+  restarted it (another workspace, 2026-10-09). Now it waits up to another 60 s for the
   exit it asked for, and an empty shell after OUR `/exit` (nothing typed since)
   is relaunched on the new account.
 - **A background agent no longer impersonates its old tab.** An agent sent to
@@ -611,7 +611,7 @@ Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 ### Fixed
 - **A new logo now shows on the taskbar right away.** The taskbar button kept
   the old icon after a logo change, even after the window was reopened (seen
-  on Cosiall Org: new logo in the window and in the Start Menu folder, old
+  on one workspace: new logo in the window and in the Start Menu folder, old
   purple "C" on the taskbar). Two causes, both fixed:
   - Windows caches a taskbar button's icon by file path, and the icon was
     always rebuilt at the same path. Every logo change now gets a new icon
@@ -622,7 +622,7 @@ Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 - Verified live with taskbar screenshots: eight logo changes in a row each
   showed the new icon at once. Not yet verified for a workspace that is
   PINNED to the taskbar (pinning can't be scripted on Windows 11).
-- A workspace whose taskbar icon is already stale (Cosiall Org) needs its logo
+- A workspace whose taskbar icon is already stale (that one) needs its logo
   picked once more after the restart. Smoke 97/97.
 
 ## [0.6.40] — 2026-10-04
@@ -637,7 +637,7 @@ Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 - The search never looks in `node_modules`, build output (`dist`, `.next`,
   `build`…), dot-folders or agent worktrees, skips files over 2 MB, and is
   capped in depth, folder count and time. On real repos it took under a second
-  (PlacementFlow: 312 images, 0.9 s) and put the real logo first.
+  (a large project repo: 312 images, 0.9 s) and put the real logo first.
 - Verified live: the picker listed the repo's images and not the copy planted
   in `node_modules`, Browse… opened in the repo folder, and picking an image
   replaced the icon and reloaded the window with agents re-attached.
@@ -799,8 +799,8 @@ Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
   confirm, and an idle restart with no dialog. Smoke 83/83.
 
 ### Fixed (repair, no code)
-- The 2026-10-01 reboot also zeroed the state files of **flexfunnels** and
-  **justlinked** (all-NUL, the same damage as recruitica and flexiq). Both were
+- The 2026-10-01 reboot also zeroed the state files of two more
+  workspaces (all-NUL, the same damage as the other two). Both were
   rebuilt from the `tabs:` audit log while their windows were closed, so they
   resume `bee1d73d…` / `7e1eb1dd…` on open (layout back to default). Broken
   files kept as `state.json.corrupt-*`.
@@ -822,7 +822,7 @@ Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 
 ### Fixed
 - **A PC restart could wipe a workspace's saved state.** After a reboot,
-  recruitica-nextjs came back with one fresh agent (its conversation
+  a workspace came back with one fresh agent (its conversation
   `0d10d298…` not resumed) and the terminal at the bottom instead of the right.
   - Cause: `state.json` is rewritten every ~5 s. The new file was renamed into
     place before its bytes reached the disk, so the reboot left it unreadable.
@@ -1328,7 +1328,7 @@ after one ↻ Restart. Smoke 57/57.
   the active tab to main (`activeTerm` in state).
 - Note for users with a global Claude notify hook: it can skip its own toast when
   `$env:VIBESPACE_TERM_STATUS` is set (every VibeSpace terminal has it) to avoid
-  duplicate toasts — done for Valentin's `~/.claude/notifications/notify.ps1`.
+  duplicate toasts — done for the owner's `~/.claude/notifications/notify.ps1`.
 
 ## [0.6.7] — 2026-09-29
 
@@ -1367,7 +1367,7 @@ after one ↻ Restart. Smoke 57/57.
 - Pinning a **running** workspace window whose AppID had no Start Menu shortcut
   (anyone who never used the launcher's Pin button) made Windows invent a junk
   `Electron.lnk` — the pin showed the Electron logo and relaunched nothing. Found
-  4 of 7 workspaces in this state (FlexIQ, FlexFunnels, Recruitica, JustLinked).
+  4 of 7 workspaces in this state.
 - Every workspace window now **claims its taskbar identity** at open:
   `setAppDetails` (AppID, icon, relaunch command, display name — pinning the
   running window now yields a correct pin), **auto-creates its Start Menu

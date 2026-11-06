@@ -1,7 +1,7 @@
 'use strict';
 // "⬇ Update" in the top bar (0.7.3): bring the commits the background fetch
 // found (main/gitfetch.cjs) into the working tree. It is the ONE git write
-// VibeSpace does itself (Valentin, 2026-10-19; every other git write is an
+// VibeSpace does itself (2026-10-19; every other git write is an
 // agent's job), so it only ever does the move that can't go wrong:
 //
 // - a FAST-FORWARD only (`merge --ff-only @{upstream}`). Git applies the whole

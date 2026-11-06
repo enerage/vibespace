@@ -930,7 +930,7 @@ async function storeEndpoint(name, env) {
 
 // ---------- presets ----------
 // "Add account → pick a provider → paste the key": the env a provider needs,
-// minus the key. zai = the values from Valentin's own working z.ai config
+// minus the key. zai = the values from the owner's own working z.ai config
 // (2026-10-07).
 const PRESETS = {
   zai: {

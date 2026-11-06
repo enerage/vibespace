@@ -220,20 +220,24 @@ async function runSmoke(hooks = {}) {
   U.ensureDir(path.join(U.dataRoot(), 'icons'));
 
   // 1. munge (pure: both platforms' paths everywhere)
-  const munged = U.mungeClaudeDir('D:\\Repositories\\PlacementFlow');
-  check('claude dir munge', munged === 'D--Repositories-PlacementFlow', munged);
+  const munged = U.mungeClaudeDir('D:\\Repositories\\MyProject');
+  check('claude dir munge', munged === 'D--Repositories-MyProject', munged);
   const mungedMac = U.mungeClaudeDir('/Users/x/Repo');
   check('claude dir munge (macOS path)', mungedMac === '-Users-x-Repo', mungedMac);
 
-  // 2. real session store discovery (read-only, against the live ~/.claude).
-  // Windows dev PC only: it needs Valentin's PlacementFlow transcripts.
-  const dir = process.platform === 'win32' ? U.resolveClaudeProjectDir('D:\\Repositories\\PlacementFlow') : null;
-  if (process.platform === 'win32') {
+  // 2. session store discovery in the real ~/.claude/projects, on a fixture
+  // this test creates (two fake transcripts for a repo path that is never
+  // created) and removes after step 5, so it runs on any machine
+  const storeRepo = path.join(require('node:os').tmpdir(), 'vibespace-smoke-store-' + U.randId(6));
+  const storeDir = path.join(U.claudeProjectsDir(), U.mungeClaudeDir(path.resolve(storeRepo)));
+  const storeIds = ['11111111-aaaa-4000-8000-000000000001', '22222222-bbbb-4000-8000-000000000002'];
+  fs.mkdirSync(storeDir, { recursive: true });
+  for (const id of storeIds) fs.writeFileSync(path.join(storeDir, id + '.jsonl'), '{}\n');
+  const dir = U.resolveClaudeProjectDir(storeRepo);
+  {
     const jsonl = dir ? fs.readdirSync(dir).filter(f => f.endsWith('.jsonl')).length : 0;
-    check('placementflow session dir found', Boolean(dir), dir || 'not found');
-    check('placementflow has sessions', jsonl > 0, `${jsonl} sessions`);
-  } else {
-    check('placementflow session store (real ~/.claude)', true, 'skipped — Windows dev PC only');
+    check('session store dir found (fixture)', Boolean(dir), dir || 'not found');
+    check('session store has sessions (fixture)', jsonl === storeIds.length, `${jsonl} sessions`);
   }
 
   // 3. ico build (default + from generated png)
@@ -247,7 +251,7 @@ async function runSmoke(hooks = {}) {
   check('ico build', headerOk && buf.length > 1000, `${buf.length} bytes, count=${buf.readUInt16LE(4)}`);
 
   // 4. registry CRUD
-  const smokeRepoPath = process.platform === 'win32' ? 'D:\\Repositories' : require('node:os').tmpdir();
+  const smokeRepoPath = require('node:os').tmpdir(); // exists on every machine
   const ws = await workspaces.create({ name: 'Smoke Repo', repoPath: smokeRepoPath, logoPath: tmpPng });
   check('workspace create', Boolean(workspaces.get(ws.id)) && ws.iconPath && fs.existsSync(ws.iconPath), ws.id);
   {
@@ -269,18 +273,19 @@ async function runSmoke(hooks = {}) {
   }
   check('workspace remove', workspaces.remove(ws.id) && !workspaces.get(ws.id));
 
-  // 5. session tracker assign logic (simulated on real dir)
+  // 5. session tracker assign logic (simulated on the step-2 fixture dir)
   if (dir) {
     const files = fs.readdirSync(dir).filter(f => f.endsWith('.jsonl'))
       .map(f => { const st = fs.statSync(path.join(dir, f)); return { id: f.slice(0, -6), born: st.birthtimeMs }; })
       .sort((a, b) => b.born - a.born);
     const newest = files[0];
-    sessions.start('smoke-ws', 'D:\\Repositories\\PlacementFlow');
+    sessions.start('smoke-ws', storeRepo);
     sessions.pinSession('smoke-ws', 't1', newest.id);
     check('session pin + lookup', sessions.getSession('smoke-ws', 't1') === newest.id, newest.id);
     check('session exists check', sessions.sessionExists('smoke-ws', newest.id) === true && sessions.sessionExists('smoke-ws', 'deadbeef-0000-0000-0000-000000000000') === false, newest.id);
     sessions.stop('smoke-ws');
   }
+  try { fs.rmSync(storeDir, { recursive: true, force: true }); } catch {}
 
   // 6. fresh-repo session tracking: dir appears only AFTER claude's first message
   {
@@ -1154,8 +1159,8 @@ async function runSmoke(hooks = {}) {
     const icoMod = require('./ico.cjs');
     const a = path.join(U.dataRoot(), 'mark-a.ico');
     const b = path.join(U.dataRoot(), 'mark-b.ico');
-    await icoMod.buildDefaultIco(a, 'Recruitica');
-    await icoMod.buildDefaultIco(b, 'FlexIQ');
+    await icoMod.buildDefaultIco(a, 'Rocket');
+    await icoMod.buildDefaultIco(b, 'Falcon');
     const ha = require('node:crypto').createHash('sha1').update(fs.readFileSync(a)).digest('hex');
     const hb = require('node:crypto').createHash('sha1').update(fs.readFileSync(b)).digest('hex');
     const appIco = path.join(U.ROOT, 'assets', 'app.ico');

@@ -1,7 +1,7 @@
 # HANDOFF — state of VibeSpace work (2026-10-12)
 
 For any agent picking up VibeSpace work, especially a **cloud session** (Linux, no
-access to Valentin's PC). Read CLAUDE.md first; it is the source of truth.
+access to the dev PC). Read CLAUDE.md first; it is the source of truth.
 This file is the short "where are we" note.
 
 ## Where things stand
@@ -22,9 +22,9 @@ See TODO.md (top section + "Internal"). Mainly: Send to cloud's Bring back /
 open link / restart persistence; the next real internet drop (`net:` log lines);
 automatic account moves (`account auto:`); packaged smoke for a new installer.
 
-## Ideas Valentin wants to review before anyone builds them
+## Ideas the owner wants to review before anyone builds them
 Fresh installer (0.6.58), Git pane for worktree tabs, reviewing one agent turn
-as a diff with comments sent back, new-agent presets. Ask him first.
+as a diff with comments sent back, new-agent presets. Ask the owner first.
 
 ## Rules for a cloud session building VibeSpace code
 1. Work on a NEW branch `cloud/<topic>`; push it; never merge into `main`.

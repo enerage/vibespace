@@ -72,8 +72,8 @@ function questionText(input) {
 
 // What the agent wrote right before it asked, from the transcript's .jsonl
 // lines (pure). Focus view shows only a turn's final message and a turn that
-// ends in a question has none, so this text is otherwise invisible (Valentin,
-// 2026-10-22: an explanation he had asked for, then the same question again).
+// ends in a question has none, so this text is otherwise invisible
+// (2026-10-22: an explanation the user had asked for, then the same question again).
 // From the line holding the tool_use (by id, else the last AskUserQuestion)
 // back to the previous user line / tool result: the step's own text blocks.
 function textBeforeTool(lines, toolUseId = '') {
@@ -365,7 +365,7 @@ function flushAll() {
 }
 
 // ---------- reader (one workspace: the asking window's own) ----------
-// Each window shows only its own workspace (Valentin, 2026-10-21: every
+// Each window shows only its own workspace (2026-10-21: every
 // window showing the same all-workspace list and badge was noise; the
 // taskbar badges already say which window needs you). That workspace's
 // window lives in this process, so its store is always loaded here.

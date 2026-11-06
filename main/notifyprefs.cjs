@@ -6,7 +6,7 @@
 //
 // Defaults: toast only when you are NEEDED (a question/permission, a failed
 // turn). "Finished its turn" is off — with many agents it fires constantly and
-// trains you to ignore toasts (Valentin, 2026-09-30). Tab lights and the
+// trains you to ignore toasts (2026-09-30). Tab lights and the
 // taskbar badge are not affected; they always show every state.
 const fs = require('node:fs');
 const path = require('node:path');

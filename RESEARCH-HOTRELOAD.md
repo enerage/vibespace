@@ -1,6 +1,6 @@
 # Research: why a VibeSpace source save is destructive, and the fix layers
 
-Date: 2026-09-26. Question from Valentin: saving VibeSpace source while agents run
+Date: 2026-09-26. Question from the owner: saving VibeSpace source while agents run
 inside VibeSpace windows reloads/restarts everything — unacceptable with several
 instances open. Findings from reading `main/index.cjs`, `main/devwatch.cjs`,
 `main/ptyhost.cjs`, `renderer/workspace/app.js`, `renderer/workspace/ui/terms.js`.

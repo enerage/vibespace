@@ -233,7 +233,7 @@ function reduceCore(state, kind, event, body, now) {
   const lastMsg = typeof body.last_assistant_message === 'string' ? clip(body.last_assistant_message, 2000) : s.lastMessage;
   // An open question/permission is closed only by the thread that asked: a
   // background subagent's tool calls kept clearing the MAIN agent's question
-  // (the light left "needs you" seconds after the ask; Valentin, 2026-10-31).
+  // (the light left "needs you" seconds after the ask; 2026-10-31).
   const aid = body.agent_id ? String(body.agent_id) : null;
   const sameAsker = (st) => (st.askAgent || null) === aid;
   const dialogOpen = (st) => st.attention === 'permission' || st.attention === 'question';

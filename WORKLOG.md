@@ -1,6 +1,6 @@
 # WORKLOG — overnight autonomous session, 2026-09-26 → 09-27
 
-Boss: Valentin (asleep). Mandate: work many hours, ship Layers 2+3 + packaging + QoL,
+Boss: the owner (asleep). Mandate: work many hours, ship Layers 2+3 + packaging + QoL,
 test everything, no questions, no overengineering, stability first. Morning summary at
 the bottom when done.
 
@@ -8,7 +8,7 @@ the bottom when done.
 
 - 0 VibeSpace processes run the hot-reload watcher (`--watch` count = 0; watch is
   opt-in since 0.3.0). Saves from this session bounce nothing.
-- PlacementFlow (PID 24008) + this window (PID 71080) run uninterrupted all night.
+- Another project's window (PID 24008) + this window (PID 71080) run uninterrupted all night.
 - One disposable `--watch` test instance may be spawned at the END for Layer 2 E2E,
   on a throwaway workspace, then killed. Nothing else gets `--watch`.
 - Real shortcuts / registry / user data are NOT migrated (packaging is built + tested
@@ -33,7 +33,7 @@ the bottom when done.
       (dist\VibeSpace Setup 0.5.0.exe). PACKAGED smoke 16/16 + clean packaged
       workspace boot. Not installed; migration left for you (TODO).
 - [x] P6 Final: dev smoke 16/16, both real instances never restarted
-      (placementflow PID 24008 and vibespace PID 71080 — same PIDs as at start),
+      (the other project PID 24008 and vibespace PID 71080 — same PIDs as at start),
       zero stray test processes, docs updated.
 
 ## Decision log
@@ -94,7 +94,7 @@ the baseline) — fixed by probing in createWorkspaceWindow, then detection prov
 live. Smoke 20/20. This is the permanent answer to "hot reload is off by default":
 automatic detection, manual restart.
 
-Addendum (morning, 0.5.1): Valentin pointed out the ⟳ button was always visible
+Addendum (morning, 0.5.1): the owner pointed out the ⟳ button was always visible
 even with nothing to update, and that claude auto-updates itself in the background
 (both true). Now: button hidden unless the on-disk claude version differs from what
 this window's agents started on (baseline at open, 5-min probe, re-baseline after a

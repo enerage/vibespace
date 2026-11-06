@@ -1,11 +1,11 @@
 # VibeSpace on macOS: plan, code audit and research
 
-Started 2026-10-18 on Valentin's request ("make VibeSpace work on Mac"). The first Mac
-user is his sister (MacBook, non-technical, one workspace, z.ai GLM preset), and the
-Kiddoss session asked for image/video preview as well (its review:
-`D:\Repositories\Kiddoss\research\opportunities\38a-vibespace-mac-glm-recheck.md`).
+Started 2026-10-18 on the owner's request ("make VibeSpace work on Mac"). The first Mac
+user is a tester (MacBook, non-technical, one workspace, z.ai GLM preset), and the
+session of another repo asked for image/video preview as well (its review lives in
+that repo).
 
-## Decisions (Valentin, 2026-10-18)
+## Decisions (2026-10-18)
 - **Scope: core port first, extras later.**
   - Phase 1: terminals, agents, the `claude` wrapper, every account kind (z.ai and
     Claude), session tracking, worktrees, the Git pane, the file tree, image/video
@@ -18,7 +18,7 @@ Kiddoss session asked for image/video preview as well (its review:
   Settings once per install. The $99/yr Developer ID comes later, only if the Mac build
   stays in use.
 - **Testing:** GitHub's macOS runners run every build automatically. The only real Mac
-  is the sister's MacBook, which gets a short hands-on checklist at the end.
+  is a tester's MacBook, which gets a short hands-on checklist at the end.
 
 ## Ground rules for the port
 - **Windows behaviour must not change.** Every Mac path sits behind

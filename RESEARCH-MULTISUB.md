@@ -8,7 +8,7 @@ Checked against Claude Code 2.1.286 and code.claude.com docs (authentication,
 env-vars, settings, statusline, hooks, remote-control, llm-gateway, sessions).
 
 **Decision (2026-10-01): option A, token profiles, Claude accounts only, auto-switch on
-limit.** GLM is out for now: Valentin had already found that Claude conversations don't
+limit.** GLM is out for now: the owner had already found that Claude conversations don't
 resume well on GLM. GLM only works as a fresh conversation, so the z.ai parts below are
 reference only.
 

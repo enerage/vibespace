@@ -11,7 +11,7 @@ param([Parameter(Mandatory)][string]$TaskFile, [Parameter(Mandatory)][string]$Re
 #
 # The repo is marked trusted in the cloud config's .claude.json first: in a hidden
 # window nobody can answer claude's folder-trust prompt, and a launch in an untrusted
-# repo hung forever (found by the FlexIQ agent, 2026-10-12). pwsh 7 only (ArgumentList).
+# repo hung forever (found by the agent of another repo, 2026-10-12). pwsh 7 only (ArgumentList).
 foreach ($k in 'CLAUDE_CODE_OAUTH_TOKEN','ANTHROPIC_API_KEY','ANTHROPIC_AUTH_TOKEN','ANTHROPIC_BASE_URL') { Remove-Item "env:$k" -ErrorAction SilentlyContinue }
 $cloudRoot = Join-Path $env:USERPROFILE '.vibespace\cloud'
 $configDir = Join-Path $cloudRoot $Account
