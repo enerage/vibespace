@@ -4,6 +4,11 @@ Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 
 ## [Unreleased]
 
+### Added
+- **♥ Sponsor.** Preferences (⚙) has a "Support VibeSpace" row that opens the
+  GitHub Sponsors page, and the repo has a FUNDING.yml for GitHub's Sponsor
+  button (2026-11-06).
+
 ### Changed
 - **The usage check for a "—" account asks Claude Code itself.** It used to take
   the account's Claude sign-in token and call Anthropic's usage address with

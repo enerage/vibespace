@@ -197,6 +197,8 @@ export function init(opts) {
 
   // rows that moved out of the header
   $('#btn-logs').onclick = () => vs.openLogs();
+  // opens in the default browser (main checks it is a plain https link)
+  $('#btn-sponsor').onclick = () => vs.cloudOpenUrl('https://github.com/sponsors/enerage');
   $('#auto-resume').addEventListener('change', opts.persist);
   $('#phone-remote').addEventListener('change', opts.persist);
   // new-worktree setup (per workspace, state.json): read when a worktree is made
