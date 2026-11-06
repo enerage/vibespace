@@ -5,6 +5,11 @@ Format: Keep a Changelog-ish. Dates are local (2026-09-26 = initial build day).
 ## [Unreleased]
 
 ### Added
+- **Ready for strangers.** A new README for people who have never seen VibeSpace,
+  a PRIVACY.md that lists everything it changes on your system and every
+  address it contacts (checked against the code), no personal or client names
+  in the docs or code comments, and self-tests that pass on any PC (they used
+  real conversations from the dev PC). The Mac guide points at 0.7.4 (2026-11-06).
 - **♥ Sponsor.** Preferences (⚙) has a "Support VibeSpace" row that opens the
   GitHub Sponsors page, and the repo has a FUNDING.yml for GitHub's Sponsor
   button (2026-11-06).
